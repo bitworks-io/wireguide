@@ -194,6 +194,57 @@ func TestSleepWake_DoesNotReconnect_WhenDisconnected(t *testing.T) {
 	}
 }
 
+// Issue #44: a helper that crash-restarted and failed its desired-state
+// restore reports nothing active, but the persisted desired state says
+// tunnels are wanted. Wake (and network change) must still fire — with a
+// nil fallback the old guard silently dropped the event and nothing ever
+// retried, leaving a manual reconnect as the only way out.
+func TestSleepWake_TriggersReconnect_WhenOnlyDesiredStateActive(t *testing.T) {
+	var reconnectCalls atomic.Int32
+	reconnectFn := func(_ context.Context, name string) error {
+		reconnectCalls.Add(1)
+		return nil
+	}
+
+	mon, mgr, sd := newTestMonitor(testConfig(), reconnectFn)
+	// Nothing connected — the manager alone would fail the old guard.
+	mgr.setConnected(false, "")
+	mon.SetDesiredActiveFn(func() bool { return true })
+
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+
+	waitFor(t, 2*time.Second, "reconnectFn called after wake via desired state", func() bool {
+		return reconnectCalls.Load() > 0
+	})
+}
+
+// The desired-state fallback must not manufacture reconnects when it reports
+// nothing wanted — disconnected manager + false fallback stays silent.
+func TestSleepWake_DoesNotReconnect_WhenDesiredStateEmpty(t *testing.T) {
+	var reconnectCalls atomic.Int32
+	reconnectFn := func(_ context.Context, name string) error {
+		reconnectCalls.Add(1)
+		return nil
+	}
+
+	mon, mgr, sd := newTestMonitor(testConfig(), reconnectFn)
+	mgr.setConnected(false, "")
+	mon.SetDesiredActiveFn(func() bool { return false })
+
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+	time.Sleep(100 * time.Millisecond)
+
+	if reconnectCalls.Load() != 0 {
+		t.Fatalf("expected no reconnect with empty desired state, got %d calls", reconnectCalls.Load())
+	}
+}
+
 func TestHealthCheck_StaleHandshake_TriggersReconnect(t *testing.T) {
 	// The monitor loop checks every 30s by default with a 180s threshold.
 	// We can't easily override the ticker interval (it's a const), so instead

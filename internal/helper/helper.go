@@ -192,6 +192,12 @@ type Helper struct {
 	userTunnelStore *storage.TunnelStore
 	userAppSupport  string
 
+	// dataDir persists helper state (crash-recovery journal, desired-tunnel
+	// state). Stored on the Helper so user-intent transitions in handlers
+	// can rewrite the desired-state file without threading the path through
+	// every call (issue #44).
+	dataDir string
+
 	done        chan struct{}
 	cleanupOnce sync.Once
 }
@@ -238,6 +244,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		logLevel:        new(slog.LevelVar), // defaults to Info
 		done:            make(chan struct{}),
 	}
+	h.dataDir = dataDir
 
 	// Derive the user's Application Support dir from the uid the
 	// LaunchDaemon plist passed in (`--uid=501` typically). Helper
@@ -280,6 +287,10 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	// Reconnect monitor — uses cached config
 	h.monitor = reconnect.NewMonitor(manager, h.reconnectFn, h.onReconnectState, reconnect.DefaultConfig())
 	h.monitor.SetFirewallCallbacks(h.suspendFirewall, h.resumeFirewall)
+	// Wake/network triggers must also fire when nothing is active but a
+	// persisted desired state says tunnels are wanted (helper crash-restart
+	// whose restore failed; issue #44).
+	h.monitor.SetDesiredActiveFn(h.desiredActiveFn)
 	h.monitor.Start()
 
 	// Register RPC handlers
@@ -397,6 +408,15 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		h.reevaluateAutomation("startup")
 	})
 
+	// Desired-state restore (issue #44): if the previous helper instance
+	// died without a clean shutdown (crash during sleep, kill -9, upgrade
+	// ForceShutdown), re-establish the tunnels it had up. Runs after the
+	// settings restore and rule wiring above so the helper is fully
+	// configured first, and async so a slow restore never delays the IPC
+	// listener — the GUI's spawn path has a 30s readiness budget. goSafe
+	// restarts the one-shot on panic only; a normal return is completion.
+	h.goSafe("desiredStateRestore", h.restoreDesiredTunnels)
+
 	// Hybrid subnet-rule trigger. Subnet-based Automation conditions must
 	// re-evaluate when the physical network changes even if the SSID
 	// doesn't (Ethernet plug/unplug, DHCP subnet change):
@@ -457,6 +477,14 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	h.mu.Lock()
 	cfgs := h.copyActiveCfgs()
 	h.mu.Unlock()
+	if len(cfgs) == 0 {
+		// Empty in-memory cache on the all-tunnels path means the helper
+		// restarted since these tunnels were last up (crash-restart whose
+		// startup restore failed). Rebuild from the persisted desired
+		// state + the user's tunnel store so wake/network-change triggers
+		// can still recover them (issue #44).
+		cfgs = h.loadDesiredCfgs()
+	}
 
 	if name != "" {
 		cfg, ok := cfgs[name]
@@ -760,6 +788,11 @@ func (h *Helper) cleanup() {
 			"connected", h.manager.IsConnected(),
 			"call_stack", string(debug.Stack()))
 		close(h.done)
+		// Clean shutdown means every tunnel is about to be torn down by
+		// user intent — the desired-state file must not survive to
+		// resurrect them on the next helper start (issue #44 semantics:
+		// restore is for crashes, not for clean quits).
+		clearDesiredState(h.dataDir)
 		h.mu.Lock()
 		t := h.shutdownTimer
 		h.shutdownTimer = nil

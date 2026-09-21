@@ -255,5 +255,10 @@ func (h *Helper) disconnectAutoManaged(name string) {
 	h.latencyMu.Lock()
 	delete(h.latencyByTunnel, name)
 	h.latencyMu.Unlock()
+	// A rule-driven disconnect is user intent by proxy — the desired-state
+	// file must drop the tunnel too, or the issue #44 restore path would
+	// resurrect it after the next helper restart (same resurrection class
+	// as the retries and caches cleared above).
+	h.persistDesiredState()
 	h.maybeArmShutdownAfterTeardown("rule-driven disconnect, no GUI attached")
 }

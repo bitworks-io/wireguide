@@ -209,6 +209,11 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		h.latencyByTunnel[req.NewName] = lat
 	}
 	h.latencyMu.Unlock()
+
+	// Keep the desired-state key in sync (issue #44). Renames of active
+	// tunnels are rejected above, so this is belt-and-braces for the same
+	// map re-key performed on activeCfgs.
+	h.persistDesiredState()
 	return ipc.Empty{}, nil
 }
 
@@ -267,6 +272,11 @@ func (h *Helper) doConnectHeld(cfg *domain.WireGuardConfig) error {
 				err, disconnectErr, restoreErr)
 		}
 	}
+	// User intent: this tunnel should stay active across helper restarts
+	// (issue #44 desired state). The failure paths above need no write —
+	// they roll activeCfgs back to the pre-call state the file already
+	// records.
+	h.persistDesiredState()
 	return nil
 }
 
@@ -507,6 +517,11 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 			return nil, firstErr
 		}
 	}
+
+	// User intent: the torn-down tunnels are no longer wanted. Failed
+	// teardowns returned early above, so this snapshot exactly matches
+	// what remains active (issue #44 desired state).
+	h.persistDesiredState()
 
 	// Strip the just-torn-down tunnels from the kill-switch filter set.
 	// Best-effort: log failures but never block the disconnect response.

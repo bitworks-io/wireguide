@@ -118,6 +118,14 @@ type Monitor struct {
 	// without canceling each other.
 	retries map[string]*retryState
 
+	// desiredActiveFn, when set, reports whether any tunnel is WANTED
+	// active even though the manager currently reports nothing active —
+	// i.e. the helper restarted after a crash and a persisted desired
+	// state (internal/helper/desired_state.go) still lists tunnels whose
+	// restore attempt failed. Wake and network-change triggers must fire
+	// in that state too, otherwise nothing ever retries them (issue #44).
+	desiredActiveFn func() bool
+
 	// healthCheckEnabled controls whether the periodic handshake age
 	// check runs in monitorLoop. Can be toggled at runtime via
 	// SetHealthCheck. Default: true.
@@ -156,6 +164,31 @@ func (m *Monitor) SetHealthCheck(enabled bool) {
 	defer m.mu.Unlock()
 	m.healthCheckEnabled = enabled
 	slog.Info("health check toggled", "enabled", enabled)
+}
+
+// SetDesiredActiveFn configures the fallback trigger predicate. When the
+// manager reports nothing connected but this function says tunnels are still
+// wanted, wake and network-change events proceed with a reconnect instead of
+// being dropped. Must be called before Start().
+func (m *Monitor) SetDesiredActiveFn(fn func() bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.desiredActiveFn = fn
+}
+
+// shouldTriggerReconnect reports whether a wake or network-change event
+// should act: either something is currently active (the classic case — the
+// tunnel is up and must be rebuilt against the new conditions) or the
+// desired-state fallback says tunnels are still wanted but not up (helper
+// crash-restarted and the startup restore failed; issue #44).
+func (m *Monitor) shouldTriggerReconnect() bool {
+	if m.manager.IsConnected() || m.manager.ActiveTunnel() != "" {
+		return true
+	}
+	m.mu.Lock()
+	fn := m.desiredActiveFn
+	m.mu.Unlock()
+	return fn != nil && fn()
 }
 
 // Start begins monitoring the tunnel connection.
@@ -667,12 +700,12 @@ func (m *Monitor) triggerLoop() {
 			return
 		case <-wakeCh:
 			slog.Info("system wake detected, triggering reconnect")
-			if m.manager.IsConnected() || m.manager.ActiveTunnel() != "" {
+			if m.shouldTriggerReconnect() {
 				m.triggerReconnect()
 			}
 		case <-netCh:
 			slog.Info("primary interface change detected, triggering reconnect")
-			if m.manager.IsConnected() || m.manager.ActiveTunnel() != "" {
+			if m.shouldTriggerReconnect() {
 				m.triggerReconnect()
 			}
 		}
