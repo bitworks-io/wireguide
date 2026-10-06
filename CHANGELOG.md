@@ -41,7 +41,7 @@ All notable changes to WireGuide will be documented in this file.
 - `ctl automation` shows the primary interface, settle state, and `held`/`latched` decisions.
 
 ### Changed
-- Update checks now target `bitworks-io/wireguide`; version is `0.5.2-bitworks.1`.
+- Update checks now target `bitworks-io/wireguide`; version is `0.5.2-bitworks.2`.
 
 ## [0.5.2] - 2026-09-15
 

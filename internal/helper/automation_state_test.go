@@ -60,6 +60,9 @@ func newAutomationHelper(t *testing.T, ssid string) (*Helper, *fakeClock) {
 	h.wifiMon = wifi.NewMonitor(nil)
 	h.wifiMon.ReportExternalSSID(ssid)
 	h.userAppSupport = t.TempDir()
+	// Automation is dormant until a GUI attaches; these tests model an
+	// attached GUI.
+	h.markGUISeen()
 	return h, clk
 }
 
