@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,12 +34,14 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/firewall"
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/launchd"
 	"github.com/korjwl1/wireguide/internal/network"
 	"github.com/korjwl1/wireguide/internal/reconnect"
 	"github.com/korjwl1/wireguide/internal/storage"
@@ -122,6 +125,71 @@ const shutdownGrace = 10 * time.Second
 // happens before crash recovery has restored any tunnel.
 const startupGrace = 60 * time.Second
 
+// activatedStartupGrace replaces startupGrace when launchd started the helper
+// because something connected to its socket. Any process running as the user
+// can cause that (a `ctl` probe, a stray connect), and no GUI is promised, so
+// a probe must not leave a root process around for a minute. An active tunnel
+// still keeps the helper alive (armShutdownTimer's guard).
+const activatedStartupGrace = 15 * time.Second
+
+// startupGraceFor picks the first-connection grace window for this launch.
+func startupGraceFor(activated bool) time.Duration {
+	if activated {
+		return activatedStartupGrace
+	}
+	return startupGrace
+}
+
+// activateLaunchd is launchd.Listeners, replaceable in tests.
+var activateLaunchd = launchd.Listeners
+
+// fallbackAddr is the address a non-launchd-managed helper listens on.
+// ipc.Listen refuses to manage /var/run itself, so a non-launchd start
+// pointed at the launchd socket path (a dev run with default arguments) keeps
+// to the legacy subdirectory instead.
+func fallbackAddr(addr string) string {
+	if filepath.Dir(addr) == filepath.Dir(ipc.DarwinSocketPath) {
+		slog.Warn("not launchd-managed; using legacy socket directory instead of /var/run",
+			"requested", addr, "using", ipc.LegacyDarwinSocketPath)
+		return ipc.LegacyDarwinSocketPath
+	}
+	return addr
+}
+
+// acquireListener returns the socket the IPC server should accept on.
+//
+// On darwin the LaunchDaemon plist declares the socket (Sockets.Listeners),
+// so launchd owns it from boot and starts this process on the first connect;
+// adopting that socket is what lets the GUI "start" the helper just by
+// dialing, without an administrator prompt. ipc.Listen must NOT run in that
+// case: it unlinks the path, which would orphan launchd's socket.
+//
+// Only "not launchd-managed" (dev run, test, old plist) falls back to
+// listening ourselves. Any other activation error is fatal: continuing would
+// leave launchd's connection pending and respawn the helper in a loop.
+func acquireListener(addr string, ownerUID int, ownerSID string) (l net.Listener, listenAddr string, activated bool, err error) {
+	if runtime.GOOS == "darwin" {
+		ls, aerr := activateLaunchd()
+		switch {
+		case aerr == nil && len(ls) > 0:
+			for _, extra := range ls[1:] {
+				extra.Close()
+			}
+			return ls[0], addr, true, nil
+		case aerr == nil, errors.Is(aerr, launchd.ErrNotManaged), errors.Is(aerr, launchd.ErrNoSocketEntry):
+			slog.Info("launchd socket activation not in use; listening directly", "reason", aerr)
+		default:
+			return nil, addr, false, fmt.Errorf("launchd socket activation: %w", aerr)
+		}
+		addr = fallbackAddr(addr)
+	}
+	l, err = ipc.Listen(addr, ownerUID, ownerSID)
+	if err != nil {
+		return nil, addr, false, fmt.Errorf("listen %s: %w", addr, err)
+	}
+	return l, addr, false, nil
+}
+
 // Helper holds the helper process state.
 type Helper struct {
 	server   *ipc.Server
@@ -172,6 +240,8 @@ type Helper struct {
 	// avoids the previous bug where every disconnect spawned a fresh goroutine
 	// and multiple shutdowns could race.
 	shutdownTimer *time.Timer
+	// armedGrace is the duration of the most recently armed window (tests).
+	armedGrace time.Duration
 
 	// latencyByTunnel caches the most recent endpoint round-trip time
 	// (in ms) per tunnel name. Updated by latencyLoop every 30s; read by
@@ -228,6 +298,19 @@ type Helper struct {
 	userTunnelStore *storage.TunnelStore
 	userAppSupport  string
 
+	// activated is true when launchd started this process through its
+	// socket (see acquireListener). Set once in Run before Serve.
+	activated bool
+	// guiSeen is set when the first non-transient control connection (the
+	// GUI) arrives. Until then the helper is dormant: no automation runs, so
+	// a helper started by a stray connect (or at boot-adjacent times) never
+	// acts on the user's network on its own. guiSeenCh is closed at the same
+	// moment for goroutines that wait for it. This is a consent signal, not a
+	// security boundary — any same-user process can attach.
+	guiSeen     atomic.Bool
+	guiSeenCh   chan struct{}
+	guiSeenOnce sync.Once
+
 	done        chan struct{}
 	cleanupOnce sync.Once
 	// cleanupDone is closed when cleanup() has finished; the signal handler
@@ -257,9 +340,9 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		defer debug.SetGCPercent(previousGCPercent)
 	}
 
-	listener, err := ipc.Listen(addr, ownerUID, ownerSID)
+	listener, addr, activated, err := acquireListener(addr, ownerUID, ownerSID)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", addr, err)
+		return err
 	}
 
 	manager := tunnel.NewManager(dataDir)
@@ -282,6 +365,8 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		logLevel:        new(slog.LevelVar), // defaults to Info
 		done:            make(chan struct{}),
 		cleanupDone:     make(chan struct{}),
+		activated:       activated,
+		guiSeenCh:       make(chan struct{}),
 	}
 
 	// Derive the user's Application Support dir from the uid the
@@ -333,21 +418,31 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	// Grace-window shutdown on GUI disconnect. This applies to EVERY launch
 	// mode, LaunchDaemon included: a running GUI is the user's statement of
 	// intent that WireGuide should be active, so a helper with no GUI (and
-	// no active tunnel) has no reason to exist. The LaunchDaemon plist sets
-	// RunAtLoad=false precisely so the boot path never produces an
-	// invisible root helper; this guard is the runtime half of the same
-	// rule, covering the case where the GUI dies without a clean Shutdown.
+	// no active tunnel) has no reason to exist.
 	//
-	// Users who want WireGuide up from boot enable auto_start, which
-	// installs the GUI LaunchAgent — the GUI then spawns the helper on the
-	// normal path.
-	h.server.OnConnect(h.cancelShutdownTimer)
+	// On macOS the LaunchDaemon plist has RunAtLoad=false and declares the
+	// socket itself (socket activation), so launchd never starts the helper
+	// at boot — it starts only when something connects to the socket, which
+	// is how the app brings it up without an administrator prompt. Two
+	// runtime rules keep that safe: the helper is dormant (no automation, see
+	// guiSeen) until a GUI attaches, and a launchd-activated helper that gets
+	// no GUI exits after the short activatedStartupGrace. The grace window
+	// below also covers a GUI that dies without a clean Shutdown. launchd
+	// keeps the socket across exits, so the next connect starts a fresh
+	// helper.
+	//
+	// Users who want WireGuide up from login enable auto_start, which
+	// installs the GUI LaunchAgent — the GUI then dials the socket.
+	h.server.OnConnect(func() {
+		h.markGUISeen()
+		h.cancelShutdownTimer()
+	})
 	h.server.OnDisconnect(h.startShutdownTimer)
 	// Arm the startup grace window now: a helper that never receives
 	// a GUI connection must not run forever (see startupGrace). The
 	// first OnConnect cancels it; the fire-time active-tunnel check
 	// keeps a crash-recovered tunnel alive even with no GUI.
-	h.armShutdownTimer(startupGrace, "startup, no GUI connected yet")
+	h.armStartupGrace()
 
 	// Start event emitter (diff loop)
 	h.goSafe("eventLoop", h.eventLoop)
@@ -412,6 +507,14 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	// Running it here, after wifiMon starts, also handles the boot
 	// case where the helper starts before the Wi-Fi has joined.
 	h.goSafe("ssidStartupRule", func() {
+		// Dormant until a GUI attaches (guiSeen): a helper nobody asked for
+		// must not act on the user's network. Wait for the first GUI, then
+		// settle as before.
+		select {
+		case <-h.done:
+			return
+		case <-h.guiSeenCh:
+		}
 		// Brief delay to let the network stack settle and crash
 		// recovery finish — racing handleSSIDChange against an
 		// in-flight RecoverFromCrash would corrupt activeCfgs.
@@ -760,10 +863,27 @@ func (h *Helper) startShutdownTimer() {
 	h.armShutdownTimer(shutdownGrace, "GUI disconnected")
 }
 
+// markGUISeen records the first GUI attachment and releases anything waiting
+// on it (the startup rule re-evaluation).
+func (h *Helper) markGUISeen() {
+	h.guiSeen.Store(true)
+	h.guiSeenOnce.Do(func() {
+		if h.guiSeenCh != nil {
+			close(h.guiSeenCh)
+		}
+	})
+}
+
 // armShutdownTimer is the shared countdown behind startShutdownTimer (GUI
 // disconnect) and the startup grace window (never-connected helper). The
 // active-tunnel guard applies to both: an active tunnel always keeps the
 // helper alive.
+// armStartupGrace arms the no-GUI-yet window Run starts with: the short
+// activatedStartupGrace for a launchd-started helper, startupGrace otherwise.
+func (h *Helper) armStartupGrace() {
+	h.armShutdownTimer(startupGraceFor(h.activated), "startup, no GUI connected yet")
+}
+
 func (h *Helper) armShutdownTimer(grace time.Duration, reason string) {
 	active := ""
 	if h.manager != nil {
@@ -786,6 +906,7 @@ func (h *Helper) armShutdownTimer(grace time.Duration, reason string) {
 		return
 	}
 
+	h.armedGrace = grace
 	slog.Info("no active tunnel — starting shutdown grace window",
 		"reason", reason, "grace", grace)
 	if h.shutdownTimer != nil {
@@ -854,8 +975,9 @@ func (h *Helper) cancelShutdownTimer() {
 //
 // Exit code 0 matters here: the LaunchDaemon plist's KeepAlive is configured
 // with SuccessfulExit=false, so launchd respawns only on crash. A successful
-// exit driven by this function will NOT restart the daemon — which is what
-// the user expects when they click "Quit" in the tray.
+// exit driven by this function will NOT restart the daemon on its own — which
+// is what the user expects when they click "Quit" in the tray. (launchd keeps
+// the socket, so the NEXT connect starts a fresh helper.)
 func (h *Helper) shutdown() {
 	h.server.Shutdown()
 }

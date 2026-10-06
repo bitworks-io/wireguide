@@ -10,6 +10,14 @@ All notable changes to WireGuide will be documented in this file.
 ### Fixed
 - **Crash recovery no longer wipes the user's own DNS** — the recovery journal records `dns_mode` (`global`/`split`), and `networksetup` DNS/search domains are reset to defaults only for tunnels that overrode system DNS. Split-DNS and DNS-less tunnels are left alone. Tunnel detail view reads the right (lower-case) model fields, so the DNS, AllowedIPs and public key rows render again.
 
+### Changed (macOS helper start)
+- **No administrator prompt at boot or on app relaunch** — the LaunchDaemon now owns the helper's socket (`/var/run/com.wireguide.helper.sock`, launchd socket activation). The helper still never runs at boot; launchd starts it when the app (or `ctl`) connects, so reopening the app after a quit or an idle exit no longer asks for a password. The prompt now appears only to install or repair (first install, app update, broken job).
+- **The first launch after upgrading asks for the admin password once** (the plist changed); a still-running pre-upgrade helper is shut down gracefully first.
+- **Helper is dormant until the app attaches** — Wi-Fi/subnet automation (including the startup re-evaluation) does nothing until a GUI connects, and a helper started without a GUI exits after 15 s (an active tunnel keeps it alive).
+- **CLI** — `Helper.Ping` reports `gui_attached` (IPC protocol 1.2). `ctl start/stop/status` and the other commands treat a helper with no app attached as "app not running"; `ctl stop` confirms with "no app and no tunnels" instead of waiting for the socket to go silent.
+- Quitting the app stops its helper health monitor first, so a health tick can no longer restart the helper right after Quit.
+- Security: any process running as your user can now start the root helper without a password (it still serves only your uid and exposes the same RPC surface as an open app). `brew uninstall --zap` removes the daemon, its socket and the pf token.
+
 ### Fixed
 - **macOS DNS protection no longer outlives its tunnels** — the helper now owns DNS protection as wanted state and reconciles the firewall against the tunnels that are actually connected (on connect, disconnect, automation, reconnect suspend/resume, and a tunnel-set watchdog in the event loop). Previously the `block ... port 53` pf rule survived disconnects, so system DNS stayed dead until quit or reboot.
 - **DNS protection no longer blackholes split tunnels** — resolvers reached over the physical network (e.g. 1.1.1.1 with a LAN-only AllowedIPs) get an any-interface permit, resolvers inside AllowedIPs or behind a default-route tunnel are pinned to the tunnel, split-DNS (`~domain`) tunnels never trigger protection, and `0.0.0.0/1` + `128.0.0.0/1` full tunnels are recognised. Loopback resolvers on port 53 are always exempt, and search domains in `DNS =` no longer cause errors.
