@@ -21,10 +21,12 @@ the CLI (`wireguide ctl automation add/rm/rules`). The read-only preview
 gateway MAC, physical IPs) and each tunnel's decision — use it to check
 expectations without reading logs.
 
-Semantics reminder: rules are evaluated top to bottom, first matching
-concrete condition wins (a `none_match`/`else` rule is the fallback);
-order = priority, and a rule can connect OR disconnect regardless of how
-the tunnel was brought up.
+Semantics reminder: rules are evaluated top to bottom and the first
+matching rule wins, by position; `else` is an unconditional match at its
+own position (a fallback when last). Order = priority, and a rule can
+connect OR disconnect regardless of how the tunnel was brought up.
+Negated ("is not") rules only match on a known, different value and hold
+(stop, no fall-through) when unknown; see the negation section below.
 
 ### Connect on a network (SSID)
 - [ ] Add `connect` when `ssid:<current-wifi>` for a tunnel; disconnect
@@ -68,3 +70,37 @@ the tunnel was brought up.
       it doesn't crash or affect other rules.
 - [ ] Wi-Fi off / on Ethernet with only SSID rules — those rules simply
       don't match (SSID is empty); nothing happens.
+
+### Negated conditions ("is not")
+Setup: tunnel `T` with rules `disconnect when ssid=<Site>` then
+`connect when ssid is not <Site>` (CLI: `add T disconnect ssid:<Site>`,
+`add T connect not-ssid:<Site>`). `ctl automation` shows `settled` /
+`settling, Ns left` and per-tunnel `decision=` (`held`, `latched`).
+- [ ] On `<Site>`: tunnel goes down (positive rule, no settle delay).
+- [ ] Join another Wi-Fi. **Expected**: nothing for ~15 s
+      (`decision=held`, "settling"), then `automation: rule connect
+      reason=settled` and the tunnel comes up.
+- [ ] Roam between two access points of `<Site>` (SSID goes blank for a
+      few seconds). **Expected**: no connect/disconnect flap.
+- [ ] Kill the GUI on macOS while on Wi-Fi (no SSID reports).
+      **Expected**: the last reported SSID is still used (decisions follow
+      it) until the gateway changes; then the SSID becomes unknown and
+      negated SSID rules hold (`decision=held`), tunnel left as is.
+- [ ] Plug in Ethernet / USB tethering (primary interface not Wi-Fi) and
+      wait 15 s. **Expected**: blank SSID counts as "not `<Site>`", so the
+      connect rule fires (`ctl automation` shows `wifi=false`).
+- [ ] Manual disconnect on a network where the connect rule holds.
+      **Expected**: it stays down (`decision=latched`) through blips and
+      re-evaluations; after you settle on a different network the latch
+      clears and rules apply again. Same for a manual connect on a
+      network where a disconnect rule would fire.
+- [ ] Two tunnels up (one with rules), sleep/wake or change the primary
+      interface. **Expected**: no `already connected` retry loop; the
+      rule-governed tunnel is handled by automation (`reason=reconnect`),
+      not the legacy reconnect.
+- [ ] Tunnel whose AllowedIPs contain your own LAN (e.g. the home
+      `192.168.x.0/24` while at home): automation/reconnect refuse to
+      bring it up (Info log); a manual connect logs "AllowedIPs overlaps
+      local network" and skips that route, LAN keeps working.
+- [ ] `ctl automation add T connect not-else` is rejected; the GUI hides
+      the is/is-not selector for "otherwise".
