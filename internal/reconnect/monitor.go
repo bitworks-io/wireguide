@@ -3,6 +3,7 @@ package reconnect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -50,6 +51,12 @@ type State struct {
 	MaxAttempts  int    `json:"max_attempts"`
 	NextRetry    string `json:"next_retry"`
 }
+
+// ErrNothingToReconnect is returned by a ReconnectFunc when there is no
+// tunnel left that it should restore (nothing cached, or every candidate
+// is owned by automation or was disconnected on purpose). The legacy
+// all-tunnels retry ends instead of backing off forever.
+var ErrNothingToReconnect = errors.New("nothing to reconnect")
 
 // ReconnectFunc is called to perform the actual reconnection of a specific
 // tunnel identified by name. The ctx is the same ctx the monitor created for
@@ -589,6 +596,13 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		} else {
 			disconnectErr = m.manager.Disconnect()
 		}
+		// Legacy path: ErrNotConnected only means there is nothing to tear
+		// down (everything is already down); fall through to the reconnect
+		// step, which decides from the helper's cached configs whether
+		// anything is left to restore.
+		if tunnelName == "" && disconnectErr != nil && isNotConnected(disconnectErr) {
+			disconnectErr = nil
+		}
 		if disconnectErr != nil {
 			slog.Warn("pre-reconnect disconnect failed; will retry after backoff",
 				"tunnel", tunnelName, "attempt", attempt, "error", disconnectErr)
@@ -615,6 +629,19 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		// Attempt reconnection — pass tunnel name so only the specific
 		// tunnel is reconnected when doing per-tunnel health recovery.
 		if err := m.reconnectFn(ctx, tunnelName); err != nil {
+			if errors.Is(err, ErrNothingToReconnect) {
+				// Nothing left to restore: end this retry rather than
+				// cycling (and suspending the firewall) forever.
+				slog.Info("reconnect retry ended: nothing to reconnect", "tunnel", tunnelName, "attempt", attempt)
+				resumeFirewall("nothing to reconnect")
+				m.notifyStatus(State{Reconnecting: false})
+				m.mu.Lock()
+				if cur, ok := m.retries[tunnelName]; ok && cur == entry {
+					delete(m.retries, tunnelName)
+				}
+				m.mu.Unlock()
+				return
+			}
 			slog.Warn("reconnection failed", "attempt", attempt, "tunnel", tunnelName, "error", err)
 			// Re-enable firewall after failed attempt so the system stays
 			// protected between retries.
@@ -680,6 +707,13 @@ func (m *Monitor) triggerLoop() {
 			}
 		}
 	}
+}
+
+// isNotConnected reports whether err is the tunnel manager's "nothing is
+// connected" error.
+func isNotConnected(err error) bool {
+	var te *tunnel.TunnelError
+	return errors.As(err, &te) && te.Kind == tunnel.ErrNotConnected
 }
 
 func (m *Monitor) notifyStatus(state State) {

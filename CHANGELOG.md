@@ -18,6 +18,13 @@ All notable changes to WireGuide will be documented in this file.
 - **pf token robustness** — pf is re-enabled if it was stopped externally, a dead token no longer wedges disable/cleanup, tokens are keyed to `kern.bootsessionuuid`, and pf query output no longer includes pfctl's stderr notices.
 - **Updates** — fork builds open the fork's release page (never upstream's Homebrew cask) and `-bitworks.N` revisions are ordered; the helper also restores DNS on a timed-out SIGTERM shutdown.
 - **Helper shutdown** — SIGTERM/SIGINT run the normal graceful shutdown, bounded to 3 s; the macOS install script waits up to 15 s for the old helper to unload.
+- **Automation no longer fights the reconnect monitor** — the legacy sleep/wake/interface-change reconnect only restores tunnels that are down, counts `ErrAlreadyConnected` as success (no more endless retry loop with two tunnels), leaves rule-governed tunnels and manually disconnected tunnels to automation/the user, waits up to 10 s for a default route, and ends its retry when nothing is left to restore; the retry is also cancelled when the last tunnel disconnects.
+- **LAN-overlap guard** — a tunnel whose AllowedIPs contain a local physical-interface address (e.g. the home LAN) is no longer brought up by automation or the legacy reconnect, and macOS route installation skips such a range with a warning instead of routing the LAN into the tunnel.
+
+### Added
+- **Negated automation conditions** — `ssid`, `subnet` and `network` rules gain an "is not" mode (`negate` in `config.json`, an is/is-not selector in the editor, `not-ssid:`/`not-subnet:`/`not-mac:` in `ctl automation add`). A negated rule matches only when its value is known and different; when unknown (blank SSID while roaming on Wi-Fi, network changed less than ~15 s ago, no default route) evaluation holds instead of falling through. A blank SSID on a non-Wi-Fi primary interface (Ethernet, USB tethering) is a known "no SSID". Non-negated rules and existing configs are unchanged. Downgrade note: an older binary reads a negated rule as its positive form (the opposite action), so remove negated rules before downgrading.
+- **Manual override latch** — an explicit connect/disconnect from the GUI, tray or CLI pauses automation for that tunnel until the network settles on a different identity, so a still-true rule no longer undoes a manual disconnect within milliseconds.
+- `ctl automation` shows the primary interface, settle state, and `held`/`latched` decisions.
 
 ### Changed
 - Update checks now target `bitworks-io/wireguide`; version is `0.5.2-bitworks.1`.

@@ -197,6 +197,10 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		delete(h.autoConnectedBy, req.OldName)
 		h.autoConnectedBy[req.NewName] = owner
 	}
+	if latch, ok := h.manualOverride[req.OldName]; ok {
+		delete(h.manualOverride, req.OldName)
+		h.manualOverride[req.NewName] = latch
+	}
 	h.wifiMu.Unlock()
 
 	// Move the cached latency under the new key so the old name doesn't
@@ -377,6 +381,8 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 	}
 
 	h.applyPostConnectFirewall(req.Config)
+	// An explicit connect overrides automation until the network changes.
+	h.recordManualOverride(req.Config.Name, false)
 	return ipc.Empty{}, nil
 }
 
@@ -446,6 +452,9 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		h.latencyMu.Lock()
 		delete(h.latencyByTunnel, tunnelName)
 		h.latencyMu.Unlock()
+		// An explicit disconnect overrides automation until the network
+		// changes (otherwise a connect rule that still holds undoes it).
+		h.recordManualOverride(tunnelName, true)
 	} else {
 		// Legacy "no name" path: tear down EVERY active tunnel via
 		// per-tunnel calls so manager.Disconnect()'s "pick the first"
@@ -474,6 +483,7 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 			h.latencyMu.Lock()
 			delete(h.latencyByTunnel, name)
 			h.latencyMu.Unlock()
+			h.recordManualOverride(name, true)
 		}
 		if firstErr != nil {
 			h.reconcileFirewallLocked("legacy-disconnect-partial")
@@ -482,6 +492,9 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 	}
 
 	h.reconcileFirewallLocked("disconnect")
+	// With nothing left up, a still-pending legacy "" retry has nothing to
+	// restore and would only bounce whatever is connected next.
+	h.cancelLegacyRetryIfIdle()
 	h.maybeArmShutdownAfterTeardown("tunnel disconnected, no GUI attached")
 	return ipc.Empty{}, nil
 }

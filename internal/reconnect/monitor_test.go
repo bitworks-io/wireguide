@@ -1022,3 +1022,44 @@ func TestFailedSuspendStillOwesResume(t *testing.T) {
 	mon.ReconnectTunnelIfIdle("ping", valid.Load)
 	waitFor(t, time.Second, "firewall resumed after failed suspend", func() bool { return resumed.Load() == 1 })
 }
+
+func TestLegacyRetryEndsWhenNothingToReconnect(t *testing.T) {
+	var calls atomic.Int32
+	mon, mgr, sd := newTestMonitor(testConfig(), func(context.Context, string) error {
+		calls.Add(1)
+		return ErrNothingToReconnect
+	})
+	mgr.setConnected(true, "t")
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+	waitFor(t, 2*time.Second, "reconnectFn called", func() bool { return calls.Load() >= 1 })
+	// The retry slot must be released rather than backing off forever.
+	waitFor(t, 2*time.Second, "retry slot cleared", func() bool {
+		mon.mu.Lock()
+		defer mon.mu.Unlock()
+		return len(mon.retries) == 0
+	})
+	time.Sleep(4 * testConfig().MaxDelay)
+	if n := calls.Load(); n != 1 {
+		t.Errorf("retry kept cycling: %d calls", n)
+	}
+}
+
+func TestLegacyReconnectToleratesNotConnectedDisconnect(t *testing.T) {
+	var calls atomic.Int32
+	mon, mgr, sd := newTestMonitor(testConfig(), func(context.Context, string) error {
+		calls.Add(1)
+		return nil
+	})
+	mgr.disconnectFn = func() error {
+		return &tunnel.TunnelError{Kind: tunnel.ErrNotConnected, Message: "no tunnel is connected"}
+	}
+	mgr.setConnected(true, "t")
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+	waitFor(t, 2*time.Second, "reconnectFn reached despite ErrNotConnected", func() bool { return calls.Load() >= 1 })
+}

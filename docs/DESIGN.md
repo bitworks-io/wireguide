@@ -219,13 +219,84 @@ Each tunnel owns an ordered list of `condition → action` rules
 - `none_match` — the fallback ("otherwise")
 
 The action is `connect` or `disconnect`. `Evaluate` walks the rules top to
-bottom: the **first** matching concrete condition wins; if none match, the
-first `none_match` rule applies; else the tunnel is left untouched. **Order
-is priority** (drag-reorderable in the GUI). A rule disconnects a tunnel
+bottom and the **first matching, well-formed rule wins** — uniformly, by
+position. `none_match` ("otherwise") is an unconditional match *at its own
+position*: a fallback when placed last, an unconditional override if dragged
+to the top. If nothing matches, the tunnel is left untouched. **Order is
+priority** (drag-reorderable in the GUI). A rule disconnects a tunnel
 **regardless of how it was brought up** — but a tunnel with *no* rules is
 never auto-touched. Legacy `Settings.WifiRules` (SSID-only auto-connect +
 global trusted list) is migrated once into this model by
 `Settings.EnsureAutomation`.
+
+### Negated conditions ("is not")
+
+`ssid`, `subnet` and `network` conditions carry an optional `negate` flag
+(JSON `"negate": true`, omitted when false so existing configs round-trip
+byte-identically; CLI `not-ssid:`/`not-subnet:`/`not-mac:`; `none_match`
+cannot be negated). A negated rule matches only when its input is **known
+and different**. The canonical remote-site setup is a pair:
+
+    {ssid = Home, disconnect}
+    {ssid != Home, connect}
+
+Positive rules keep the simple semantics: unknown (empty) input never
+matches and evaluation falls through. A negated rule that cannot be decided
+**holds**: `Evaluate` stops and returns `StateUnmanaged` rather than falling
+through to later rules (otherwise a trailing `else → disconnect` would fire
+on every roam blip). "Cannot be decided" means any of:
+
+- the network has not been stable (`Settled`) for `NegationSettleWindow`
+  (15 s) — a fingerprint of SSID, primary interface, canonical gateway MAC
+  and sorted physical subnets (`wifi.SettleTracker`);
+- there is no default route (`Online` false);
+- the required input is empty — except a blank SSID on a settled, online
+  network whose primary interface is **not** Wi-Fi (Ethernet, USB
+  tethering), which is a known "no SSID", so a negated SSID rule matches.
+  A blank SSID while the primary interface *is* Wi-Fi (roam blip, GUI not
+  reporting, missing Location permission) is unknown and holds.
+
+Nothing re-triggers evaluation when the settle window ends (macOS has no
+poll), so when any tunnel has a negated rule and the context is unsettled,
+`reevaluateAutomation` arms a `time.AfterFunc(remaining+250ms)` that calls
+`reevaluateAutomation("settled")`. `EvaluateDetailed` additionally reports
+the deciding rule index and whether the decision was a hold (surfaced as
+`held` in `ctl automation`).
+
+### Manual override latch
+
+An explicit connect or disconnect arriving through IPC (`handleConnect` /
+`handleDisconnect`: GUI, tray, CLI — never automation's own calls) latches
+that tunnel: `manualOverride[tunnel] = identity of the current network`
+(`ssid:<SSID>`, else `net:<iface>|<gatewayMAC>|<subnets>`). Automation will
+not connect or disconnect a latched tunnel. The latch clears only when the
+context is **settled** on a different identity, so a 4-10 s roam blip never
+clears it. This stops a still-true connect rule from undoing a manual
+disconnect (its own route churn re-triggers evaluation within ~200 ms).
+Rename moves latch entries like `autoConnectedBy`; latches for tunnels with
+no rules are dropped.
+
+### Reconnect monitor interplay
+
+The legacy all-tunnels reconnect path (sleep/wake, primary-interface
+change) reconnects only cached tunnels that are **not currently connected**,
+treats `ErrAlreadyConnected` as success, waits up to 10 s for a default
+route, and leaves two kinds of tunnel alone: tunnels that have automation
+rules (unless the user manually connected them — then the latch says the
+user owns it) and tunnels under a manual-disconnect latch. After it
+finishes it triggers `reevaluateAutomation("reconnect")` asynchronously,
+without holding `connectMu` (lock order is `reevalMu → connectMu`). When
+nothing is left to reconnect the retry ends (`ErrNothingToReconnect`);
+`CancelRetryFor("")` also runs whenever a disconnect leaves zero active
+tunnels.
+
+### LAN-overlap guard
+
+A tunnel whose AllowedIPs contain an address currently assigned to a
+physical interface would route the machine's own LAN (gateway, resolver)
+into the tunnel. macOS `AddRoutes` skips such non-default routes with a
+warning; automation connects and legacy reconnects refuse to bring up such a
+tunnel at all. Manual connects proceed (with the `AddRoutes` guard).
 
 ### Evaluation triggers (helper-side)
 
@@ -234,16 +305,18 @@ in `internal/helper/wifi_rules.go`), so they fire whether or not a GUI is
 alive. `reevalMu` serialises evaluations. Triggers:
 
 ```
-current network context = { SSID, physical IPs, gateway MAC }
+current network context = { SSID, physical IPs, gateway MAC, primary iface,
+                            is-Wi-Fi, online, settled }
   ├─ SSID change      → wifiMon (CoreWLAN via GUI on macOS 14+) — instant
   ├─ network change   → macOS: the shared `route -n monitor` subscription
   │                     (SubscribeNetworkChange) — instant, ~zero added cost
   └─ poll (30s)       → Windows/Linux fallback (no process-wide monitor yet)
 
 for each tunnel with rules:
+  (latched by a manual connect/disconnect → skip)
   Evaluate(rules, ctx) → StateConnect  → doConnectHeld (same as manual)
                          StateDisconnect → disconnectAutoManaged
-                         StateUnmanaged  → leave as-is
+                         StateUnmanaged  → leave as-is (also: negated hold)
 ```
 
 The gateway MAC is read unprivileged and locale-independently:
@@ -285,7 +358,8 @@ The helper's locks:
   takes the locks below.
 - `connectMu` — serializes connect/disconnect operations
 - `mu` — protects `activeCfgs` and other manager state
-- `wifiMu` — protects `autoConnectedBy`
+- `wifiMu` — protects `autoConnectedBy` and `manualOverride`
+- `settleMu` — protects the settle tracker and its re-evaluation timer
 
 Rule: within an evaluation, always acquire in the order
 `connectMu → mu → wifiMu`. Never hold a lower-priority lock when acquiring
