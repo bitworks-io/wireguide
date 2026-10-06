@@ -1047,3 +1047,39 @@ func removeIfExists(path string) error {
 	}
 	return nil // os.Remove is already handled in DownloadUpdate on failure
 }
+
+func TestIsNewerVersion_ForkRevisions(t *testing.T) {
+	tests := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"0.5.2-bitworks.2", "0.5.2-bitworks.1", true},
+		{"0.5.2-bitworks.1", "0.5.2-bitworks.2", false},
+		{"0.5.2-bitworks.1", "0.5.2-bitworks.1", false},
+		{"0.5.2", "0.5.2-bitworks.1", false},
+		{"0.5.3", "0.5.2-bitworks.9", true},
+		{"0.5.2-bitworks.10", "0.5.2-bitworks.9", true},
+		{"0.5.2-bitworks.1", "0.5.2", true},
+		{"0.5.1-bitworks.5", "0.5.2-bitworks.1", false},
+	}
+	for _, tt := range tests {
+		if got := isNewerVersion(tt.latest, tt.current); got != tt.want {
+			t.Errorf("isNewerVersion(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+		}
+	}
+}
+
+func TestReleaseURLsFollowCheckerRepo(t *testing.T) {
+	if ReleasesURL() != "https://github.com/"+githubRepo+"/releases/latest" {
+		t.Fatalf("ReleasesURL() = %q", ReleasesURL())
+	}
+	if !IsValidReleaseURL("https://github.com/" + githubRepo + "/releases/tag/v1") {
+		t.Error("own release page must be valid")
+	}
+	if IsValidReleaseURL("https://github.com/korjwl1/wireguide/releases/latest") && githubRepo != upstreamRepo {
+		t.Error("upstream release page must not be valid for a fork build")
+	}
+	if IsValidReleaseURL("https://evil.example/" + githubRepo + "/") {
+		t.Error("foreign host must be rejected")
+	}
+}

@@ -44,7 +44,7 @@ func installDarwin(path string) error {
 	// instead of trying to auto-replace the app bundle (which would need
 	// sudo and has many failure modes). The user downloads and replaces
 	// the app manually — same UX as most indie macOS apps.
-	return exec.Command("open", "https://github.com/korjwl1/wireguide/releases/latest").Run()
+	return exec.Command("open", ReleasesURL()).Run()
 }
 
 func installLinux(path string) error {

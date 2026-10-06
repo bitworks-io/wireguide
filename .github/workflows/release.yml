@@ -358,7 +358,10 @@ jobs:
         with:
           files: artifacts/*
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Fork revisions (vX.Y.Z-bitworks.N) are real releases: GitHub's
+          # /releases/latest never returns prereleases, so flagging them would
+          # leave the in-app update check with nothing to find.
+          prerelease: ${{ contains(github.ref_name, '-') && !contains(github.ref_name, '-bitworks.') }}
           body_path: CHANGELOG.md
           fail_on_unmatched_files: true
 

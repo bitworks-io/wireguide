@@ -358,7 +358,10 @@ func (s *TunnelService) RunUpdate(info *update.UpdateInfo) error {
 		return fmt.Errorf("no update available")
 	}
 
-	if runtime.GOOS == "darwin" && update.IsBrewInstall() {
+	// The Homebrew path installs upstream's cask, so it is only valid when
+	// this build's update channel IS upstream. A fork build uses the release
+	// page of the repo its checker reads from.
+	if runtime.GOOS == "darwin" && update.UsesUpstreamRelease() && update.IsBrewInstall() {
 		brewBin := update.BrewPath()
 
 		// `brew update` is pure-network (git fetch on tap repos); 90 s is
@@ -427,10 +430,16 @@ func (s *TunnelService) RunUpdate(info *update.UpdateInfo) error {
 	}
 
 	slog.Info("update: opening GitHub Releases page (non-brew install)")
-	if s.app != nil {
-		return s.app.Browser.OpenURL("https://github.com/korjwl1/wireguide/releases/latest")
+	// info round-trips through the frontend: only open its URL when it is a
+	// release page of our own repo, else fall back to the canonical one.
+	releaseURL := update.ReleasesURL()
+	if update.IsValidReleaseURL(info.ReleaseURL) {
+		releaseURL = info.ReleaseURL
 	}
-	return exec.Command("open", "https://github.com/korjwl1/wireguide/releases/latest").Run()
+	if s.app != nil {
+		return s.app.Browser.OpenURL(releaseURL)
+	}
+	return exec.Command("open", releaseURL).Run()
 }
 
 // emitUpdateProgress tells the frontend which phase RunUpdate is in
