@@ -41,6 +41,7 @@ type Server struct {
 	shutdownCh   chan struct{}
 	onConnect    func() // called when a control conn attaches (any)
 	onDisconnect func() // called when the last control conn closes
+	onSubscribe  func() // called after a client's event subscription is live
 	controlConns map[net.Conn]struct{}
 
 	// connWg tracks in-flight safeHandleConn goroutines. Shutdown waits on it
@@ -107,6 +108,15 @@ func (s *Server) OnConnect(fn func()) {
 func (s *Server) OnDisconnect(fn func()) {
 	s.mu.Lock()
 	s.onDisconnect = fn
+	s.mu.Unlock()
+}
+
+// OnSubscribe sets a callback fired (on its own goroutine) after a client's
+// event subscription is registered and acknowledged. The helper uses it to
+// deliver once-per-start notices that were produced before any GUI attached.
+func (s *Server) OnSubscribe(fn func()) {
+	s.mu.Lock()
+	s.onSubscribe = fn
 	s.mu.Unlock()
 }
 
@@ -423,6 +433,13 @@ func (s *Server) handleSubscribe(conn net.Conn, reqID uint64) {
 	ack, _ := NewResponse(reqID, Empty{})
 	if err := WriteFrame(conn, ack); err != nil {
 		return
+	}
+
+	s.mu.Lock()
+	onSub := s.onSubscribe
+	s.mu.Unlock()
+	if onSub != nil {
+		go onSub()
 	}
 
 	// Pump events to this subscriber

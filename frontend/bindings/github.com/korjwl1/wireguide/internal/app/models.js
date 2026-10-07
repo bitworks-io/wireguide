@@ -12,6 +12,9 @@ import * as config$0 from "../config/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as domain$0 from "../domain/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as ipc$0 from "../ipc/models.js";
 
 /**
  * AutomationPreview is the GUI-facing view of the helper's read-only
@@ -438,6 +441,145 @@ export class DomainCheck {
 }
 
 /**
+ * FirewallStatus is the read-only DNS protection / kill switch state for the
+ * Settings sub-lines. Available is false for an older helper or on failure,
+ * in which case the UI falls back to the wanted setting alone.
+ */
+export class FirewallStatus {
+    /**
+     * Creates a new FirewallStatus instance.
+     * @param {Partial<FirewallStatus>} [$$source = {}] - The source object to create the FirewallStatus.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {ipc$0.FirewallStatusResponse | null | undefined}
+             */
+            this["status"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType8;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("status" in $$parsedSource) {
+            $$parsedSource["status"] = $$createField1_0($$parsedSource["status"]);
+        }
+        return new FirewallStatus(/** @type {Partial<FirewallStatus>} */($$parsedSource));
+    }
+}
+
+/**
+ * HelperInfo is the Settings > Advanced "Helper" card. Available is false
+ * when the helper cannot be asked at all; fields are blank when an older
+ * helper does not report them (it predates Helper.Info).
+ */
+export class HelperInfo {
+    /**
+     * Creates a new HelperInfo instance.
+     * @param {Partial<HelperInfo>} [$$source = {}] - The source object to create the HelperInfo.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("app_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["app_version"] = "";
+        }
+        if (!("protocol_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["protocol_version"] = "";
+        }
+        if (!("pid" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["pid"] = 0;
+        }
+        if (!("started_at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["started_at"] = "";
+        }
+        if (!("start_mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["start_mode"] = "";
+        }
+        if (!("socket_path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["socket_path"] = "";
+        }
+        if (!("activation_reason" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["activation_reason"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Recovery is what the helper's startup crash recovery cleaned up
+             * (nil when nothing).
+             * @member
+             * @type {ipc$0.HelperRecovery | null | undefined}
+             */
+            this["recovery"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField8_0 = $$createType10;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recovery" in $$parsedSource) {
+            $$parsedSource["recovery"] = $$createField8_0($$parsedSource["recovery"]);
+        }
+        return new HelperInfo(/** @type {Partial<HelperInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * KnownSSIDs is the response shape for GetKnownSSIDs. The frontend uses
  * it to render a picker so users can tap saved networks instead of
  * retyping SSIDs they've already joined.
@@ -724,7 +866,7 @@ export class TunnelInfo {
      */
     static createFrom($$source = {}) {
         const $$createField8_0 = $$createType4;
-        const $$createField9_0 = $$createType8;
+        const $$createField9_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_domains" in $$parsedSource) {
             $$parsedSource["dns_domains"] = $$createField8_0($$parsedSource["dns_domains"]);
@@ -914,7 +1056,7 @@ export class VerifyRow {
      * @returns {VerifyRow}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType9;
+        const $$createField4_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("detail_params" in $$parsedSource) {
             $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
@@ -964,7 +1106,7 @@ export class ZipImportResult {
      * @returns {ZipImportResult}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType8;
+        const $$createField2_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("warnings" in $$parsedSource) {
             $$parsedSource["warnings"] = $$createField2_0($$parsedSource["warnings"]);
@@ -981,6 +1123,10 @@ const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Array($Create.Any);
 const $$createType5 = DomainCheck.createFrom;
 const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = config$0.Diagnostic.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $Create.Map($Create.Any, $Create.Any);
+const $$createType7 = ipc$0.FirewallStatusResponse.createFrom;
+const $$createType8 = $Create.Nullable($$createType7);
+const $$createType9 = ipc$0.HelperRecovery.createFrom;
+const $$createType10 = $Create.Nullable($$createType9);
+const $$createType11 = config$0.Diagnostic.createFrom;
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $Create.Map($Create.Any, $Create.Any);

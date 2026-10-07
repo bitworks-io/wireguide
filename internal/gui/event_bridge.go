@@ -203,6 +203,15 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 		} else {
 			b.app.Event.Emit("settings_changed", payload)
 		}
+	case ipc.EventRecovery:
+		// Startup crash recovery restored DNS / flushed stale firewall rules
+		// (once per helper start). The frontend shows an info banner.
+		var payload ipc.HelperRecovery
+		if err := json.Unmarshal(params, &payload); err != nil {
+			slog.Debug("event bridge: unmarshal recovery failed", "error", err)
+		} else {
+			b.app.Event.Emit("helper_recovery", payload)
+		}
 	case ipc.EventCriticalError:
 		// A helper background goroutine has died permanently. Surface to
 		// the frontend so the user knows tunnel state may stop updating

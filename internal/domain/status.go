@@ -41,6 +41,19 @@ type ConnectionStatus struct {
 	LatencyMs    float64 `json:"latency_ms,omitempty"`
 	ErrorMessage string  `json:"error_message,omitempty"`
 
+	// DNSMode / DNSServers / DNSProtected describe what the tunnel did to
+	// DNS, filled by the helper for connected tunnels (additive, protocol
+	// minor 3). DNSMode is "global" | "split" | "search" | "none" and is the
+	// config's intent unless the platform could not apply it (then "none").
+	// DNSProtected is true only when the firewall's DNS permit set currently
+	// covers this tunnel's servers. Older helpers omit all three.
+	DNSMode      string   `json:"dns_mode,omitempty"`
+	DNSServers   []string `json:"dns_servers,omitempty"`
+	DNSProtected bool     `json:"dns_protected,omitempty"`
+	// RoutesSkipped lists AllowedIPs ranges the macOS LAN-overlap guard did
+	// not install because they overlap the local network.
+	RoutesSkipped []string `json:"routes_skipped,omitempty"`
+
 	// ActiveTunnels lists the names of all currently connected (or connecting)
 	// tunnels. Populated by the multi-tunnel manager so the frontend can show
 	// which tunnels are active.

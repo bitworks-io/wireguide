@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/elevate"
@@ -338,10 +339,18 @@ func startHelperHealthMonitor(app *application.App, clients *ipc.ClientHolder, d
 				app.Event.Emit("helper", HelperEvent{Alive: true})
 				wasAlive = true
 			}
+			if helperRepairing.Load() {
+				// The administrator prompt of a user-requested repair takes
+				// longer than the outage window; do not announce an outage
+				// the user is in the middle of fixing.
+				outageStarted = time.Now()
+			}
 			if !wasAlive && !outageReported && time.Since(outageStarted) >= 10*time.Second {
 				app.Event.Emit("critical_error", ipc.CriticalErrorPayload{
 					Where:  "Helper connection",
-					Detail: "The VPN helper is unavailable. Quit and reopen WireGuide to retry helper setup.",
+					Detail: "The VPN helper is unavailable. Use Repair helper (Settings > Advanced) to reinstall it.",
+					Code:   "helper_unavailable",
+					Action: "repair_helper",
 				})
 				outageReported = true
 				if bridge != nil && bridge.notify != nil {
@@ -364,6 +373,10 @@ var recoveryDial = func(ctx context.Context, dataDir string) (*ipc.Client, error
 // true if a new client is now in place. Best-effort — caller decides whether
 // to retry on the next tick.
 func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir string, done <-chan struct{}) bool {
+	// A user-requested repair owns the client holder while it runs.
+	if helperRepairing.Load() {
+		return false
+	}
 	// Quitting: never touch the helper socket again (on macOS a connect would
 	// start the helper right after the user quit).
 	select {
@@ -423,7 +436,7 @@ func reconnectHelper(ctx context.Context, addr string) (*ipc.Client, error) {
 	}
 	if ping.AppVersion != update.CurrentVersion() {
 		client.Close()
-		return nil, fmt.Errorf("helper version %q does not match app %q; reopen WireGuide to update it", ping.AppVersion, update.CurrentVersion())
+		return nil, fmt.Errorf("helper version %q does not match app %q; use Repair helper in Settings > Advanced to update it", ping.AppVersion, update.CurrentVersion())
 	}
 	return client, nil
 }
@@ -445,4 +458,52 @@ func isHelperGoneErr(err error) bool {
 		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, ipc.ErrClientClosed)
+}
+
+// helperRepairing is true while repairHelper runs, so the background health
+// monitor does not race it for the client holder while the helper is down.
+var helperRepairing atomic.Bool
+
+// repairHelper is the user-requested "Repair helper" action. It runs the same
+// administrator install/repair path as an upgrade (ForceReinstall makes
+// SpawnHelper skip the "already running" shortcut and reinstall the binary and
+// plist), which is the only action that prompts. The old helper, if it still
+// answers, is shut down first through its own graceful Shutdown so the
+// installer's bootout never kills a running one. Replacing the helper drops
+// any connected tunnel; callers must ask the user first.
+func repairHelper(ctx context.Context, clients *ipc.ClientHolder, bridge *eventBridge, dataDir string) error {
+	if !helperRepairing.CompareAndSwap(false, true) {
+		return errors.New("a helper repair is already running")
+	}
+	defer helperRepairing.Store(false)
+
+	args := elevate.Args{
+		SocketPath:     ipc.DefaultSocketPath(),
+		SocketUID:      os.Getuid(),
+		SocketSID:      elevate.CurrentUserSID(),
+		DataDir:        dataDir,
+		ForceReinstall: true,
+	}
+	// Stop a helper that still answers so the install replaces it cleanly.
+	if old := clients.Get(); old != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		var resp ipc.PingResponse
+		err := old.CallWithContext(pingCtx, ipc.MethodPing, nil, &resp)
+		cancel()
+		if err == nil {
+			slog.Warn("repair: stopping the running helper before reinstall", "pid", resp.PID)
+			shutdownStaleHelper(old, resp.PID, args.SocketPath)
+		}
+	}
+	newClient, err := spawnAndConnectHelper(ctx, args, elevate.SpawnHelper, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	clients.Set(newClient)
+	if bridge != nil {
+		bridge.Resubscribe()
+	}
+	ResendSSIDToHelper(clients)
+	slog.Info("helper repaired")
+	return nil
 }

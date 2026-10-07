@@ -30,6 +30,7 @@
   // Modal state
   let showEditor = false;
   let showSettings = false;
+  let settingsTab = 'general';
   let showConflictWarning = false;
   let showZipResult = false;
   let zipResults = [];
@@ -55,7 +56,11 @@
   let updateUnsub = null;
   let configChangedUnsub = null;
   let tunnelsChangedUnsub = null;
-  let criticalErrors = []; // array of { where, detail, at } — shown as a persistent banner
+  let criticalErrors = []; // array of { where, detail, code, action, at } — shown as a persistent banner
+  // Startup crash-recovery notice (info, not an error): what the helper
+  // cleaned up when it started. Deduped per helper start via started_at.
+  let recoveryNotice = null; // { dns_restored, firewall_flushed, started_at }
+  let helperRecoveryUnsub = null;
 
   // App-level ESC handler: close the editor modal. ConfigEditor wraps
   // a CodeMirror instance whose own keymaps may handle ESC for things
@@ -189,6 +194,7 @@
       await initialLoad(TunnelService);
       await refreshStatus(TunnelService);
       refreshAutomationPreview();
+      checkRecovery();
     });
 
     // Wi-Fi SSID change events are still broadcast by the helper, but rule
@@ -226,10 +232,12 @@
     // helper subsystem (status broadcast, latency probe, wifi rules)
     // is permanently dead and the user should restart the helper.
     criticalErrorUnsub = Events.On('critical_error', (event) => {
-      const { where, detail } = event.data || {};
+      const { where, detail, code, action } = event.data || {};
       const next = [...criticalErrors, {
         where: where || 'unknown',
         detail: detail || '',
+        code: code || '',
+        action: action || '',
         at: new Date().toLocaleTimeString(),
       }];
       // Cap at the 5 most recent entries. A storm of helper goSafe
@@ -237,7 +245,47 @@
       // would otherwise fill the screen with banners and freeze the UI.
       criticalErrors = next.slice(-5);
     });
+
+    helperRecoveryUnsub = Events.On('helper_recovery', () => { checkRecovery(); });
+    checkRecovery();
   });
+
+  // What the helper's startup recovery cleaned up. The event fires once per
+  // helper start, but the frontend may not have been listening yet, so the
+  // same data is also read from Helper.Info on load and after a helper reset.
+  async function checkRecovery() {
+    try {
+      const info = await TunnelService.GetHelperInfo();
+      const r = info?.recovery;
+      if (!info?.available || !r || !(r.dns_restored || r.firewall_flushed)) return;
+      let dismissed = '';
+      try { dismissed = localStorage.getItem('wg.recovery.dismissed') || ''; } catch (_) {}
+      if (dismissed === info.started_at) return;
+      recoveryNotice = { dns_restored: !!r.dns_restored, firewall_flushed: !!r.firewall_flushed, started_at: info.started_at };
+    } catch (_) { /* older helper or helper mid-restart: no notice */ }
+  }
+
+  function dismissRecovery() {
+    try { localStorage.setItem('wg.recovery.dismissed', recoveryNotice?.started_at || ''); } catch (_) {}
+    recoveryNotice = null;
+  }
+
+  function recoveryKey(n) {
+    if (n.dns_restored && n.firewall_flushed) return 'recovery.dns_and_firewall';
+    return n.dns_restored ? 'recovery.dns_only' : 'recovery.firewall_only';
+  }
+
+  // Banner text: known helper codes are translated, anything else falls back
+  // to the helper's own (English) detail.
+  const CRITICAL_CODES = ['dns_protection_failing', 'helper_unavailable'];
+  function criticalText(e) {
+    return CRITICAL_CODES.includes(e.code) ? $t('critical.' + e.code) : e.detail;
+  }
+
+  function openSettingsFromBanner() {
+    settingsTab = 'advanced';
+    showSettings = true;
+  }
 
   onDestroy(() => {
     unsubscribe();
@@ -248,6 +296,7 @@
     if (wifiSsidUnsub) wifiSsidUnsub();
     if (autoConnectedUnsub) autoConnectedUnsub();
     if (criticalErrorUnsub) criticalErrorUnsub();
+    if (helperRecoveryUnsub) helperRecoveryUnsub();
     if (updateUnsub) updateUnsub();
     if (configChangedUnsub) configChangedUnsub();
     if (tunnelsChangedUnsub) tunnelsChangedUnsub();
@@ -726,20 +775,36 @@
     <div class="toast">{toast}</div>
   {/if}
 
+  <div class="banner-stack">
   {#if criticalErrors.length > 0}
     <div class="critical-banner" role="alert">
-      <div class="critical-banner-title">⚠ Helper subsystem failure</div>
+      <div class="critical-banner-title">⚠ {$t('critical.title')}</div>
       {#each criticalErrors as e, i}
         <div class="critical-banner-row">
-          <span class="critical-banner-where">{e.where}</span>
-          <span class="critical-banner-detail">{e.detail}</span>
+          <span class="critical-banner-where">{e.code === 'dns_protection_failing' ? $t('settings.dns_protection') : e.where}</span>
+          <span class="critical-banner-detail">{criticalText(e)}</span>
           <span class="critical-banner-time">{e.at}</span>
-          <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label="Dismiss">×</button>
+          <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label={$t('critical.dismiss')}>×</button>
         </div>
       {/each}
-      <div class="critical-banner-hint">Restart the app to recover the affected subsystem.</div>
+      {#if criticalErrors.some((e) => e.action === 'repair_helper' || e.code === 'dns_protection_failing')}
+        <div class="critical-banner-hint">
+          {$t('critical.hint_settings')}
+          <button class="critical-banner-action" on:click={openSettingsFromBanner}>{$t('critical.open_settings')}</button>
+        </div>
+      {:else}
+        <div class="critical-banner-hint">{$t('critical.hint_restart')}</div>
+      {/if}
     </div>
   {/if}
+
+  {#if recoveryNotice}
+    <div class="recovery-banner" role="status">
+      <span class="recovery-banner-text">{$t(recoveryKey(recoveryNotice))}</span>
+      <button class="recovery-banner-close" on:click={dismissRecovery} aria-label={$t('recovery.dismiss')}>×</button>
+    </div>
+  {/if}
+  </div>
 
   <div class="layout">
     <nav class="sidebar">
@@ -794,7 +859,7 @@
       <div class="nav-spacer"></div>
 
       <div class="nav-footer">
-        <button class="nav-item" on:click={() => showSettings = true}>
+        <button class="nav-item" on:click={() => { settingsTab = 'general'; showSettings = true; }}>
           <span class="nav-icon-box">
             <Icon name="settings" size={15} strokeWidth={2} />
           </span>
@@ -894,7 +959,7 @@
   {/if}
 
   {#if showSettings}
-    <Settings {TunnelService} onClose={() => showSettings = false} {updateInfo} onInstall={handleUpdate} />
+    <Settings {TunnelService} initialTab={settingsTab} onClose={() => showSettings = false} {updateInfo} onInstall={handleUpdate} />
   {/if}
 
   {#if showConflictWarning}
@@ -1332,17 +1397,26 @@
   }
 
   /* ---------- Critical helper-failure banner (top-centre, persistent) ---------- */
-  .critical-banner {
+  .banner-stack {
     position: fixed;
     top: var(--space-3);
     left: 50%;
     transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    z-index: 400;
+    max-width: calc(100vw - 32px);
+    pointer-events: none;
+  }
+  .banner-stack > * { pointer-events: auto; }
+  .critical-banner {
     padding: var(--space-3) var(--space-4);
     background: rgba(220, 60, 60, 0.96);
     color: white;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
-    z-index: 400;
     max-width: 640px;
     min-width: 320px;
     font: var(--text-body);
@@ -1387,6 +1461,44 @@
     margin-top: var(--space-2);
     font-size: 0.75rem;
     opacity: 0.85;
+  }
+  .critical-banner-action {
+    margin-left: var(--space-2);
+    padding: 2px var(--space-2);
+    background: rgba(255, 255, 255, 0.2);
+    border: 0.5px solid rgba(255, 255, 255, 0.5);
+    border-radius: var(--radius-xs);
+    color: white;
+    font: inherit;
+    cursor: pointer;
+  }
+  .critical-banner-action:hover { background: rgba(255, 255, 255, 0.3); }
+
+  /* ---------- Startup-recovery info banner (top-centre, dismissible) ---------- */
+  .recovery-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    max-width: 560px;
+    font: var(--text-body);
+  }
+  .recovery-banner-text { flex: 1 1 auto; }
+  .recovery-banner-close {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 0 var(--space-2);
+    line-height: 1;
   }
 
   /* ---------- Toast (bottom-centre) ---------- */

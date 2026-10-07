@@ -235,6 +235,26 @@ type Helper struct {
 	ksIfaces       map[string]struct{}
 	fwSuspendDepth int
 
+	// fwv mirrors the reconcile bookkeeping above for lock-free-ish readers
+	// (status broadcast, Firewall.Status): those must not take connectMu,
+	// which a connect can hold for seconds. Written only under connectMu by
+	// the reconcile paths, always under mu. Guarded by mu.
+	fwv fwView
+	// reconcileAlerted latches the "DNS protection keeps failing" banner so
+	// it fires once per failure streak. Guarded by mu.
+	reconcileAlerted bool
+
+	// Process facts reported by Helper.Info; set once in Run before Serve.
+	startedAt        time.Time
+	startMode        string
+	socketPath       string
+	activationReason string
+	dataDir          string
+	// recovery is what startup crash recovery cleaned up; set once in Run
+	// before Serve. recoveryEmitted ensures the event goes out once.
+	recovery        ipc.HelperRecovery
+	recoveryEmitted atomic.Bool
+
 	// shutdownTimer is a singleton grace-window timer. When the control
 	// connection drops we Reset it; when the GUI reconnects we Stop it. This
 	// avoids the previous bug where every disconnect spawned a fresh goroutine
@@ -353,6 +373,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 		return err
 	}
 
+	startedAt := time.Now()
 	manager := tunnel.NewManager(dataDir)
 	fw := firewall.NewPlatformFirewall()
 	// Wire the always-on endpoint loop protection. The firewall
@@ -375,7 +396,11 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 		cleanupDone:     make(chan struct{}),
 		activated:       activated,
 		guiSeenCh:       make(chan struct{}),
+		startedAt:       startedAt,
+		socketPath:      addr,
+		dataDir:         dataDir,
 	}
+	h.startMode, h.activationReason = describeStart(activated)
 
 	// Derive the user's Application Support dir from the uid the
 	// LaunchDaemon plist passed in (`--uid=501` typically). Helper
@@ -402,19 +427,9 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 	// instead of constructing a fresh one inside the tunnel package
 	// (which previously decoupled the cleanup from the helper's view).
 	recoverAll := func() {
-		if recovered := tunnel.RecoverFromCrash(dataDir, fw); len(recovered) > 0 {
-			slog.Warn("recovered from previous crash", "tunnels", recovered)
-		}
-
-		// Firewall crash recovery. A helper restart means every tunnel interface
-		// the previous process owned is gone, so no WireGuide firewall rule can
-		// still be valid: the firewall implementation clears stale state
-		// unconditionally (on macOS: flush both pf anchors, release the persisted
-		// pf reference, drop legacy markers), whether or not any state file
-		// exists. Must run BEFORE any tunnel brings new rules up.
-		if recovered := fw.RecoverFromCrash(); recovered {
-			slog.Warn("recovered firewall state from previous crash")
-		}
+		runStartupRecovery(&h.recovery, fw, func() tunnel.RecoveryReport {
+			return tunnel.RecoverFromCrashReport(dataDir, fw)
+		})
 	}
 
 	// A socket-activated helper outlives its app. If the app that installed it
@@ -457,6 +472,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 		h.cancelShutdownTimer()
 	})
 	h.server.OnDisconnect(h.startShutdownTimer)
+	h.server.OnSubscribe(h.onSubscribe)
 	// Arm the startup grace window now: a helper that never receives
 	// a GUI connection must not run forever (see startupGrace). The
 	// first OnConnect cancels it; the fire-time active-tunnel check
@@ -1085,4 +1101,43 @@ func (h *Helper) cleanup() {
 		h.firewall.Cleanup()
 		slog.Info("helper shutdown complete")
 	})
+}
+
+// runStartupRecovery performs crash recovery and records what it cleaned in rec.
+//
+// A helper restart means every tunnel interface the previous process owned is
+// gone, so no WireGuide firewall rule can still be valid: the firewall
+// implementation clears stale state unconditionally (on macOS: flush both pf
+// anchors, release the persisted pf reference, drop legacy markers), whether
+// or not any state file exists. Must run BEFORE any tunnel brings new rules up.
+//
+// The pf read-back is taken BEFORE tunnel recovery: RecoverFromCrashReport ends
+// with fw.Cleanup() when a journal exists, which flushes the anchors, so a
+// later read-back would never see the stale rules. A stale pf token file alone
+// (e.g. after a reboot) must not raise a banner on every launch.
+func runStartupRecovery(rec *ipc.HelperRecovery, fw firewall.FirewallManager, recoverTunnels func() tunnel.RecoveryReport) {
+	rulesPresent, rulesKnown := false, false
+	if r, ok := fw.(firewall.StateReader); ok {
+		if rb, err := r.ReadBack(); err == nil {
+			rulesKnown = true
+			rulesPresent = rb.DNSProtectionActive || rb.KillSwitchActive || len(rb.Permits) > 0
+		}
+	}
+
+	report := recoverTunnels()
+	if len(report.Tunnels) > 0 {
+		slog.Warn("recovered from previous crash", "tunnels", report.Tunnels)
+	}
+	rec.TunnelsRecovered = report.Tunnels
+	rec.DNSRestored = len(report.DNSRestored) > 0
+
+	recovered := fw.RecoverFromCrash()
+	if recovered {
+		slog.Warn("recovered firewall state from previous crash")
+	}
+	if rulesKnown {
+		rec.FirewallFlushed = rulesPresent
+	} else {
+		rec.FirewallFlushed = recovered || len(report.Tunnels) > 0
+	}
 }

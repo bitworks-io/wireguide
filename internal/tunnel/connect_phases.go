@@ -257,6 +257,11 @@ func (m *Manager) connectPhases(ctx context.Context, cfg *domain.WireGuardConfig
 		if errors.Is(err, network.ErrSplitDNSUnsupported) {
 			slog.Warn("split DNS is not supported here; continuing without DNS handling for this tunnel",
 				"tunnel", cfg.Name, "error", err)
+			m.mu.Lock()
+			if e := m.tunnels[cfg.Name]; e != nil {
+				e.dnsUnsupported = true
+			}
+			m.mu.Unlock()
 		} else if len(cfg.Interface.DNS) > 0 {
 			return nil, rollback(newTunnelError(ErrNetwork, "setting DNS", err))
 		}

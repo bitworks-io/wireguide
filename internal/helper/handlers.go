@@ -38,6 +38,9 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodSetPinInterface, h.handleSetPinInterface)
 	h.server.Handle(ipc.MethodReportSSID, h.handleReportSSID)
 	h.server.Handle(ipc.MethodAutomationPreview, h.handleAutomationPreview)
+	h.server.Handle(ipc.MethodFirewallStatus, h.handleFirewallStatus)
+	h.server.Handle(ipc.MethodResetDNS, h.handleResetDNS)
+	h.server.Handle(ipc.MethodHelperInfo, h.handleHelperInfo)
 }
 
 func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) {
@@ -462,38 +465,10 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		// changes (otherwise a connect rule that still holds undoes it).
 		h.recordManualOverride(tunnelName, true)
 	} else {
-		// Legacy "no name" path: tear down EVERY active tunnel via
-		// per-tunnel calls so manager.Disconnect()'s "pick the first"
-		// semantic doesn't leave half the snapshot still up while we
-		// blanket-evict their cached configs. Each successful per-
-		// tunnel disconnect drops its cache entry; partial failures
-		// leave the still-up tunnels intact in activeCfgs so the
-		// reconnect monitor can still recover them.
-		toDisconnect := h.manager.ActiveTunnels()
-		var firstErr error
-		for _, name := range toDisconnect {
-			if err := h.manager.DisconnectTunnel(name); err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				slog.Warn("legacy disconnect: tunnel teardown failed",
-					"tunnel", name, "error", err)
-				continue
-			}
-			h.mu.Lock()
-			delete(h.activeCfgs, name)
-			h.mu.Unlock()
-			h.wifiMu.Lock()
-			delete(h.autoConnectedBy, name)
-			h.wifiMu.Unlock()
-			h.latencyMu.Lock()
-			delete(h.latencyByTunnel, name)
-			h.latencyMu.Unlock()
-			h.recordManualOverride(name, true)
-		}
-		if firstErr != nil {
+		// Legacy "no name" path: tear down EVERY active tunnel.
+		if err := h.disconnectAllHeld(); err != nil {
 			h.reconcileFirewallLocked("legacy-disconnect-partial")
-			return nil, firstErr
+			return nil, err
 		}
 	}
 
@@ -503,6 +478,39 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 	h.cancelLegacyRetryIfIdle()
 	h.maybeArmShutdownAfterTeardown("tunnel disconnected, no GUI attached")
 	return ipc.Empty{}, nil
+}
+
+// disconnectAllHeld tears down EVERY active tunnel via per-tunnel calls so
+// manager.Disconnect()'s "pick the first" semantic doesn't leave half the
+// snapshot still up while we blanket-evict their cached configs. Each
+// successful per-tunnel disconnect drops its cache entry; partial failures
+// leave the still-up tunnels intact in activeCfgs so the reconnect monitor
+// can still recover them. Returns the first error. Caller MUST hold
+// h.connectMu and runs the firewall reconcile itself.
+func (h *Helper) disconnectAllHeld() error {
+	toDisconnect := h.manager.ActiveTunnels()
+	var firstErr error
+	for _, name := range toDisconnect {
+		if err := h.manager.DisconnectTunnel(name); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			slog.Warn("legacy disconnect: tunnel teardown failed",
+				"tunnel", name, "error", err)
+			continue
+		}
+		h.mu.Lock()
+		delete(h.activeCfgs, name)
+		h.mu.Unlock()
+		h.wifiMu.Lock()
+		delete(h.autoConnectedBy, name)
+		h.wifiMu.Unlock()
+		h.latencyMu.Lock()
+		delete(h.latencyByTunnel, name)
+		h.latencyMu.Unlock()
+		h.recordManualOverride(name, true)
+	}
+	return firstErr
 }
 
 func (h *Helper) handleStatus(params json.RawMessage) (interface{}, error) {

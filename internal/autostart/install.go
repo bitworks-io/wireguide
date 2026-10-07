@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/korjwl1/wireguide/internal/launchd"
 	"github.com/korjwl1/wireguide/internal/sysexec"
 )
 
@@ -64,12 +65,25 @@ func installMacAutostart(appPath string) error {
 	}
 	safeAppPath := b.String()
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	plist := macAutostartPlist(safeAppPath)
+
+	return os.WriteFile(filepath.Join(plistDir, "com.wireguide.gui.plist"), []byte(plist), 0644)
+}
+
+// macAutostartPlist renders the GUI LaunchAgent. safeAppPath must already be
+// XML-escaped. AssociatedBundleIdentifiers attributes the login item to the
+// WireGuide app in System Settings > Login Items & Extensions.
+func macAutostartPlist(safeAppPath string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.wireguide.gui</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>%s</string>
+    </array>
     <key>ProgramArguments</key>
     <array>
         <string>%s</string>
@@ -78,9 +92,7 @@ func installMacAutostart(appPath string) error {
     <true/>
 </dict>
 </plist>
-`, safeAppPath)
-
-	return os.WriteFile(filepath.Join(plistDir, "com.wireguide.gui.plist"), []byte(plist), 0644)
+`, launchd.AppBundleID, safeAppPath)
 }
 
 func removeMacAutostart() error {

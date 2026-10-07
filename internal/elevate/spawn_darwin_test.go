@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/launchd"
 )
 
 // testArgs returns a representative Args for plist generation.
@@ -106,6 +107,30 @@ func TestPlistDeclaresLaunchdSocket(t *testing.T) {
 	}
 	if got := plistExtract(t, path, "Sockets.Listeners.SockPathName"); got != ipc.DarwinSocketPath {
 		t.Errorf("SockPathName %q differs from ipc.DarwinSocketPath %q", got, ipc.DarwinSocketPath)
+	}
+}
+
+// The daemon plist ties itself to the app bundle so System Settings > Login
+// Items & Extensions attributes it to WireGuide, and the id is the app's real
+// CFBundleIdentifier.
+func TestPlistDeclaresAssociatedBundleIdentifier(t *testing.T) {
+	plist := generatePlistContent("/Library/PrivilegedHelperTools/com.wireguide.helper", testArgs())
+	path := filepath.Join(t.TempDir(), "test.plist")
+	if err := os.WriteFile(path, []byte(plist), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v\n%s", err, out)
+	}
+	if got := plistExtract(t, path, "AssociatedBundleIdentifiers.0"); got != "com.korjwl1.wireguide" {
+		t.Errorf("AssociatedBundleIdentifiers.0 = %q", got)
+	}
+	info, err := os.ReadFile("../../build/darwin/Info.plist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(info), "<string>"+launchd.AppBundleID+"</string>") {
+		t.Errorf("launchd.AppBundleID %q does not match build/darwin/Info.plist", launchd.AppBundleID)
 	}
 }
 

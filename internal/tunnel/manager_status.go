@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/domain"
+	"github.com/korjwl1/wireguide/internal/network"
 )
 
 // Status returns the status of the first connected (or connecting) tunnel.
@@ -299,4 +300,33 @@ func (m *Manager) ConnectedInterfaces() map[string]string {
 		}
 	}
 	return out
+}
+
+// TunnelNetInfo is read-only, status-only network detail about a tunnel:
+// what the platform did not apply. It never influences what is installed.
+type TunnelNetInfo struct {
+	// SkippedRoutes are AllowedIPs ranges left out by the macOS LAN-overlap
+	// guard (nil elsewhere).
+	SkippedRoutes []string
+	// DNSUnsupported is true when the config's DNS= handling could not be
+	// applied on this platform (split DNS without platform support).
+	DNSUnsupported bool
+}
+
+// NetInfo returns the status-only network detail for a tunnel. The manager
+// lock is released before the platform manager is consulted.
+func (m *Manager) NetInfo(name string) TunnelNetInfo {
+	m.mu.Lock()
+	e, ok := m.tunnels[name]
+	if !ok {
+		m.mu.Unlock()
+		return TunnelNetInfo{}
+	}
+	netMgr := e.netMgr
+	info := TunnelNetInfo{DNSUnsupported: e.dnsUnsupported}
+	m.mu.Unlock()
+	if p, ok := netMgr.(network.SkippedRoutesProvider); ok {
+		info.SkippedRoutes = p.SkippedRoutes()
+	}
+	return info
 }
