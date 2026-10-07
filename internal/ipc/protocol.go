@@ -25,9 +25,14 @@ import (
 // Minor 2 added PingResponse.GUIAttached. With launchd socket activation a
 // successful dial no longer proves the app is running (the dial itself starts
 // the helper), so the CLI needs the helper to say whether a GUI is attached.
+// Minor 3 added Firewall.Status, Network.ResetDNS and Helper.Info, the
+// event.recovery notification, per-tunnel dns_mode/dns_servers/dns_protected/
+// routes_skipped status fields and CriticalErrorPayload.Code/Action. All
+// additive: an older helper answers the new methods with method-not-found
+// (callers treat that as "unknown"), and an older GUI ignores the new fields.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 2
+	ProtocolMinor = 3
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -163,6 +168,16 @@ const (
 	// shutdown path then stops the helper. With no GUI attached the
 	// helper simply shuts itself down.
 	MethodRequestQuit = "Helper.RequestQuit"
+	// MethodFirewallStatus is a read-only report of the firewall state the
+	// helper wants and what is actually loaded (pf read-back on macOS).
+	MethodFirewallStatus = "Firewall.Status"
+	// MethodResetDNS flushes WireGuide's firewall rules, split-DNS keys and
+	// restores DNS from the recovery journal, returning a report of each
+	// step. Refuses while a tunnel is connected unless Force is set.
+	MethodResetDNS = "Network.ResetDNS"
+	// MethodHelperInfo is a read-only description of the running helper
+	// (version, start mode, socket, pid, start time, startup recovery).
+	MethodHelperInfo = "Helper.Info"
 )
 
 // Event names (server → client notifications)
@@ -188,6 +203,10 @@ const (
 	// value so a running GUI can update its toggle without racing a
 	// re-read of config.json.
 	EventSettingsChanged = "event.settings_changed"
+	// EventRecovery is broadcast once per helper start, to the first GUI that
+	// subscribes, when startup crash recovery restored DNS or flushed stale
+	// firewall rules. The same data stays available from Helper.Info.
+	EventRecovery = "event.recovery"
 )
 
 // CodedError is an error that carries a specific JSON-RPC error code.

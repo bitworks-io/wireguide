@@ -143,6 +143,12 @@ type AutoConnectPayload struct {
 type CriticalErrorPayload struct {
 	Where  string `json:"where"`
 	Detail string `json:"detail"`
+	// Code is an optional stable identifier ("dns_protection_failing",
+	// "helper_unavailable") the GUI maps to a translated message; Detail
+	// stays the English fallback. Action optionally names a remedy the GUI
+	// can offer ("repair_helper"). Both protocol minor >= 3.
+	Code   string `json:"code,omitempty"`
+	Action string `json:"action,omitempty"`
 }
 
 // SettingsChangedPayload carries a single applied setting so a running
@@ -186,4 +192,84 @@ type AutomationTunnelDecision struct {
 	Active   bool   `json:"active"`
 	Held     bool   `json:"held,omitempty"`
 	Latched  bool   `json:"latched,omitempty"`
+}
+
+// FirewallPermit is one DNS permit the firewall currently allows. Interface
+// is "" for "any interface". Tunnel names the tunnel the resolver belongs to
+// ("" when unknown).
+type FirewallPermit struct {
+	Interface string `json:"interface"`
+	Server    string `json:"server"`
+	Tunnel    string `json:"tunnel,omitempty"`
+}
+
+// FirewallStatusResponse is the read-only result of Firewall.Status.
+type FirewallStatusResponse struct {
+	DNSProtectionWanted bool `json:"dns_protection_wanted"`
+	// DNSProtectionActive is read back from pf on macOS (Source "pf") and
+	// the helper's cached view elsewhere or when the read-back failed
+	// (Source "cached").
+	DNSProtectionActive bool             `json:"dns_protection_active"`
+	Permits             []FirewallPermit `json:"permits"`
+	KillSwitchWanted    bool             `json:"kill_switch_wanted"`
+	KillSwitchActive    bool             `json:"kill_switch_active"`
+	LastReconcileError  string           `json:"last_reconcile_error,omitempty"`
+	// DNSReconcileError is the part of LastReconcileError that came from the
+	// DNS protection step (empty when only the kill-switch step failed).
+	DNSReconcileError string `json:"dns_reconcile_error,omitempty"`
+	LastReconcileAt     string           `json:"last_reconcile_at,omitempty"` // RFC3339
+	ReconcileFailures   int              `json:"reconcile_failures,omitempty"`
+	Source              string           `json:"source,omitempty"`
+	ReadBackError       string           `json:"read_back_error,omitempty"`
+}
+
+// ResetDNSRequest is the parameter for Network.ResetDNS.
+type ResetDNSRequest struct {
+	// Force proceeds even while tunnels are connected, disconnecting them
+	// first. Without it the call refuses (Refused in the response).
+	Force bool `json:"force,omitempty"`
+}
+
+// ResetStep is one line of the ResetDNS report.
+type ResetStep struct {
+	Name   string `json:"name"` // stable id: tunnels|firewall|kill_switch|split_dns|dns_restore|dns_cache
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// ResetDNSResponse is the result of Network.ResetDNS. Refused is true when a
+// tunnel is connected and Force was not set; nothing was changed then.
+type ResetDNSResponse struct {
+	Refused          bool        `json:"refused,omitempty"`
+	ConnectedTunnels []string    `json:"connected_tunnels,omitempty"`
+	Steps            []ResetStep `json:"steps,omitempty"`
+}
+
+// HelperRecovery summarises what startup crash recovery cleaned up.
+type HelperRecovery struct {
+	TunnelsRecovered []string `json:"tunnels_recovered,omitempty"`
+	DNSRestored      bool     `json:"dns_restored,omitempty"`
+	FirewallFlushed  bool     `json:"firewall_flushed,omitempty"`
+}
+
+// Any reports whether recovery did anything worth telling the user.
+func (r HelperRecovery) Any() bool {
+	return r.DNSRestored || r.FirewallFlushed
+}
+
+// HelperInfoResponse is the read-only result of Helper.Info.
+type HelperInfoResponse struct {
+	AppVersion      string `json:"app_version"`
+	ProtocolVersion string `json:"protocol_version"`
+	PID             int    `json:"pid"`
+	StartedAt       string `json:"started_at"` // RFC3339
+	// StartMode is "launchd-socket" (launchd started the helper through its
+	// socket), "legacy" (the helper listens on its own socket) or "direct".
+	StartMode  string `json:"start_mode"`
+	SocketPath string `json:"socket_path"`
+	// ActivationReason says why the helper started in that mode, e.g.
+	// "launchd socket activation" or the reason launchd was not used.
+	ActivationReason string          `json:"activation_reason,omitempty"`
+	GUIAttached      bool            `json:"gui_attached"`
+	Recovery         *HelperRecovery `json:"recovery,omitempty"`
 }

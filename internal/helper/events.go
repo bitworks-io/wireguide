@@ -102,6 +102,14 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	result := *primary
 	result.ActiveTunnels = h.manager.ActiveTunnels()
 
+	// Additive DNS/route visibility fields, from the mirrored reconcile view
+	// (never connectMu) and the manager's status-only network detail.
+	dnsWanted, _ := h.wantedState()
+	view := h.viewSnapshot()
+	h.mu.Lock()
+	cfgs := h.copyActiveCfgs()
+	h.mu.Unlock()
+
 	// Snapshot the latency cache once per call so we don't take the
 	// lock per-tunnel inside the loop.
 	h.latencyMu.Lock()
@@ -114,6 +122,7 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	if lat, ok := latencies[result.TunnelName]; ok {
 		result.LatencyMs = lat
 	}
+	h.decorateStatus(&result, cfgs, view, dnsWanted)
 
 	// Include complete per-tunnel status. The same DTO backs both the
 	// frontend's selected-tunnel statistics and `ctl status --json`; copying
@@ -133,6 +142,7 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 			if lat, ok := latencies[ts.TunnelName]; ok {
 				sub.LatencyMs = lat
 			}
+			h.decorateStatus(&sub, cfgs, view, dnsWanted)
 			result.Tunnels = append(result.Tunnels, sub)
 		}
 	}
@@ -325,6 +335,7 @@ func (h *Helper) eventLoop() {
 			// watchdog teardown, direct manager calls), reconcile so DNS
 			// rules and kill-switch permits never outlive their tunnel.
 			h.maybeReconcileOnTunnelChange()
+			h.maybeAlertReconcileFailure()
 			// Skip if nobody's listening — saves the wgctrl syscalls + JSON marshal.
 			if !h.server.HasSubscribers() {
 				lastJSON = nil // force next broadcast (post-resubscribe) to fire

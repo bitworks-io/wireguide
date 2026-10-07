@@ -98,6 +98,42 @@ export class ConnectionStatus {
         }
         if (/** @type {any} */(false)) {
             /**
+             * DNSMode / DNSServers / DNSProtected describe what the tunnel did to
+             * DNS, filled by the helper for connected tunnels (additive, protocol
+             * minor 3). DNSMode is "global" | "split" | "search" | "none" and is the
+             * config's intent unless the platform could not apply it (then "none").
+             * DNSProtected is true only when the firewall's DNS permit set currently
+             * covers this tunnel's servers. Older helpers omit all three.
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_servers"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["dns_protected"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RoutesSkipped lists AllowedIPs ranges the macOS LAN-overlap guard did
+             * not install because they overlap the local network.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["routes_skipped"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * ActiveTunnels lists the names of all currently connected (or connecting)
              * tunnels. Populated by the multi-tunnel manager so the frontend can show
              * which tunnels are active.
@@ -125,14 +161,22 @@ export class ConnectionStatus {
      * @returns {ConnectionStatus}
      */
     static createFrom($$source = {}) {
-        const $$createField10_0 = $$createType0;
-        const $$createField11_0 = $$createType2;
+        const $$createField11_0 = $$createType0;
+        const $$createField13_0 = $$createType0;
+        const $$createField14_0 = $$createType0;
+        const $$createField15_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("dns_servers" in $$parsedSource) {
+            $$parsedSource["dns_servers"] = $$createField11_0($$parsedSource["dns_servers"]);
+        }
+        if ("routes_skipped" in $$parsedSource) {
+            $$parsedSource["routes_skipped"] = $$createField13_0($$parsedSource["routes_skipped"]);
+        }
         if ("active_tunnels" in $$parsedSource) {
-            $$parsedSource["active_tunnels"] = $$createField10_0($$parsedSource["active_tunnels"]);
+            $$parsedSource["active_tunnels"] = $$createField14_0($$parsedSource["active_tunnels"]);
         }
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField11_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField15_0($$parsedSource["tunnels"]);
         }
         return new ConnectionStatus(/** @type {Partial<ConnectionStatus>} */($$parsedSource));
     }

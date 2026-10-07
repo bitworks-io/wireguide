@@ -275,6 +275,7 @@ func (h *Helper) reconcileFirewallErrLocked(reason string) error {
 	snap := h.snapshotConnected()
 	dnsErr := h.applyDNSLocked(reason, snap)
 	ksErr := h.applyKillSwitchLocked(reason, snap)
+	h.mirrorReconcileView(dnsErr, ksErr)
 	h.mu.Lock()
 	if dnsErr == nil && ksErr == nil {
 		h.reconciledKey = snap.key()
@@ -344,6 +345,7 @@ func (h *Helper) applyDNSLocked(reason string, snap connSnapshot) error {
 	}
 	if err != nil {
 		h.dnsApplied = false
+		h.mirrorDNSView()
 		return fmt.Errorf("apply DNS protection: %w", err)
 	}
 	if !h.dnsApplied || !permitsEqual(desired, h.lastPermits) {
@@ -352,6 +354,7 @@ func (h *Helper) applyDNSLocked(reason string, snap connSnapshot) error {
 	}
 	h.dnsApplied = true
 	h.lastPermits = desired
+	h.mirrorDNSView()
 	return nil
 }
 
@@ -464,6 +467,7 @@ func (h *Helper) suspendFirewall() error {
 	// Clear DNS first (on pf it is a sub-anchor of the kill switch).
 	h.dnsApplied = false
 	h.lastPermits = nil
+	h.mirrorDNSView()
 	if setter, ok := h.firewall.(firewall.DNSPermitSetter); ok {
 		if err := setter.SetDNSPermits(nil); err != nil {
 			slog.Warn("suspendFirewall: failed to clear DNS permits", "error", err)

@@ -81,6 +81,13 @@ type DNSSnapshotProvider interface {
 	SavedDNSSnapshot() DNSSnapshot
 }
 
+// SkippedRoutesProvider is an optional interface for platform managers whose
+// AddRoutes leaves out AllowedIPs ranges (the macOS LAN-overlap guard). It
+// only reports what was skipped; it never changes which routes are installed.
+type SkippedRoutesProvider interface {
+	SkippedRoutes() []string
+}
+
 // RoutingStateRestorer is an optional interface that platform managers may
 // implement to accept persisted table/fwmark values during crash recovery.
 // This allows cleanup to use the correct routing table instead of hardcoded

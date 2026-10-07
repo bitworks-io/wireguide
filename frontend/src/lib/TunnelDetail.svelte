@@ -3,7 +3,9 @@
   import Icon from './Icon.svelte';
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
-  import { createEventDispatcher, tick, onDestroy } from 'svelte';
+  import { createEventDispatcher, tick, onDestroy, onMount } from 'svelte';
+  import { Events } from '@wailsio/runtime';
+  import { protectionState, skippedRouteRows, skippedRoutesLabel, connectPreview } from './dnsTruth.js';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
   import VerifyPanel from './VerifyPanel.svelte';
@@ -20,6 +22,25 @@
   let detail = null;
   let loading = false;
   let error = '';
+
+  // Whether the user turned DNS protection on (Settings). Combined with the
+  // helper's live per-tunnel dns_protected flag it decides the hero chip:
+  // "protected" vs "intended, not applied".
+  let dnsWanted = false;
+  // AllowedIPs ranges the macOS connect path will not route (LAN overlap),
+  // for the pre-connect preview. Computed by the backend with the same rule
+  // the connect uses; [] on other platforms.
+  let lanOverlaps = [];
+  let splitSupported = true;
+  let settingsUnsub = null;
+  onMount(() => {
+    TunnelService.GetSettings().then((s) => { dnsWanted = !!s?.dns_protection; }).catch(() => {});
+    settingsUnsub = Events.On('settings_changed', (event) => {
+      const p = event?.data || {};
+      if (p.dns_protection != null) dnsWanted = !!p.dns_protection;
+    });
+  });
+  onDestroy(() => { if (settingsUnsub) settingsUnsub(); });
 
   // Track the last name we issued loadDetail for. The
   // selectedTunnel store emits a fresh object reference on every
@@ -55,6 +76,7 @@
     latencyTargetValue = $selectedTunnel.latency_probe_target || '';
     latencyTargetSaved = latencyTargetValue;
     latencyTargetError = '';
+    lanOverlaps = [];
     loadDetail($selectedTunnel.name);
   }
 
@@ -188,6 +210,13 @@
   // list row, `ctl status` and the tray tooltip always agree.
   $: dnsChipMode = $selectedTunnel?.dns_mode || '';
   $: dnsDomains = $selectedTunnel?.dns_domains || [];
+  // Live truth from the helper (read once connected): is this tunnel's DNS
+  // actually pinned by the firewall, and which AllowedIPs were skipped.
+  $: protState = isConnected ? protectionState(status, dnsWanted) : '';
+  $: skippedRows = isConnected
+    ? skippedRouteRows(status).filter((r) => r.tunnel === $selectedTunnel?.name)
+    : [];
+  $: preview = connectPreview(detail, lanOverlaps, splitSupported);
   // Why automation is / isn't acting on this tunnel (same one-liner as the
   // Automation editor strip and the list row).
   $: autoVerdict = verdictFor($automationPreview, $selectedTunnel?.name);
@@ -262,6 +291,17 @@
     try {
       detail = await TunnelService.GetTunnelDetail(name);
       error = '';
+      try {
+        splitSupported = (await TunnelService.SplitDNSSupported()) !== false;
+      } catch (_) {
+        splitSupported = true;
+      }
+      try {
+        const overlaps = (await TunnelService.GetLANOverlaps(name)) || [];
+        if (name === lastLoadedName) lanOverlaps = overlaps;
+      } catch (_) {
+        lanOverlaps = [];
+      }
     } catch (e) {
       detail = null;
       // Surface the failure rather than silently leaving the panel
@@ -480,6 +520,21 @@
             </span>
           </div>
         {/if}
+        {#if protState}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-prot-{protState}"
+              title={$t(protState === 'protected' ? 'tunnel.dns_protected_hint' : 'tunnel.dns_intended_hint')}>
+              {$t(protState === 'protected' ? 'tunnel.dns_protected' : 'tunnel.dns_intended')}
+            </span>
+          </div>
+        {/if}
+        {#if skippedRows.length > 0}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-skipped" title={$t('tunnel.routes_skipped_hint')}>
+              {skippedRoutesLabel($t, skippedRows.length)}
+            </span>
+          </div>
+        {/if}
         {#if autoLine}
           <div class="hero-dns-line">
             <span class="dns-chip auto-chip auto-chip-{verdictTone(autoVerdict)}" title={autoLine}>{autoLine}</span>
@@ -507,6 +562,18 @@
         </button>
       {/if}
     </div>
+
+    <!-- PRE-CONNECT PREVIEW: what connecting will change, from the config -->
+    {#if !isConnected && !isConnecting && preview.length > 0}
+      <details class="connect-preview">
+        <summary>{$t('tunnel.preview_title')}</summary>
+        <ul>
+          {#each preview as p}
+            <li>{$t(p.key, p.params)}</li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
 
     <!-- STATS HERO: big numbers, colored icons, 3-up grid -->
     {#if isConnected && status.state === 'connected'}
@@ -928,6 +995,28 @@
     vertical-align: top;
   }
   .dns-chip-split { color: var(--blue, var(--accent)); }
+  .dns-chip-prot-protected { color: var(--green); }
+  .dns-chip-prot-intended { color: var(--orange, #FF9500); }
+  .dns-chip-skipped { color: var(--orange, #FF9500); }
+  .connect-preview {
+    margin: -6px 0 14px;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    font: 400 12px/17px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .connect-preview summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .connect-preview ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .connect-preview li { margin: 2px 0; }
   .auto-chip-warn { color: var(--orange, #FF9500); }
   .hero-endpoint {
     color: var(--text-secondary);

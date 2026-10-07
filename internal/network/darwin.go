@@ -68,6 +68,11 @@ type DarwinManager struct {
 	// to the upstream interface. Disabled by default.
 	pinInterface bool
 
+	// skippedRoutes are the AllowedIPs ranges AddRoutes did not install
+	// because they overlap the local network (status visibility only).
+	// Guarded by mu.
+	skippedRoutes []string
+
 	// Route-monitor subscription key (the tunnel interface name). The
 	// underlying `route -n monitor` subprocess is process-wide; this
 	// DarwinManager just registers/unregisters its reapply callback
@@ -163,6 +168,9 @@ func (m *DarwinManager) AddRoutes(ifaceName string, allowedIPs []string, fullTun
 		slog.Info("Table=off: skipping route installation", "interface", ifaceName)
 		return nil
 	}
+	m.mu.Lock()
+	m.skippedRoutes = nil
+	m.mu.Unlock()
 	// Sort by prefix length descending (longest first)
 	sorted := sortAllowedIPs(allowedIPs)
 
@@ -184,6 +192,9 @@ func (m *DarwinManager) AddRoutes(ifaceName string, allowedIPs []string, fullTun
 		if ip, overlaps := LocalNetworkOverlap(cidr); overlaps {
 			slog.Warn("AllowedIPs overlaps local network; not routing it through the tunnel",
 				"interface", ifaceName, "cidr", cidr, "local_address", ip.String())
+			m.mu.Lock()
+			m.skippedRoutes = append(m.skippedRoutes, cidr)
+			m.mu.Unlock()
 			continue
 		}
 		// Non-default route: skip if already pointing at this interface (idempotent)
@@ -1680,4 +1691,13 @@ func prefixLen(cidr string) int {
 	var n int
 	fmt.Sscanf(cidr[idx+1:], "%d", &n)
 	return n
+}
+
+// SkippedRoutes returns the AllowedIPs ranges the last AddRoutes call left
+// out because they overlap the local network. Read-only; it does not change
+// which routes are installed.
+func (m *DarwinManager) SkippedRoutes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.skippedRoutes...)
 }

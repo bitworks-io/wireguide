@@ -74,6 +74,8 @@ func Run(args []string) int {
 		return cmdRoutes(rest)
 	case "verify":
 		return cmdVerify(rest)
+	case "reset-dns":
+		return cmdResetDNS(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -117,6 +119,9 @@ Settings & diagnostics:
   wireguide ctl set healthcheck <on|off>      handshake monitor + auto-reconnect
   wireguide ctl set pin-interface <on|off>    bind sockets to the upstream interface
   wireguide ctl set loglevel <debug|info|warn|error>
+  wireguide ctl reset-dns [--force]            remove WireGuide's firewall rules and split-DNS entries and
+                                               restore DNS (refuses while a tunnel is up; --force
+                                               disconnects tunnels first)
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
   wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]

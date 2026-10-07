@@ -7,6 +7,213 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * FirewallPermit is one DNS permit the firewall currently allows. Interface
+ * is "" for "any interface". Tunnel names the tunnel the resolver belongs to
+ * ("" when unknown).
+ */
+export class FirewallPermit {
+    /**
+     * Creates a new FirewallPermit instance.
+     * @param {Partial<FirewallPermit>} [$$source = {}] - The source object to create the FirewallPermit.
+     */
+    constructor($$source = {}) {
+        if (!("interface" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["interface"] = "";
+        }
+        if (!("server" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["server"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["tunnel"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallPermit instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallPermit}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FirewallPermit(/** @type {Partial<FirewallPermit>} */($$parsedSource));
+    }
+}
+
+/**
+ * FirewallStatusResponse is the read-only result of Firewall.Status.
+ */
+export class FirewallStatusResponse {
+    /**
+     * Creates a new FirewallStatusResponse instance.
+     * @param {Partial<FirewallStatusResponse>} [$$source = {}] - The source object to create the FirewallStatusResponse.
+     */
+    constructor($$source = {}) {
+        if (!("dns_protection_wanted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["dns_protection_wanted"] = false;
+        }
+        if (!("dns_protection_active" in $$source)) {
+            /**
+             * DNSProtectionActive is read back from pf on macOS (Source "pf") and
+             * the helper's cached view elsewhere or when the read-back failed
+             * (Source "cached").
+             * @member
+             * @type {boolean}
+             */
+            this["dns_protection_active"] = false;
+        }
+        if (!("permits" in $$source)) {
+            /**
+             * @member
+             * @type {FirewallPermit[]}
+             */
+            this["permits"] = [];
+        }
+        if (!("kill_switch_wanted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["kill_switch_wanted"] = false;
+        }
+        if (!("kill_switch_active" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["kill_switch_active"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_reconcile_error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DNSReconcileError is the part of LastReconcileError that came from the
+             * DNS protection step (empty when only the kill-switch step failed).
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_reconcile_error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RFC3339
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_reconcile_at"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["reconcile_failures"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["source"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["read_back_error"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallStatusResponse instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallStatusResponse}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("permits" in $$parsedSource) {
+            $$parsedSource["permits"] = $$createField2_0($$parsedSource["permits"]);
+        }
+        return new FirewallStatusResponse(/** @type {Partial<FirewallStatusResponse>} */($$parsedSource));
+    }
+}
+
+/**
+ * HelperRecovery summarises what startup crash recovery cleaned up.
+ */
+export class HelperRecovery {
+    /**
+     * Creates a new HelperRecovery instance.
+     * @param {Partial<HelperRecovery>} [$$source = {}] - The source object to create the HelperRecovery.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["tunnels_recovered"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["dns_restored"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["firewall_flushed"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperRecovery instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperRecovery}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tunnels_recovered" in $$parsedSource) {
+            $$parsedSource["tunnels_recovered"] = $$createField0_0($$parsedSource["tunnels_recovered"]);
+        }
+        return new HelperRecovery(/** @type {Partial<HelperRecovery>} */($$parsedSource));
+    }
+}
+
+/**
  * LogEntry is a single structured log record forwarded from the helper
  * to the GUI (and from the GUI to the frontend LogViewer). We keep it flat
  * — no nested attrs — because the viewer just renders a one-line per entry.
@@ -61,6 +268,106 @@ export class LogEntry {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new LogEntry(/** @type {Partial<LogEntry>} */($$parsedSource));
+    }
+}
+
+/**
+ * ResetDNSResponse is the result of Network.ResetDNS. Refused is true when a
+ * tunnel is connected and Force was not set; nothing was changed then.
+ */
+export class ResetDNSResponse {
+    /**
+     * Creates a new ResetDNSResponse instance.
+     * @param {Partial<ResetDNSResponse>} [$$source = {}] - The source object to create the ResetDNSResponse.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["refused"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["connected_tunnels"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {ResetStep[] | undefined}
+             */
+            this["steps"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResetDNSResponse instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResetDNSResponse}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType2;
+        const $$createField2_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("connected_tunnels" in $$parsedSource) {
+            $$parsedSource["connected_tunnels"] = $$createField1_0($$parsedSource["connected_tunnels"]);
+        }
+        if ("steps" in $$parsedSource) {
+            $$parsedSource["steps"] = $$createField2_0($$parsedSource["steps"]);
+        }
+        return new ResetDNSResponse(/** @type {Partial<ResetDNSResponse>} */($$parsedSource));
+    }
+}
+
+/**
+ * ResetStep is one line of the ResetDNS report.
+ */
+export class ResetStep {
+    /**
+     * Creates a new ResetStep instance.
+     * @param {Partial<ResetStep>} [$$source = {}] - The source object to create the ResetStep.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * stable id: tunnels|firewall|kill_switch|split_dns|dns_restore|dns_cache
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("ok" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["ok"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["detail"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResetStep instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResetStep}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ResetStep(/** @type {Partial<ResetStep>} */($$parsedSource));
     }
 }
 
@@ -124,3 +431,10 @@ export class SettingsChangedPayload {
         return new SettingsChangedPayload(/** @type {Partial<SettingsChangedPayload>} */($$parsedSource));
     }
 }
+
+// Private type creation functions
+const $$createType0 = FirewallPermit.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = ResetStep.createFrom;
+const $$createType4 = $Create.Array($$createType3);
