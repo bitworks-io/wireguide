@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -234,6 +235,18 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		h.latencyByTunnel[req.NewName] = lat
 	}
 	h.latencyMu.Unlock()
+
+	// Per-tunnel bookkeeping added for automation visibility: the health
+	// override (under mu, like activeCfgs), the last automation decision and
+	// rules digest, and the change reasons.
+	h.mu.Lock()
+	if v, ok := h.healthOverride[req.OldName]; ok {
+		delete(h.healthOverride, req.OldName)
+		h.healthOverride[req.NewName] = v
+	}
+	h.mu.Unlock()
+	h.renameAutomationState(req.OldName, req.NewName)
+	h.renameChangeReasons(req.OldName, req.NewName)
 	return ipc.Empty{}, nil
 }
 
@@ -265,7 +278,13 @@ func (h *Helper) doConnectHeld(cfg *domain.WireGuardConfig) error {
 	h.activeCfgs[cfg.Name] = cfg
 	h.mu.Unlock()
 
-	if err := h.manager.Connect(cfg); err != nil {
+	var connectErr error
+	if h.tunnelConnectFn != nil {
+		connectErr = h.tunnelConnectFn(context.Background(), cfg)
+	} else {
+		connectErr = h.manager.Connect(cfg)
+	}
+	if err := connectErr; err != nil {
 		h.mu.Lock()
 		delete(h.activeCfgs, cfg.Name)
 		if prev, ok := prevCfgs[cfg.Name]; ok {
@@ -398,9 +417,13 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 		}
 	}
 
+	commitReason, undoReason := h.beginConnectReason(req.Config.Name, domain.ChangeReasonUser)
 	if err := h.doConnectHeld(req.Config); err != nil {
+		undoReason()
 		return nil, err
 	}
+	commitReason()
+	h.setHealthOverride(req.Config.Name, req.HealthCheck)
 
 	h.applyPostConnectFirewall(req.Config)
 	// An explicit connect overrides automation until the network changes.
@@ -461,12 +484,17 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 	// runs on EVERY path, including a partial legacy failure, so the
 	// tunnels that did go down never keep permits or DNS rules.
 	if tunnelName != "" {
+		undoReason := h.beginDisconnectReason(tunnelName, domain.ChangeReasonUser)
 		if err := h.manager.DisconnectTunnel(tunnelName); err != nil {
+			if !h.tunnelGone(tunnelName) {
+				undoReason()
+			}
 			h.reconcileFirewallLocked("disconnect-failed")
 			return nil, err
 		}
 		h.mu.Lock()
 		delete(h.activeCfgs, tunnelName)
+		h.dropHealthOverrideLocked(tunnelName)
 		h.mu.Unlock()
 		h.wifiMu.Lock()
 		delete(h.autoConnectedBy, tunnelName)
@@ -479,7 +507,7 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		h.recordManualOverride(tunnelName, true)
 	} else {
 		// Legacy "no name" path: tear down EVERY active tunnel.
-		if err := h.disconnectAllHeld(); err != nil {
+		if err := h.disconnectAllHeld(domain.ChangeReasonUser); err != nil {
 			h.reconcileFirewallLocked("legacy-disconnect-partial")
 			return nil, err
 		}
@@ -499,12 +527,17 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 // successful per-tunnel disconnect drops its cache entry; partial failures
 // leave the still-up tunnels intact in activeCfgs so the reconnect monitor
 // can still recover them. Returns the first error. Caller MUST hold
-// h.connectMu and runs the firewall reconcile itself.
-func (h *Helper) disconnectAllHeld() error {
+// h.connectMu and runs the firewall reconcile itself. reason is recorded as
+// each tunnel's end reason (user for a disconnect, recovery for ResetDNS).
+func (h *Helper) disconnectAllHeld(reason string) error {
 	toDisconnect := h.manager.ActiveTunnels()
 	var firstErr error
 	for _, name := range toDisconnect {
+		undoReason := h.beginDisconnectReason(name, reason)
 		if err := h.manager.DisconnectTunnel(name); err != nil {
+			if !h.tunnelGone(name) {
+				undoReason()
+			}
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -514,6 +547,7 @@ func (h *Helper) disconnectAllHeld() error {
 		}
 		h.mu.Lock()
 		delete(h.activeCfgs, name)
+		h.dropHealthOverrideLocked(name)
 		h.mu.Unlock()
 		h.wifiMu.Lock()
 		delete(h.autoConnectedBy, name)

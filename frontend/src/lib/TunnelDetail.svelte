@@ -8,6 +8,7 @@
   import { protectionState, skippedRouteRows, skippedRoutesLabel, connectPreview } from './dnsTruth.js';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
+  import HealthCheckOverride from './HealthCheckOverride.svelte';
   import VerifyPanel from './VerifyPanel.svelte';
   import { automationPreview } from '../stores/automation.js';
   import { verdictFor, verdictText, verdictTone } from './automationLine.js';
@@ -724,6 +725,7 @@
 
     {#key $selectedTunnel.name}
       <PingHealthSettings {TunnelService} tunnelName={$selectedTunnel.name} />
+      <HealthCheckOverride {TunnelService} tunnelName={$selectedTunnel.name} />
     {/key}
 
     <!-- SECONDARY ACTIONS: 4-up icon button grid -->

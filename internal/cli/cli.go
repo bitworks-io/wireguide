@@ -110,9 +110,12 @@ Automation (per-tunnel connect/disconnect rules):
                                           append a rule; <cond> is one of:
                                             ssid:<wifi-name>   subnet:<CIDR>
                                             mac:<gateway-MAC>  else
+                                            'ssid:<a>|<b>'     any of several Wi-Fi names
+                                            medium:<wifi|wired|tethered>  connection type
                                           or negated: not-ssid:<name> not-subnet:<CIDR>
-                                            not-mac:<MAC> (matches only when the value is
-                                            known and different; unknown holds, see README)
+                                            not-mac:<MAC> 'not-ssid:<a>|<b>' not-medium:<m>
+                                            (matches only when the value is known and
+                                            different; unknown holds, see README)
   wireguide ctl automation rm <name> <n>  remove rule number <n> (from 'rules')
 
 Settings & diagnostics:
@@ -142,6 +145,8 @@ Examples:
   wireguide ctl automation add work connect else
   wireguide ctl automation add vpn disconnect ssid:HomeWiFi
   wireguide ctl automation add vpn connect not-ssid:HomeWiFi
+  wireguide ctl automation add vpn disconnect 'ssid:HomeWiFi|HomeWiFi-5G'
+  wireguide ctl automation add vpn connect not-medium:wired
 
 WireGuide must be running for connect/disconnect/status — start it with
 'wireguide ctl start' (or by opening the app). Nothing else starts it for you.
@@ -439,7 +444,13 @@ func cmdConnect(args []string) int {
 	// Connect can take a while (handshake, route setup).
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := c.CallWithContext(ctx, ipc.MethodConnect, ipc.ConnectRequest{Config: cfg}, nil); err != nil {
+	// Carry the tunnel's health-check override like the GUI does.
+	req := ipc.ConnectRequest{Config: cfg}
+	if meta, merr := store.LoadMeta(name); merr == nil && meta != nil &&
+		(meta.HealthCheck == storage.HealthCheckOn || meta.HealthCheck == storage.HealthCheckOff) {
+		req.HealthCheck = meta.HealthCheck
+	}
+	if err := c.CallWithContext(ctx, ipc.MethodConnect, req, nil); err != nil {
 		fmt.Fprintln(os.Stderr, "connect:", err)
 		return 1
 	}
@@ -559,7 +570,11 @@ func automationPreview() int {
 	if !resp.Settled {
 		settle = fmt.Sprintf("settling, %ds left (negated rules hold)", resp.SettleRemainingSec)
 	}
-	fmt.Printf("                 primary=%s wifi=%v online=%v  %s\n", iface, resp.PrimaryIsWiFi, resp.Online, settle)
+	medium := resp.Medium
+	if medium == "" {
+		medium = "(unknown)"
+	}
+	fmt.Printf("                 primary=%s wifi=%v medium=%s online=%v  %s\n", iface, resp.PrimaryIsWiFi, medium, resp.Online, settle)
 	if len(resp.Tunnels) == 0 {
 		fmt.Println("no tunnels have automation rules")
 		return 0
@@ -621,7 +636,18 @@ func formatCondition(c wifi.Condition) string {
 	}
 	switch c.Type {
 	case wifi.CondSSID:
+		if set := wifi.SSIDSet(c); len(c.SSIDs) > 0 && len(set) > 1 {
+			in := " in "
+			if c.Negate {
+				in = " not in "
+			}
+			return "ssid" + in + "{" + strings.Join(set, ", ") + "}"
+		} else if len(c.SSIDs) > 0 && len(set) == 1 {
+			return "ssid" + op + set[0]
+		}
 		return "ssid" + op + c.SSID
+	case wifi.CondMedium:
+		return "medium" + op + c.Medium
 	case wifi.CondSubnet:
 		return "subnet" + op + c.Subnet
 	case wifi.CondNetwork:
@@ -656,10 +682,12 @@ func automationRules(args []string) int {
 }
 
 // parseCondition turns "ssid:home" / "subnet:10.0.0.0/24" / "mac:.." /
-// "else" into a wifi.Condition. A "not-" prefix on ssid/subnet/mac
-// ("not-ssid:home") negates it: it matches only when the value is known
-// and different (a blank SSID mid-roam holds instead of matching).
-// "not-else" is rejected. Returns an error for malformed values.
+// "medium:wired" / "else" into a wifi.Condition. "ssid:A|B" matches any of
+// several SSIDs (one name is stored as ssid, several as ssids). A "not-"
+// prefix on ssid/subnet/mac/medium ("not-ssid:home") negates it: it
+// matches only when the value is known and different (a blank SSID
+// mid-roam holds instead of matching). "not-else" is rejected. Returns an
+// error for malformed values.
 func parseCondition(spec string) (wifi.Condition, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "else" || spec == "otherwise" || spec == "none" {
@@ -670,7 +698,7 @@ func parseCondition(spec string) (wifi.Condition, error) {
 	}
 	kind, val, ok := strings.Cut(spec, ":")
 	if !ok || strings.TrimSpace(val) == "" {
-		return wifi.Condition{}, fmt.Errorf("condition %q must be ssid:<name>, subnet:<CIDR>, mac:<MAC> or else (prefix not- to negate)", spec)
+		return wifi.Condition{}, fmt.Errorf("condition %q must be ssid:<name>[|<name>...], subnet:<CIDR>, mac:<MAC>, medium:<wifi|wired|tethered> or else (prefix not- to negate)", spec)
 	}
 	negate := false
 	if rest, found := strings.CutPrefix(kind, "not-"); found {
@@ -680,7 +708,29 @@ func parseCondition(spec string) (wifi.Condition, error) {
 	val = strings.TrimSpace(val)
 	switch kind {
 	case "ssid":
-		return wifi.Condition{Type: wifi.CondSSID, Negate: negate, SSID: val}, nil
+		parts := strings.Split(val, "|")
+		names := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				return wifi.Condition{}, fmt.Errorf("ssid list %q has an empty name", val)
+			}
+			names = append(names, p)
+		}
+		if len(names) == 1 {
+			return wifi.Condition{Type: wifi.CondSSID, Negate: negate, SSID: names[0]}, nil
+		}
+		return wifi.Condition{Type: wifi.CondSSID, Negate: negate, SSIDs: names}, nil
+	case "medium":
+		m := strings.ToLower(val)
+		if strings.Contains(m, "|") {
+			return wifi.Condition{}, fmt.Errorf("medium takes one value (wifi, wired or tethered), got %q", val)
+		}
+		c := wifi.Condition{Type: wifi.CondMedium, Negate: negate, Medium: m}
+		if err := c.Validate(); err != nil {
+			return wifi.Condition{}, fmt.Errorf("medium %q must be wifi, wired or tethered", val)
+		}
+		return c, nil
 	case "subnet":
 		if _, _, err := net.ParseCIDR(val); err != nil {
 			return wifi.Condition{}, fmt.Errorf("subnet %q is not a valid CIDR (e.g. 192.168.0.0/24)", val)
@@ -698,7 +748,7 @@ func parseCondition(spec string) (wifi.Condition, error) {
 		}
 		return wifi.Condition{Type: wifi.CondNetwork, Negate: negate, GatewayMAC: strings.ToLower(val)}, nil
 	default:
-		return wifi.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/else, or not-ssid/not-subnet/not-mac)", kind)
+		return wifi.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/medium/else, or not-ssid/not-subnet/not-mac/not-medium)", kind)
 	}
 }
 

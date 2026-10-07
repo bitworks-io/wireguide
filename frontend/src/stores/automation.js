@@ -6,6 +6,10 @@ export const automationPreview = writable(null);
 // Wall-clock time of the last successful poll, shown as "checked HH:MM:SS"
 // where polling is slow (Windows/Linux).
 export const automationCheckedAt = writable(0);
+// Location Services status of the GUI process (authorized / denied /
+// restricted / not_determined / unknown). Only fetched while the preview
+// reports an unreadable Wi-Fi name, so a healthy network costs nothing.
+export const locationAuth = writable('unknown');
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
 // 2 s on macOS while the window is visible (a settle countdown / manual
@@ -22,6 +26,9 @@ export async function refreshAutomationPreview() {
   inflight = true;
   try {
     const p = await service.GetAutomationPreview();
+    if (p && p.ssid_unknown && service.GetLocationAuthorization) {
+      try { locationAuth.set((await service.GetLocationAuthorization()) || 'unknown'); } catch (_) { locationAuth.set('unknown'); }
+    }
     const json = JSON.stringify(p);
     // Only notify subscribers on a real change; a 2 s poll of an idle
     // network would otherwise re-render every chip each tick.

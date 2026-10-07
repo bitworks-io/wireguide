@@ -26,7 +26,7 @@ type eventBridge struct {
 	// that were started or ended by the helper itself (auto-reconnect on
 	// wake, wifi rules, health-check recovery). nil when the bridge runs
 	// without a history store.
-	onReconcileHistory func(activeNames []string, rx, tx map[string]int64, reason string)
+	onReconcileHistory func(in wgapp.HistoryReconcile)
 	// onQuitRequested terminates the app. Fired for ipc.EventQuit, which
 	// the helper broadcasts when someone runs `wireguide ctl stop`.
 	onQuitRequested func()
@@ -43,7 +43,7 @@ func newEventBridge(
 	app *application.App,
 	clients *ipc.ClientHolder,
 	onStatusChange func(activeNames []string, handshakeMap map[string]bool),
-	onReconcileHistory func(activeNames []string, rx, tx map[string]int64, reason string),
+	onReconcileHistory func(in wgapp.HistoryReconcile),
 	onQuitRequested func(),
 ) *eventBridge {
 	return &eventBridge{
@@ -125,17 +125,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 				b.onStatusChange(status.ActiveTunnels, hsMap)
 			}
 			if b.onReconcileHistory != nil {
-				rx := make(map[string]int64, len(status.Tunnels)+1)
-				tx := make(map[string]int64, len(status.Tunnels)+1)
-				for _, ts := range status.Tunnels {
-					rx[ts.TunnelName] = ts.RxBytes
-					tx[ts.TunnelName] = ts.TxBytes
-				}
-				if status.TunnelName != "" {
-					rx[status.TunnelName] = status.RxBytes
-					tx[status.TunnelName] = status.TxBytes
-				}
-				b.onReconcileHistory(status.ActiveTunnels, rx, tx, "")
+				b.onReconcileHistory(historyInput(status, getCurrentSSID()))
 			}
 		}
 	case ipc.EventReconnect:
@@ -167,6 +157,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 		if err := json.Unmarshal(params, &payload); err != nil {
 			slog.Debug("event bridge: unmarshal wifi_ssid failed", "error", err)
 		} else {
+			setCurrentSSID(payload.NewSSID)
 			b.app.Event.Emit("wifi_ssid", payload)
 		}
 	case ipc.EventAutoConnect:
@@ -180,6 +171,19 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			b.app.Event.Emit("auto_connected", payload)
 			if b.notify != nil {
 				b.notify.onAutoConnected(payload.TunnelName)
+			}
+		}
+	case ipc.EventAutomation:
+		// An Automation decision (protocol minor >= 4). The helper sends it
+		// before the matching auto_connect, so the notifier can name the
+		// rule and SSID before the generic event arrives.
+		var payload ipc.AutomationEventPayload
+		if err := json.Unmarshal(params, &payload); err != nil {
+			slog.Debug("event bridge: unmarshal automation failed", "error", err)
+		} else {
+			b.app.Event.Emit("automation_event", payload)
+			if b.notify != nil {
+				b.notify.onAutomation(payload)
 			}
 		}
 	case ipc.EventQuit:
@@ -227,4 +231,42 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			}
 		}
 	}
+}
+
+// historyInput turns one status event into the history reconcile input:
+// per-tunnel counters, the helper's start reasons (last_change_reason) and
+// recent end reasons, and the GUI's current SSID.
+func historyInput(status domain.ConnectionStatus, ssid string) wgapp.HistoryReconcile {
+	in := wgapp.HistoryReconcile{
+		Active: status.ActiveTunnels,
+		Rx:     make(map[string]int64, len(status.Tunnels)+1),
+		Tx:     make(map[string]int64, len(status.Tunnels)+1),
+		SSID:   ssid,
+	}
+	add := func(ts domain.ConnectionStatus) {
+		in.Rx[ts.TunnelName] = ts.RxBytes
+		in.Tx[ts.TunnelName] = ts.TxBytes
+		if ts.LastChangeReason != "" {
+			if in.StartReasons == nil {
+				in.StartReasons = map[string]string{}
+			}
+			in.StartReasons[ts.TunnelName] = ts.LastChangeReason
+		}
+	}
+	for _, ts := range status.Tunnels {
+		add(ts)
+	}
+	if status.TunnelName != "" {
+		add(status)
+	}
+	for name, c := range status.RecentDisconnects {
+		if c.Reason == "" {
+			continue
+		}
+		if in.EndReasons == nil {
+			in.EndReasons = map[string]string{}
+		}
+		in.EndReasons[name] = c.Reason
+	}
+	return in
 }

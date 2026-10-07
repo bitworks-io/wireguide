@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/network"
 	"github.com/korjwl1/wireguide/internal/tunnel"
@@ -70,7 +71,7 @@ func (h *Helper) resetDNSHeld(force bool) ipc.ResetDNSResponse {
 		if h.monitor != nil {
 			h.monitor.CancelRetry()
 		}
-		err := h.disconnectAllHeld()
+		err := h.disconnectAllHeld(domain.ChangeReasonRecovery)
 		h.reconcileFirewallLocked("reset-dns-disconnect")
 		h.cancelLegacyRetryIfIdle()
 		step("tunnels", err, "disconnected: "+strings.Join(connected, ", "))

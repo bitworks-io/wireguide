@@ -28,7 +28,20 @@
     "reason_reconnect": "재연결됨",
     "reason_app_quit": "앱 종료",
     "reason_health_check": "자동 복구",
-    "reason_error": "오류"
+    "reason_error": "오류",
+    "started_by": "시작 원인",
+    "ssid": "Wi-Fi 네트워크",
+    "reason_automation": "자동화로 연결 해제됨",
+    "reason_wake": "깨어난 후 재연결됨",
+    "reason_network_change": "네트워크 변경 후 재연결됨",
+    "reason_recovery": "복구로 초기화됨",
+    "start_user": "사용자",
+    "start_automation": "자동화",
+    "start_wake": "잠자기 해제",
+    "start_network_change": "네트워크 변경",
+    "start_health_check": "상태 점검",
+    "start_reconnect": "재연결",
+    "start_recovery": "복구"
   },
   "tunnel": {
     "list_title": "터널",
@@ -86,7 +99,12 @@
     "routes_skipped_one": "경로 {n}개 건너뜀(LAN과 겹침)",
     "routes_skipped_other": "경로 {n}개 건너뜀(LAN과 겹침)",
     "routes_skipped_hint": "이 AllowedIPs 범위는 로컬 네트워크와 겹치므로 터널로 라우팅되지 않으며 해당 트래픽은 로컬에 남습니다.",
-    "preview_title": "연결하면 달라지는 점"
+    "preview_title": "연결하면 달라지는 점",
+    "health_check_override": "핸드셰이크 상태 점검",
+    "health_check_inherit": "설정 따르기",
+    "health_check_on": "켜기",
+    "health_check_off": "끄기",
+    "health_check_override_hint": "이 터널에만 설정의 상태 점검을 덮어씁니다. 깨어난 후 90초 동안과 오프라인일 때는 점검을 쉽니다."
   },
   "import": {
     "zip_result_title": "가져오기 결과",
@@ -305,7 +323,10 @@
   "wifi_permission": {
     "title": "위치 서비스 권한 필요",
     "desc": "Wi-Fi 자동 연결 규칙이 동작하려면 현재 Wi-Fi 이름에 접근할 수 있어야 합니다. System Settings → 개인 정보 보호 및 보안 → 위치 서비스에서 허용해주세요.",
-    "open_settings": "설정 열기"
+    "open_settings": "설정 열기",
+    "desc_denied": "WireGuide의 위치 서비스가 거부되어 Wi-Fi 이름을 읽을 수 없고 '아닌 경우' SSID 규칙이 보류됩니다. 시스템 설정 → 개인정보 보호 및 보안 → 위치 서비스에서 허용하세요.",
+    "desc_restricted": "이 Mac에서 위치 서비스가 제한되어 있어(예: 프로파일) WireGuide가 Wi-Fi 이름을 읽을 수 없고 '아닌 경우' SSID 규칙이 보류됩니다.",
+    "desc_not_determined": "WireGuide의 위치 서비스가 아직 허용되지 않아 Wi-Fi 이름을 읽을 수 없습니다. 시스템 설정 → 개인정보 보호 및 보안 → 위치 서비스에서 허용하세요."
   },
   "automation": {
     "title": "자동화",
@@ -333,7 +354,7 @@
     "negated_hint": "\"아님\"은 값을 알 수 있고 다를 때만 일치하며, 알 수 없는 동안에는 터널을 그대로 둡니다.",
     "why": {
       "title": "자동화 상태",
-      "net_ssid": "네트워크: {ssid}",
+      "net_ssid": "네트워크: Wi-Fi: {ssid}",
       "net_unknown": "Wi-Fi 이름을 알 수 없음 — 위치 서비스가 꺼져 있을 수 있습니다. \"아님\" 규칙은 보류됩니다",
       "net_no_wifi": "네트워크: Wi-Fi 없음 (이더넷/테더링)",
       "net_offline": "네트워크: 오프라인",
@@ -358,7 +379,32 @@
       "v_paused_disconnected": "일시 중지 — 직접 연결을 해제함. 네트워크가 바뀌면 다시 적용됩니다",
       "v_overlap": "연결하지 않음 — {cidr}이(가) 현재 LAN과 겹칩니다",
       "v_no_match": "현재 네트워크에 맞는 규칙이 없습니다",
-      "toast_connected": "자동화가 {name} 터널을 연결했습니다"
+      "toast_connected": "자동화가 {name} 터널을 연결했습니다",
+      "net_wired": "네트워크: 유선",
+      "net_tethered": "네트워크: 테더링",
+      "cond_ssid_in": "SSID가 {value} 중 하나",
+      "cond_ssid_not_in": "SSID가 {value} 중 어느 것도 아님",
+      "cond_medium_is": "연결 유형이 {value}",
+      "cond_medium_not": "연결 유형이 {value} 아님",
+      "net_unknown_denied": "WireGuide의 위치 서비스가 거부됨 — Wi-Fi 이름을 알 수 없어 '아닌 경우' SSID 규칙이 보류됩니다",
+      "net_unknown_not_allowed": "WireGuide의 위치 서비스가 아직 허용되지 않음 — Wi-Fi 이름을 알 수 없어 '아닌 경우' SSID 규칙이 보류됩니다",
+      "net_unknown_roaming": "Wi-Fi 이름을 잠시 확인할 수 없음 (재연결 또는 로밍 중) — '아닌 경우' 규칙이 보류됩니다"
+    },
+    "cond_medium": "연결 유형이",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "유선 (이더넷)",
+    "medium_tethered": "테더링 (휴대폰 USB/블루투스)",
+    "ssid_add_placeholder": "추가…",
+    "ssid_tags_hint": "Wi-Fi 이름 — Enter 또는 쉼표로 더 추가할 수 있으며, 그중 하나와 일치하면 규칙이 적용됩니다",
+    "remove_ssid": "{ssid} 제거",
+    "safety": {
+      "removed": "규칙을 삭제했습니다",
+      "undo": "실행 취소",
+      "restore_open": "이전 규칙 복원…",
+      "restore": "복원",
+      "no_backups": "저장된 사본이 아직 없습니다.",
+      "rule_count": "규칙 {n}개",
+      "external": "앱 밖에서 {name}의 규칙이 변경되었습니다"
     }
   },
   "ping_health": {

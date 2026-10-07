@@ -7,6 +7,91 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * AutomationEventPayload is broadcast as EventAutomation (protocol minor
+ * >= 4). RuleIndex is the deciding rule's position in the tunnel's rule
+ * list, -1 when no single rule applies (a manual latch). RuleText is an
+ * English description of that rule ("SSID is not Home"); GUIs localise
+ * from the rule itself when they can. Error is set when an executed
+ * connect/disconnect failed. At is RFC3339.
+ */
+export class AutomationEventPayload {
+    /**
+     * Creates a new AutomationEventPayload instance.
+     * @param {Partial<AutomationEventPayload>} [$$source = {}] - The source object to create the AutomationEventPayload.
+     */
+    constructor($$source = {}) {
+        if (!("tunnel" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["tunnel"] = "";
+        }
+        if (!("action" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["action"] = "";
+        }
+        if (!("rule_index" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["rule_index"] = 0;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["rule_text"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
+        }
+        if (!("settled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["settled"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+        if (!("at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["at"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationEventPayload instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationEventPayload}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationEventPayload(/** @type {Partial<AutomationEventPayload>} */($$parsedSource));
+    }
+}
+
+/**
  * FirewallPermit is one DNS permit the firewall currently allows. Interface
  * is "" for "any interface". Tunnel names the tunnel the resolver belongs to
  * ("" when unknown).

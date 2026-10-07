@@ -24,6 +24,10 @@ func (p PingResponse) GUIKnown() bool { return MinorOf(p.Version) >= 2 }
 // ConnectRequest is the parameter for Tunnel.Connect.
 type ConnectRequest struct {
 	Config *domain.WireGuardConfig `json:"config"`
+	// HealthCheck is the tunnel's handshake health-check override from its
+	// .meta.json sidecar: "on" | "off" | "inherit" ("" = inherit). Protocol
+	// minor >= 4; older helpers ignore it.
+	HealthCheck string `json:"health_check,omitempty"`
 }
 
 // ConnectionStatus is the wire representation of the tunnel connection state.
@@ -137,6 +141,32 @@ type AutoConnectPayload struct {
 	TunnelName string `json:"tunnel_name"`
 }
 
+// Automation actions carried by AutomationEventPayload.Action.
+const (
+	AutomationActionConnect        = "connect"
+	AutomationActionDisconnect     = "disconnect"
+	AutomationActionHeld           = "held"
+	AutomationActionLatched        = "latched"
+	AutomationActionSkippedOverlap = "skipped_overlap"
+)
+
+// AutomationEventPayload is broadcast as EventAutomation (protocol minor
+// >= 4). RuleIndex is the deciding rule's position in the tunnel's rule
+// list, -1 when no single rule applies (a manual latch). RuleText is an
+// English description of that rule ("SSID is not Home"); GUIs localise
+// from the rule itself when they can. Error is set when an executed
+// connect/disconnect failed. At is RFC3339.
+type AutomationEventPayload struct {
+	Tunnel    string `json:"tunnel"`
+	Action    string `json:"action"`
+	RuleIndex int    `json:"rule_index"`
+	RuleText  string `json:"rule_text,omitempty"`
+	SSID      string `json:"ssid,omitempty"`
+	Settled   bool   `json:"settled"`
+	Error     string `json:"error,omitempty"`
+	At        string `json:"at"`
+}
+
 // CriticalErrorPayload describes a permanently-dead helper goroutine.
 // Where is the goSafe name (e.g. "eventLoop", "latencyLoop"); Detail is a
 // short human-readable summary of the last panic / restart-budget breach.
@@ -172,7 +202,10 @@ type AutomationPreviewResponse struct {
 	// PrimaryIface is the default-route interface ("" when unknown).
 	PrimaryIface  string `json:"primary_iface,omitempty"`
 	PrimaryIsWiFi bool   `json:"primary_is_wifi,omitempty"`
-	Online        bool   `json:"online"`
+	// Medium is the primary interface's connection type: wifi, wired or
+	// tethered ("" unknown). Added in protocol 1.4.
+	Medium string `json:"medium,omitempty"`
+	Online bool   `json:"online"`
 	// Settled is true once the network has been stable long enough for
 	// negated rules to act; SettleRemainingSec counts down otherwise.
 	Settled            bool                       `json:"settled"`

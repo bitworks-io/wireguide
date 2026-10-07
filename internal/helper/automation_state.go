@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ type netProbeResult struct {
 	IPs           []net.IP
 	Subnets       []string
 	PrimaryIsWiFi bool
+	// Medium is the primary interface's connection type ("" unknown).
+	Medium string
 }
 
 var probeNetwork = func() netProbeResult {
@@ -43,6 +46,10 @@ var probeNetwork = func() netProbeResult {
 	}
 	// Unknown primary interface reads as Wi-Fi so an empty SSID holds.
 	r.PrimaryIsWiFi = iface == "" || wifi.IsWiFiInterface(iface)
+	// Medium is classified independently of the PrimaryIsWiFi placeholder
+	// (which reads true when detection fails): an unknown interface or a
+	// failed lookup is "" so positive medium rules can't fire on a guess.
+	r.Medium = wifi.InterfaceMedium(iface)
 	return r
 }
 
@@ -154,11 +161,21 @@ func (h *Helper) networkState(observe bool) networkState {
 			PrimaryIface:  probe.Iface,
 			PrimaryIsWiFi: probe.PrimaryIsWiFi,
 			Online:        probe.Gateway != "" || probe.Iface != "",
+			Medium:        probeMedium(probe),
 		},
 		identity:        networkIdentity(ssid, probe.Iface, gw, subnets),
 		identityKnown:   (probe.Gateway != "" || probe.Iface != "") && !(ssid == "" && probe.PrimaryIsWiFi),
 		settleRemaining: remaining,
 	}
+}
+
+// probeMedium is the context's Medium: "" when offline or the primary
+// interface is unknown, else the probe's classification.
+func probeMedium(p netProbeResult) string {
+	if p.Iface == "" {
+		return ""
+	}
+	return p.Medium
 }
 
 // armSettleTimer (re)schedules a re-evaluation for when the network will
@@ -184,6 +201,44 @@ func (h *Helper) armSettleTimer(remaining time.Duration) {
 		}
 		h.reevaluateAutomation("settled")
 	})
+}
+
+// mediumRetryInterval / mediumRetryBudget bound the re-evaluation retry
+// while a medium rule exists but the online primary interface's medium is
+// still unknown (macOS: an interface not yet in the hardware-port listing,
+// e.g. a phone just plugged in). Medium isn't part of the settle
+// fingerprint and macOS has no automation poll, so without the retry a
+// corrected classification would not be acted on until the next network
+// event. The budget stops a never-listed interface from retrying forever.
+const (
+	mediumRetryInterval = 5 * time.Second
+	mediumRetryBudget   = 60 * time.Second
+)
+
+// mediumRetryEnabled: the retry runs only where nothing else re-evaluates
+// periodically (helper.go polls automation on non-darwin platforms). Tests
+// enable it per Helper (mediumRetryForce) rather than by writing this
+// package variable, which background settle timers of other helpers read.
+var mediumRetryEnabled = runtime.GOOS == "darwin"
+
+// mediumRetryDue reports whether a re-evaluation should be scheduled in
+// mediumRetryInterval because medium rules exist and the context is online
+// on a known primary interface whose medium is still unknown. Caller holds
+// reevalMu.
+func (h *Helper) mediumRetryDue(ctx wifi.NetworkContext, usesMedium bool) bool {
+	if !(mediumRetryEnabled || h.mediumRetryForce) || !usesMedium || !ctx.Online || ctx.PrimaryIface == "" || ctx.Medium != "" {
+		h.mediumRetryIface = ""
+		return false
+	}
+	now := time.Now()
+	if h.mediumRetryClock != nil {
+		now = h.mediumRetryClock()
+	}
+	if h.mediumRetryIface != ctx.PrimaryIface {
+		h.mediumRetryIface = ctx.PrimaryIface
+		h.mediumRetrySince = now
+	}
+	return now.Sub(h.mediumRetrySince) < mediumRetryBudget
 }
 
 // stopSettleTimer cancels any pending settle re-evaluation (cleanup).

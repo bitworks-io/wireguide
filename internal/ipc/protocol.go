@@ -32,9 +32,15 @@ import (
 // additive: an older helper answers the new methods with method-not-found
 // (callers treat that as "unknown" / record the bundle section as
 // unavailable), and an older GUI ignores the new fields.
+// Minor 4 added the event.automation notification, per-tunnel
+// last_change_reason/last_change_at status fields plus the top-level
+// recent_disconnects map, and ConnectRequest.HealthCheck (per-tunnel
+// handshake health-check override). All additive and omitempty: an older
+// GUI ignores them, and a GUI talking to an older helper falls back to its
+// previous generic notification / history reasons.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 3
+	ProtocolMinor = 4
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -213,6 +219,11 @@ const (
 	// subscribes, when startup crash recovery restored DNS or flushed stale
 	// firewall rules. The same data stays available from Helper.Info.
 	EventRecovery = "event.recovery"
+	// EventAutomation reports an Automation decision: every executed
+	// rule-driven connect/disconnect (success or failure), and a
+	// held/latched/skipped_overlap decision when it changes for a tunnel.
+	// Protocol minor >= 4.
+	EventAutomation = "event.automation"
 )
 
 // CodedError is an error that carries a specific JSON-RPC error code.

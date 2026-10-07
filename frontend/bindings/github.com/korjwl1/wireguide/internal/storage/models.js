@@ -14,6 +14,61 @@ import * as wifi$0 from "../wifi/models.js";
 import * as time$0 from "../../../../../time/models.js";
 
 /**
+ * AutomationBackupInfo describes one snapshot for the GUI list.
+ */
+export class AutomationBackupInfo {
+    /**
+     * Creates a new AutomationBackupInfo instance.
+     * @param {Partial<AutomationBackupInfo>} [$$source = {}] - The source object to create the AutomationBackupInfo.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("time" in $$source)) {
+            /**
+             * RFC3339 (UTC)
+             * @member
+             * @type {string}
+             */
+            this["time"] = "";
+        }
+        if (!("rule_count" in $$source)) {
+            /**
+             * rules for the requested tunnel
+             * @member
+             * @type {number}
+             */
+            this["rule_count"] = 0;
+        }
+        if (!("total_rules" in $$source)) {
+            /**
+             * rules across all tunnels
+             * @member
+             * @type {number}
+             */
+            this["total_rules"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationBackupInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationBackupInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationBackupInfo(/** @type {Partial<AutomationBackupInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * Session is one VPN session record. EndTime is a pointer so a still-active
  * session (no end yet) can be distinguished from a completed session that
  * happens to have ended at time.Time{} — the previous flat-struct design
@@ -82,6 +137,24 @@ export class Session {
              * @type {string | undefined}
              */
             this["disconnect_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * StartReason says what brought the session up ("user", "automation",
+             * "wake", "network_change", "health_check", "reconnect"); empty when
+             * unknown (older helper, older record). SSID is the Wi-Fi network the
+             * GUI saw when the session started ("" when unknown / not on Wi-Fi).
+             * @member
+             * @type {string | undefined}
+             */
+            this["start_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
         }
 
         Object.assign(this, $$source);

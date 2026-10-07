@@ -252,7 +252,8 @@ func (s *TunnelService) Connect(name string) error {
 	s.userActions.Begin(name, true)
 	defer s.userActions.End(name, true)
 	return s.callLong(ipc.MethodConnect, ipc.ConnectRequest{
-		Config: cfg,
+		Config:      cfg,
+		HealthCheck: s.tunnelHealthCheckForConnect(name),
 	}, nil)
 }
 
@@ -405,6 +406,31 @@ func (s *TunnelService) snapshotActiveStats(wantName string) (string, int64, int
 // open-session loop. The stats cache still gets updated so the eventual
 // disappear-close uses fresh counters.
 func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTunnel, txByTunnel map[string]int64, disappearReason string) {
+	s.ReconcileHistory(HistoryReconcile{
+		Active: activeNames, Rx: rxByTunnel, Tx: txByTunnel, DisappearReason: disappearReason,
+	})
+}
+
+// HistoryReconcile is one status event's input to history reconciliation.
+// StartReasons / EndReasons come from the helper's last_change_reason and
+// recent_disconnects (protocol minor 4; nil from older helpers). SSID is the
+// GUI's current Wi-Fi network, recorded on sessions that open now.
+type HistoryReconcile struct {
+	Active          []string          `json:"active"`
+	Rx              map[string]int64  `json:"rx,omitempty"`
+	Tx              map[string]int64  `json:"tx,omitempty"`
+	DisappearReason string            `json:"disappear_reason,omitempty"`
+	StartReasons    map[string]string `json:"start_reasons,omitempty"`
+	EndReasons      map[string]string `json:"end_reasons,omitempty"`
+	SSID            string            `json:"ssid,omitempty"`
+}
+
+// ReconcileHistory is ReconcileHistoryFromStatus with per-tunnel start/end
+// reasons and the SSID at session start. A session's end reason is, in
+// order: the GUI's own "user" hint, the helper's recorded end reason, then
+// DisappearReason ("reconnect" by default).
+func (s *TunnelService) ReconcileHistory(in HistoryReconcile) {
+	activeNames, rxByTunnel, txByTunnel, disappearReason := in.Active, in.Rx, in.Tx, in.DisappearReason
 	if s.historyStore == nil {
 		return
 	}
@@ -465,6 +491,9 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 			// Prefer cached last-seen counters and reason — the current event's
 			// maps don't include this tunnel since it just disappeared, and a
 			// pre-set reason from user Disconnect overrides the default.
+			if r := in.EndReasons[name]; r != "" {
+				reason = r
+			}
 			if cached, ok := s.lastKnownStats.LoadAndDelete(name); ok {
 				if st, ok := cached.(lastKnownTunnelStats); ok {
 					rx = st.rx
@@ -487,7 +516,7 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		if _, exists := s.activeSessions.Load(name); exists {
 			continue
 		}
-		id := s.historyStore.RecordConnect(name)
+		id := s.historyStore.RecordConnectDetail(name, in.StartReasons[name], in.SSID)
 		s.activeSessions.Store(name, id)
 	}
 }

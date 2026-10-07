@@ -77,8 +77,10 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	if len(allStats) == 0 {
 		// Mirror the previous Status()==nil behavior with an empty
 		// disconnected struct so subscribers don't spuriously see
-		// "tunnel disappeared" events on idle helpers.
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		// "tunnel disappeared" events on idle helpers. Recently ended
+		// tunnels still report why they went down.
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 
 	// Pick the primary the same way manager.Status() did: prefer
@@ -97,7 +99,8 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 		}
 	}
 	if primary == nil {
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 	result := *primary
 	result.ActiveTunnels = h.manager.ActiveTunnels()
@@ -124,6 +127,24 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	}
 	h.decorateStatus(&result, cfgs, view, dnsWanted)
 
+	// Change reasons (protocol minor 4): why each listed tunnel came up,
+	// and why recently-ended tunnels went down — a gone tunnel is absent
+	// from the status entirely, so its end reason travels top-level.
+	activeSet := make(map[string]bool, len(allStats))
+	for _, ts := range allStats {
+		if ts != nil && ts.TunnelName != "" {
+			activeSet[ts.TunnelName] = true
+		}
+	}
+	connReasons, ended := h.changeSnapshot(activeSet)
+	applyChange := func(st *domain.ConnectionStatus) {
+		if c, ok := connReasons[st.TunnelName]; ok {
+			st.LastChangeReason, st.LastChangeAt = c.Reason, c.At
+		}
+	}
+	applyChange(&result)
+	result.RecentDisconnects = ended
+
 	// Include complete per-tunnel status. The same DTO backs both the
 	// frontend's selected-tunnel statistics and `ctl status --json`; copying
 	// only name/state/handshake silently zeroed interface, duration, traffic,
@@ -143,6 +164,8 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 				sub.LatencyMs = lat
 			}
 			h.decorateStatus(&sub, cfgs, view, dnsWanted)
+			sub.RecentDisconnects = nil
+			applyChange(&sub)
 			result.Tunnels = append(result.Tunnels, sub)
 		}
 	}

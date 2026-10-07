@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/korjwl1/wireguide/internal/wifi"
@@ -29,6 +30,18 @@ func TestParseCondition(t *testing.T) {
 		{spec: "not-mac:zz", wantErr: true},
 		{spec: "not-bogus:x", wantErr: true},
 		{spec: "ssid", wantErr: true},
+		{spec: "ssid:A|B", want: wifi.Condition{Type: wifi.CondSSID, SSIDs: []string{"A", "B"}}},
+		{spec: "ssid: A | B ", want: wifi.Condition{Type: wifi.CondSSID, SSIDs: []string{"A", "B"}}},
+		{spec: "not-ssid:A|B|C", want: wifi.Condition{Type: wifi.CondSSID, Negate: true, SSIDs: []string{"A", "B", "C"}}},
+		{spec: "ssid:A|", wantErr: true},
+		{spec: "ssid:|A", wantErr: true},
+		{spec: "ssid:A||B", wantErr: true},
+		{spec: "medium:wifi", want: wifi.Condition{Type: wifi.CondMedium, Medium: "wifi"}},
+		{spec: "medium:Wired", want: wifi.Condition{Type: wifi.CondMedium, Medium: "wired"}},
+		{spec: "not-medium:tethered", want: wifi.Condition{Type: wifi.CondMedium, Negate: true, Medium: "tethered"}},
+		{spec: "medium:ethernet", wantErr: true},
+		{spec: "medium:wifi|wired", wantErr: true},
+		{spec: "not-medium:", wantErr: true},
 	}
 	for _, tc := range cases {
 		got, err := parseCondition(tc.spec)
@@ -42,7 +55,7 @@ func TestParseCondition(t *testing.T) {
 			t.Errorf("%q: %v", tc.spec, err)
 			continue
 		}
-		if got != tc.want {
+		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: got %+v want %+v", tc.spec, got, tc.want)
 		}
 		if err := got.Validate(); err != nil {
@@ -63,6 +76,11 @@ func TestFormatCondition(t *testing.T) {
 		{wifi.Condition{Type: wifi.CondNetwork, GatewayMAC: "aa:bb:cc:dd:ee:ff"}, "network(mac)=aa:bb:cc:dd:ee:ff"},
 		{wifi.Condition{Type: wifi.CondNetwork, Negate: true, GatewayMAC: "aa:bb:cc:dd:ee:ff"}, "network(mac)!=aa:bb:cc:dd:ee:ff"},
 		{wifi.Condition{Type: wifi.CondNoneMatch}, "otherwise"},
+		{wifi.Condition{Type: wifi.CondSSID, SSIDs: []string{"A", "B"}}, "ssid in {A, B}"},
+		{wifi.Condition{Type: wifi.CondSSID, Negate: true, SSIDs: []string{"A", "B"}}, "ssid not in {A, B}"},
+		{wifi.Condition{Type: wifi.CondSSID, SSIDs: []string{"A"}}, "ssid=A"},
+		{wifi.Condition{Type: wifi.CondMedium, Medium: "wired"}, "medium=wired"},
+		{wifi.Condition{Type: wifi.CondMedium, Negate: true, Medium: "wifi"}, "medium!=wifi"},
 	}
 	for _, tc := range cases {
 		if got := formatCondition(tc.c); got != tc.want {
