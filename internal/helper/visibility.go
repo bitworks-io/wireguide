@@ -76,7 +76,7 @@ func (h *Helper) viewSnapshot() fwView {
 func describeStart(activated bool) (mode, reason string) {
 	switch {
 	case activated:
-		return "launchd-socket", "launchd socket activation: a client connecting to the socket started the helper"
+		return "launchd-socket", "started by launchd as a socket-activated job (launchd handed over the listening socket)"
 	case runtime.GOOS == "darwin":
 		return "legacy", "launchd did not hand over a socket; the helper listens on its own socket"
 	}

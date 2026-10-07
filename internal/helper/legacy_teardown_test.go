@@ -161,3 +161,32 @@ func TestLegacyReconnectConnectedRuleTunnelStillReevaluates(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// While a GUI is attached its reported SSID is authoritative: a gateway
+// change without an SSID change (iPhone USB tethering ranked above Wi-Fi,
+// Wi-Fi still associated) must not blank it.
+func TestSSIDStampIgnoredWhileGUIAttached(t *testing.T) {
+	p := wifiProbe()
+	p.GatewayMAC = "aa:aa:aa:aa:aa:aa"
+	stubNetwork(t, p)
+	h, _ := newAutomationHelper(t, "HomeWiFi")
+	attached := true
+	h.guiAttachedFn = func() bool { return attached }
+	h.wifiMu.Lock()
+	h.ssidFromGUI = true
+	h.ssidStampGW = "aa:aa:aa:aa:aa:aa"
+	h.wifiMu.Unlock()
+
+	p.GatewayMAC = "bb:bb:bb:bb:bb:bb"
+	p.Iface = "en8"
+	p.PrimaryIsWiFi = false
+	if st := h.currentNetworkState(); st.ctx.SSID != "HomeWiFi" {
+		t.Fatalf("attached GUI's SSID must survive a gateway change: %+v", st.ctx)
+	}
+
+	// Once the GUI is gone the stamp guard applies again.
+	attached = false
+	if st := h.currentNetworkState(); st.ctx.SSID != "" {
+		t.Fatalf("without a GUI a gateway change must invalidate the SSID: %+v", st.ctx)
+	}
+}

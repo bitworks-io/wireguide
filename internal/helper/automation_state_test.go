@@ -566,3 +566,23 @@ func TestUnknownMediumArmsBoundedRetry(t *testing.T) {
 		t.Error("no medium rule => no retry")
 	}
 }
+
+// A tunnel that a failed reconnect already took down can still have a
+// health-check retry pending. When automation wants that tunnel down, the
+// retry must be cancelled so it cannot bring the tunnel back.
+func TestRuleDisconnectCancelsRetryForInactiveTunnel(t *testing.T) {
+	stubNetwork(t, wifiProbe())
+	h, _ := newAutomationHelper(t, "HomeWiFi")
+	h.done = make(chan struct{})
+	writeAutomation(t, h, map[string][]wifi.Rule{
+		"home-vpn": {
+			{When: wifi.Condition{Type: wifi.CondSSID, SSID: "HomeWiFi"}, Do: wifi.ActionDisconnect},
+		},
+	})
+	h.monitor = startPendingRetry(t, "home-vpn")
+
+	h.reevaluateAutomation("test")
+	if h.monitor.GetState().Reconnecting {
+		t.Fatal("rule disconnect left a reconnect retry pending for the tunnel")
+	}
+}

@@ -172,6 +172,12 @@ func (h *Helper) reevaluateAutomation(reason string) {
 				slog.Info("automation: rule disconnect", "tunnel", name, "reason", reason, "ssid", ctx.SSID)
 				note(h.disconnectAutoManaged(name, ctx, rules, info.RuleIndex))
 			} else {
+				// Already down, but a health-check retry left over from a
+				// failed reconnect may still be pending for it; automation
+				// wants it down, so that retry must not bring it back.
+				if h.monitor != nil {
+					h.monitor.CancelRetryFor(name)
+				}
 				h.clearAutomationDecision(name)
 			}
 		case wifi.StateUnmanaged:

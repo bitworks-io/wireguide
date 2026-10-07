@@ -100,7 +100,11 @@ func ParseURLAction(raw string) (URLAction, error) {
 }
 
 // maxPendingURLActions caps the queue so a flood of URLs cannot pile up
-// confirmation sheets.
+// confirmation sheets. TakeURLActions drains this queue, so the cap and the
+// dedupe here only cover URLs that arrive before the frontend drains; the
+// frontend applies the same cap and dedupe to the sheets it holds
+// (frontend/src/lib/urlActions.js, MAX_PENDING_URL_ACTIONS) so they hold end
+// to end. Keep the two values equal.
 const maxPendingURLActions = 4
 
 // urlActionQueue holds actions awaiting a confirmation sheet in the window.

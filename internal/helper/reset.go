@@ -64,13 +64,33 @@ func (h *Helper) resetDNSHeld(force bool) ipc.ResetDNSResponse {
 	}
 	slog.Warn("reset DNS and firewall requested", "force", force, "connected", connected)
 
+	// Cancel every pending reconnect retry, including ones for tunnels that
+	// are already down: a retry's resumeFirewall would otherwise re-install
+	// a wanted kill-switch blockade within one backoff tick of this reset.
+	if h.monitor != nil {
+		h.monitor.CancelRetry()
+	}
+
+	// Tunnels whose disconnect restores the pre-VPN system DNS (global DNS,
+	// not split), so the dns_restore step can say DNS was restored even
+	// though the clean disconnect leaves no journal behind.
+	var globalDNS []string
+	if len(connected) > 0 {
+		h.mu.Lock()
+		for _, name := range connected {
+			if cfg := h.activeCfgs[name]; cfg != nil {
+				if dns := cfg.Interface.ParseDNS(); len(dns.Servers) > 0 && len(dns.Match) == 0 {
+					globalDNS = append(globalDNS, name)
+				}
+			}
+		}
+		h.mu.Unlock()
+	}
+
 	if len(connected) > 0 {
 		// Tear the tunnels down through the normal path so their routes and
 		// DNS are restored by the same code that handles a disconnect, and
 		// so no journal is left half-owned. Never touch live journals here.
-		if h.monitor != nil {
-			h.monitor.CancelRetry()
-		}
 		err := h.disconnectAllHeld(domain.ChangeReasonRecovery)
 		h.reconcileFirewallLocked("reset-dns-disconnect")
 		h.cancelLegacyRetryIfIdle()
@@ -116,7 +136,9 @@ func (h *Helper) resetDNSHeld(force bool) ipc.ResetDNSResponse {
 	// here (a clean disconnect already restored and removed its own).
 	report := resetRecoverJournals(h.dataDir, nil)
 	step("split_dns", report.SplitDNSSweepErr, "split DNS entries removed")
-	if len(report.Tunnels) == 0 {
+	if len(report.Tunnels) == 0 && len(globalDNS) > 0 {
+		step("dns_restore", nil, "DNS restored to the pre-VPN settings by disconnecting "+strings.Join(globalDNS, ", "))
+	} else if len(report.Tunnels) == 0 {
 		step("dns_restore", nil, "no recovery journal found; system DNS left untouched")
 	} else if len(report.DNSRestored) > 0 {
 		step("dns_restore", nil, "restored DNS from the saved pre-VPN state: "+strings.Join(report.DNSRestored, ", "))

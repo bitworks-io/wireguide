@@ -215,7 +215,7 @@
     "reset_step_split_dns": "분할 DNS 항목 확인",
     "reset_step_dns_restore": "저장된 DNS 상태",
     "reset_step_dns_cache": "DNS 캐시 비움",
-    "helper_reason_launchd_socket": "클라이언트가 소켓에 연결되어 launchd가 도우미를 시작했습니다",
+    "helper_reason_launchd_socket": "launchd가 시작함 (소켓 활성화 작업)",
     "helper_reason_legacy": "launchd가 소켓을 넘기지 않아 도우미가 자체 소켓으로 대기합니다",
     "helper_reason_direct": "launchd 없이 직접 시작됨",
     "dns_protection_idle": "켜져 있습니다. DNS 서버가 있는 터널이 연결되기 전에는 보호할 대상이 없습니다.",

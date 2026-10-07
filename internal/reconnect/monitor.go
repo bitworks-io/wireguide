@@ -773,11 +773,13 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 				disconnectErr = m.manager.Disconnect()
 			}
 		}
-		// Legacy path: ErrNotConnected only means there is nothing to tear
-		// down (everything is already down); fall through to the reconnect
-		// step, which decides from the helper's cached configs whether
-		// anything is left to restore.
-		if tunnelName == "" && disconnectErr != nil && isNotConnected(disconnectErr) {
+		// ErrNotConnected only means there is nothing to tear down: on the
+		// legacy path everything is already down, and on the per-tunnel path
+		// an earlier attempt's failed connect removed the tunnel. Fall
+		// through to the reconnect step (the helper decides from its cached
+		// configs whether anything is left to restore); treating it as a
+		// teardown failure would back off forever without ever reconnecting.
+		if disconnectErr != nil && isNotConnected(disconnectErr) {
 			disconnectErr = nil
 		}
 		if disconnectErr != nil {

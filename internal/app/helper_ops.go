@@ -88,6 +88,15 @@ func (s *TunnelService) GetFirewallStatus() FirewallStatus {
 // result, nothing changed) while any tunnel is connected.
 func (s *TunnelService) ResetDNS(force bool) (*ipc.ResetDNSResponse, error) {
 	var resp ipc.ResetDNSResponse
+	// A forced reset disconnects every connected tunnel at the user's request
+	// from this window: record it like Disconnect (wildcard, since the helper
+	// picks the tunnels) so the notifier does not report "disconnected outside
+	// the app". No markUserDisconnect: History keeps the helper's "recovery"
+	// end reason. The CLI path never passes through here and still notifies.
+	if force {
+		s.userActions.Begin(AnyTunnel, false)
+		defer s.userActions.End(AnyTunnel, false)
+	}
 	// A forced reset disconnects tunnels (seconds each) while the helper
 	// answers one request at a time per connection; mark the RPC in flight so
 	// the health monitor does not mistake the busy helper for a dead one and

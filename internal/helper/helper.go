@@ -295,6 +295,9 @@ type Helper struct {
 	// stamp and its staleness guard apply only then: on Linux/Windows the
 	// helper reads the SSID itself, so it is always fresh. Guarded by wifiMu.
 	ssidFromGUI bool
+	// guiAttachedFn, when set, replaces the server's control-connection
+	// check in guiAttached (tests only).
+	guiAttachedFn func() bool
 
 	// connectedFn, when set, replaces manager.ActiveTunnels() in the legacy
 	// reconnect path (tests only).
@@ -1091,6 +1094,15 @@ func (h *Helper) armShutdownTimer(grace time.Duration, reason string) {
 // no GUI, no tunnel, no timer. armShutdownTimer's own active-tunnel guard
 // makes this a no-op while any tunnel is still up, and a GUI that IS attached
 // keeps its normal lifecycle (its later disconnect arms the window).
+// guiAttached reports whether a GUI control connection is attached. Safe on
+// a helper without a server (tests).
+func (h *Helper) guiAttached() bool {
+	if h.guiAttachedFn != nil {
+		return h.guiAttachedFn()
+	}
+	return h.server != nil && h.server.HasControlConn()
+}
+
 func (h *Helper) maybeArmShutdownAfterTeardown(reason string) {
 	if h.server.HasControlConn() {
 		return

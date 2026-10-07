@@ -41,18 +41,89 @@ func RemoveAutostart() error {
 	}
 }
 
+// SyncAutostart brings an existing autostart entry up to date with the
+// current template, so an upgrade picks up template changes (macOS:
+// AssociatedBundleIdentifiers in the LaunchAgent) without the user toggling
+// auto-start off and on. Callers invoke it only while auto-start is on.
+//
+// macOS only; elsewhere it is a no-op. It never creates a missing entry (the
+// user may have removed the login item outside the app), and it only acts for
+// a binary inside an app bundle, so running a development build never points
+// the login item at a build directory. It reports whether it rewrote the file.
+func SyncAutostart(appPath string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, nil
+	}
+	if !strings.Contains(appPath, ".app/Contents/MacOS/") {
+		return false, nil
+	}
+	path, err := macAutostartPath()
+	if err != nil {
+		return false, err
+	}
+	return syncMacAutostartFile(path, appPath)
+}
+
+// syncMacAutostartFile rewrites the LaunchAgent at path when it exists,
+// already launches appPath, and differs from the plist rendered for appPath.
+// An entry that launches a different binary (the user installed elsewhere, or
+// this copy runs from a DMG or a translocated path) keeps its launch target:
+// only toggling auto-start moves it.
+func syncMacAutostartFile(path, appPath string) (bool, error) {
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var esc strings.Builder
+	if err := xml.EscapeText(&esc, []byte(appPath)); err != nil {
+		return false, fmt.Errorf("xml-escape app path: %w", err)
+	}
+	if !strings.Contains(string(cur), "<string>"+esc.String()+"</string>") {
+		return false, nil
+	}
+	want, err := renderMacAutostart(appPath)
+	if err != nil {
+		return false, err
+	}
+	if string(cur) == want {
+		return false, nil
+	}
+	if err := os.WriteFile(path, []byte(want), 0644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // --- macOS: LaunchAgent ---
 
-func installMacAutostart(appPath string) error {
+func macAutostartPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("cannot determine home directory: %w", err)
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
-	plistDir := filepath.Join(home, "Library", "LaunchAgents")
-	if err := os.MkdirAll(plistDir, 0755); err != nil {
+	return filepath.Join(home, "Library", "LaunchAgents", "com.wireguide.gui.plist"), nil
+}
+
+func installMacAutostart(appPath string) error {
+	path, err := macAutostartPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("creating LaunchAgents dir: %w", err)
 	}
+	plist, err := renderMacAutostart(appPath)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(plist), 0644)
+}
 
+// renderMacAutostart XML-escapes appPath and renders the LaunchAgent.
+func renderMacAutostart(appPath string) (string, error) {
 	// XML-escape appPath to prevent plist injection from special characters.
 	// xml.EscapeText returning an error means the escaping itself failed
 	// (extremely rare — only from the io.Writer surface) and the buffer
@@ -61,13 +132,9 @@ func installMacAutostart(appPath string) error {
 	// could inject `</string>...<key>...` and modify our plist.
 	var b strings.Builder
 	if err := xml.EscapeText(&b, []byte(appPath)); err != nil {
-		return fmt.Errorf("xml-escape app path: %w", err)
+		return "", fmt.Errorf("xml-escape app path: %w", err)
 	}
-	safeAppPath := b.String()
-
-	plist := macAutostartPlist(safeAppPath)
-
-	return os.WriteFile(filepath.Join(plistDir, "com.wireguide.gui.plist"), []byte(plist), 0644)
+	return macAutostartPlist(b.String()), nil
 }
 
 // macAutostartPlist renders the GUI LaunchAgent. safeAppPath must already be

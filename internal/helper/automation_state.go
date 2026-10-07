@@ -113,7 +113,12 @@ func (h *Helper) networkState(observe bool) networkState {
 	}
 	probe := probeNetwork()
 	gw := probe.GatewayMAC
-	if ssid != "" && gw != "" {
+	// The gateway stamp guards against a stale SSID once no GUI is left to
+	// refresh it. While a GUI is attached its CoreWLAN-reported SSID is
+	// authoritative: a primary-interface change that keeps Wi-Fi associated
+	// (e.g. iPhone USB tethering ranked above Wi-Fi) changes the gateway
+	// without changing the SSID, and must not blank it.
+	if ssid != "" && gw != "" && !h.guiAttached() {
 		h.wifiMu.Lock()
 		fromGUI := h.ssidFromGUI
 		stamp := h.ssidStampGW

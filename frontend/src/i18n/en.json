@@ -215,7 +215,7 @@
     "reset_step_split_dns": "Split-DNS entries checked",
     "reset_step_dns_restore": "Saved DNS state",
     "reset_step_dns_cache": "Flushed the DNS cache",
-    "helper_reason_launchd_socket": "launchd started the helper because a client connected to its socket",
+    "helper_reason_launchd_socket": "Started by launchd (socket-activated job)",
     "helper_reason_legacy": "launchd did not hand over a socket; the helper listens on its own",
     "helper_reason_direct": "Started directly, without launchd",
     "dns_protection_idle": "Turned on. Nothing to protect until a tunnel with DNS servers connects.",

@@ -24,6 +24,7 @@
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
   import { diagText } from './lib/wireguard-lint.js';
+  import { mergeURLActions } from './lib/urlActions.js';
 
   // View state
   let currentView = 'tunnels'; // 'tunnels' | 'history' | 'dnsleak' | 'routes' | 'logs'
@@ -324,7 +325,7 @@
   async function takeURLActions() {
     try {
       const got = await TunnelService.TakeURLActions();
-      if (got && got.length) urlActions = [...urlActions, ...got];
+      if (got && got.length) urlActions = mergeURLActions(urlActions, got);
     } catch (_) { /* queue is best-effort */ }
   }
   async function approveURLAction() {

@@ -215,7 +215,7 @@
     "reset_step_split_dns": "スプリット DNS の項目を確認",
     "reset_step_dns_restore": "保存済みの DNS 状態",
     "reset_step_dns_cache": "DNS キャッシュを消去",
-    "helper_reason_launchd_socket": "クライアントがソケットに接続したため、launchd がヘルパーを起動しました",
+    "helper_reason_launchd_socket": "launchd が起動 (ソケットアクティベーションのジョブ)",
     "helper_reason_legacy": "launchd がソケットを渡さなかったため、ヘルパーは独自のソケットで待機しています",
     "helper_reason_direct": "launchd を使わず直接起動",
     "dns_protection_idle": "オンです。DNS サーバーを持つトンネルが接続されるまで、保護する対象はありません。",

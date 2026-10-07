@@ -1117,3 +1117,35 @@ func TestLegacyTeardownHookRunsOnFirstAttemptOnly(t *testing.T) {
 		t.Errorf("legacy teardown hook calls = %d, want 1", hook.Load())
 	}
 }
+
+// After a failed reconnect the manager has removed the tunnel, so the next
+// attempt's pre-reconnect teardown returns ErrNotConnected. The per-tunnel
+// retry must treat that as "nothing to tear down" and call reconnectFn again,
+// not back off forever without ever reconnecting.
+func TestPerTunnelRetry_ErrNotConnectedStillReconnects(t *testing.T) {
+	var reconnectCalls atomic.Int32
+	reconnectFn := func(_ context.Context, name string) error {
+		reconnectCalls.Add(1)
+		return errors.New("endpoint lookup failed")
+	}
+	mon, mgr, _ := newTestMonitor(testConfig(), reconnectFn)
+	var disconnects atomic.Int32
+	mgr.disconnectFn = func() error {
+		// The first teardown succeeds (the tunnel was up); after the failed
+		// connect the entry is gone.
+		if disconnects.Add(1) == 1 {
+			return nil
+		}
+		return &tunnel.TunnelError{Kind: tunnel.ErrNotConnected, Message: "no tunnel is connected"}
+	}
+	mon.mu.Lock()
+	mon.running = true
+	mon.mu.Unlock()
+	defer mon.Stop()
+
+	mon.triggerReconnectTunnel("home-vpn")
+
+	waitFor(t, 3*time.Second, "reconnectFn called again after ErrNotConnected", func() bool {
+		return reconnectCalls.Load() >= 3
+	})
+}

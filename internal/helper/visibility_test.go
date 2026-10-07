@@ -1,18 +1,21 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/firewall"
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/reconnect"
 	"github.com/korjwl1/wireguide/internal/tunnel"
 )
 
@@ -237,6 +240,11 @@ func TestHelperInfo(t *testing.T) {
 	if mode, _ := describeStart(false); mode == "launchd-socket" {
 		t.Fatal("a non-activated helper must not claim launchd-socket")
 	}
+	// The socket hand-off happens for a kickstart (install/repair) or a
+	// KeepAlive restart too, so the reason must not claim a client connect.
+	if mode, reason := describeStart(true); mode != "launchd-socket" || strings.Contains(reason, "connect") {
+		t.Fatalf("activated start reason must not claim a client connect: %q %q", mode, reason)
+	}
 }
 
 // --- Network.ResetDNS ---
@@ -427,5 +435,78 @@ func TestEffectivePermitsDropsUnpinnedInKillSwitchMode(t *testing.T) {
 	h.decorateStatus(st, map[string]*domain.WireGuardConfig{"a": cfg}, v, true)
 	if st.DNSProtected {
 		t.Fatal("unpinned resolver reported as protected while the kill switch drops it")
+	}
+}
+
+// startPendingRetry starts a monitor with a per-tunnel retry pending for name
+// (its reconnect always fails, as after a failed reconnect).
+func startPendingRetry(t *testing.T, name string) *reconnect.Monitor {
+	t.Helper()
+	queued := make(chan struct{}, 1)
+	mon := reconnect.NewMonitor(&pingRetryManager{}, func(context.Context, string) error {
+		return errors.New("endpoint lookup failed")
+	}, func(st reconnect.State) {
+		if st.Reconnecting {
+			select {
+			case queued <- struct{}{}:
+			default:
+			}
+		}
+	}, reconnect.Config{InitialDelay: time.Hour, MaxDelay: time.Hour})
+	mon.Start()
+	t.Cleanup(mon.Stop)
+	mon.ReconnectTunnelIfIdle(name, nil)
+	select {
+	case <-queued:
+	case <-time.After(2 * time.Second):
+		t.Fatal("retry was not queued")
+	}
+	return mon
+}
+
+// A reset with no tunnel connected must still cancel pending reconnect
+// retries: a surviving retry's resumeFirewall would re-install the wanted
+// kill-switch blockade within one backoff tick.
+func TestResetDNSCancelsRetriesWithNoTunnels(t *testing.T) {
+	installResetFakes(t)
+	h := newResetHelper(t, &fakeFW{})
+	h.ksWanted = true
+	h.monitor = startPendingRetry(t, "home-vpn")
+
+	out, _ := h.handleResetDNS(nil)
+	if out.(ipc.ResetDNSResponse).Refused {
+		t.Fatal("idle helper must not refuse")
+	}
+	if h.monitor.GetState().Reconnecting {
+		t.Fatal("reset left a reconnect retry pending")
+	}
+}
+
+// A forced reset that disconnects a global-DNS tunnel restores the pre-VPN
+// DNS through that disconnect (which removes the journal); the report must
+// say so instead of "system DNS left untouched".
+func TestResetDNSForceReportsDNSRestoredByDisconnect(t *testing.T) {
+	installResetFakes(t)
+	h := newResetHelper(t, &fakeFW{})
+	h.connectedFn = func() []string { return []string{"home-vpn"} }
+	cfg := &domain.WireGuardConfig{Name: "home-vpn"}
+	cfg.Interface.DNS = []string{"1.1.1.1"}
+	h.activeCfgs["home-vpn"] = cfg
+
+	out, _ := h.handleResetDNS(json.RawMessage(`{"force":true}`))
+	s, ok := stepByName(out.(ipc.ResetDNSResponse), "dns_restore")
+	if !ok || !s.OK || !strings.Contains(s.Detail, "restored") || !strings.Contains(s.Detail, "home-vpn") {
+		t.Fatalf("dns_restore = %+v", s)
+	}
+
+	// A split-DNS tunnel never changed system DNS: keep the old wording.
+	split := &domain.WireGuardConfig{Name: "split"}
+	split.Interface.DNS = []string{"10.0.0.1", "~corp.example"}
+	h2 := newResetHelper(t, &fakeFW{})
+	h2.connectedFn = func() []string { return []string{"split"} }
+	h2.activeCfgs["split"] = split
+	out, _ = h2.handleResetDNS(json.RawMessage(`{"force":true}`))
+	if s, _ := stepByName(out.(ipc.ResetDNSResponse), "dns_restore"); !strings.Contains(s.Detail, "left untouched") {
+		t.Fatalf("split-DNS dns_restore = %+v", s)
 	}
 }
