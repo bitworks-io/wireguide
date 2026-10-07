@@ -156,7 +156,7 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 	settings.EnsureAutomation()
 	auto := settings.Automation
 
-	st := h.currentNetworkState()
+	st := h.peekNetworkState()
 	ctx := st.ctx
 
 	ipStrs := make([]string, 0, len(ctx.PhysicalIPs))

@@ -89,6 +89,17 @@ func networkIdentity(ssid, iface, gwMAC string, subnets []string) string {
 // currentNetworkState builds the NetworkContext (see currentNetworkContext
 // for the SSID staleness rules) and feeds the settle tracker.
 func (h *Helper) currentNetworkState() networkState {
+	return h.networkState(true)
+}
+
+// peekNetworkState is currentNetworkState for read-only callers (the
+// automation preview the GUI polls): it reads the settle tracker without
+// recording the sampled fingerprint, so polling cannot restart the window.
+func (h *Helper) peekNetworkState() networkState {
+	return h.networkState(false)
+}
+
+func (h *Helper) networkState(observe bool) networkState {
 	ssid := ""
 	if h.wifiMon != nil {
 		ssid = strings.TrimSpace(h.wifiMon.LastSSID())
@@ -127,7 +138,13 @@ func (h *Helper) currentNetworkState() networkState {
 	}
 	tracker := h.settle
 	h.settleMu.Unlock()
-	settled, remaining := tracker.Observe(fp)
+	var settled bool
+	var remaining time.Duration
+	if observe {
+		settled, remaining = tracker.Observe(fp)
+	} else {
+		settled, remaining = tracker.Peek(fp)
+	}
 	return networkState{
 		ctx: wifi.NetworkContext{
 			SSID:          ssid,

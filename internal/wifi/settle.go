@@ -64,3 +64,19 @@ func (t *SettleTracker) Observe(fingerprint string) (settled bool, remaining tim
 	}
 	return false, t.window - elapsed
 }
+
+// Peek reports what Observe would return for fingerprint without recording
+// it. Read-only callers (the GUI's automation preview poll) use it so a
+// transient fingerprint they happen to sample cannot restart the window.
+func (t *SettleTracker) Peek(fingerprint string) (settled bool, remaining time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.seen || fingerprint != t.fp {
+		return false, t.window
+	}
+	elapsed := t.now().Sub(t.since)
+	if elapsed >= t.window {
+		return true, 0
+	}
+	return false, t.window - elapsed
+}

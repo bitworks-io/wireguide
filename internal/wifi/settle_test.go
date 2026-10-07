@@ -30,6 +30,29 @@ func TestSettleTracker(t *testing.T) {
 	}
 }
 
+func TestSettleTrackerPeekIsReadOnly(t *testing.T) {
+	now := time.Unix(1000, 0)
+	tr := NewSettleTracker(func() time.Time { return now })
+
+	if ok, rem := tr.Peek("a"); ok || rem != NegationSettleWindow {
+		t.Fatalf("peek before any observe: settled=%v rem=%v", ok, rem)
+	}
+	tr.Observe("a")
+	now = now.Add(10 * time.Second)
+	// A transient fingerprint sampled by a read-only caller...
+	if ok, rem := tr.Peek("b"); ok || rem != NegationSettleWindow {
+		t.Fatalf("peek of other fingerprint: settled=%v rem=%v", ok, rem)
+	}
+	// ...must not restart the window for the observed one.
+	if ok, rem := tr.Peek("a"); ok || rem != 5*time.Second {
+		t.Fatalf("peek after transient: settled=%v rem=%v", ok, rem)
+	}
+	now = now.Add(5 * time.Second)
+	if ok, rem := tr.Observe("a"); !ok || rem != 0 {
+		t.Fatalf("observe after window: settled=%v rem=%v", ok, rem)
+	}
+}
+
 func TestNetworkFingerprint(t *testing.T) {
 	a := NetworkFingerprint("Net ", "en0", "B0:38:6C:54:8B:AB", []string{"10.0.0.0/24", "192.168.1.0/24"})
 	b := NetworkFingerprint("Net", "en0", "b0-38-6c-54-8b-ab", []string{"192.168.1.0/24", "10.0.0.0/24"})
