@@ -91,7 +91,9 @@
     "save": "保存",
     "cancel": "キャンセル",
     "name_placeholder": "トンネル名",
-    "name_required": "トンネル名を入力してください"
+    "name_required": "トンネル名を入力してください",
+    "tpl_dns_global": "すべてのクエリをトンネル経由",
+    "tpl_dns_split": "スプリット: corp.lan のみトンネル経由"
   },
   "settings": {
     "title": "設定",
@@ -116,7 +118,7 @@
     "kill_switch": "キルスイッチ",
     "kill_switch_hint": "VPN が切断されるとすべてのトラフィックをブロックします。接続時に自動適用。",
     "dns_protection": "DNS 保護",
-    "dns_protection_hint": "DNS を VPN トンネル経由のみに強制します。接続時に自動適用。",
+    "dns_protection_hint": "接続中のトンネルのリゾルバー以外へのDNSをブロックします。スプリット DNS(~domain)を使うトンネルや DNS のないトンネルはシステム DNS を維持し、影響を受けません。接続時に自動適用。",
     "health_check": "ヘルスチェック",
     "health_check_hint": "ハンドシェイクの状態を監視し、180 秒間トンネルが応答しない場合に再接続します。スリープ復帰直後や PersistentKeepalive のないアイドル状態のトンネルでも作動することがあるため、使用する場合は PersistentKeepalive = 25 を設定してください。",
     "pin_interface": "インターフェース固定",
@@ -202,7 +204,11 @@
     "message": "接続すると上記インターフェースのトラフィックルーティングに影響する可能性があります。より具体的なルートが優先されます。",
     "proceed": "それでも接続",
     "cancel": "キャンセル",
-    "and_more": "… ほか {n} 件"
+    "and_more": "… ほか {n} 件",
+    "same_address": "同じ Address",
+    "address_message": "接続中のトンネルがすでに同じインターフェース Address を使用しています。2 つのトンネルが 1 つのアドレスを使うとルーティングが曖昧になる場合があります。先にそのトンネルを切断するか、そのまま接続できます。",
+    "disconnect_and_connect": "{names} を切断して接続",
+    "disconnect_failed": "切断に失敗しました: {error}"
   },
   "update": {
     "available": "v{version} が利用可能",
@@ -350,5 +356,32 @@
     "detail_ping_none": "{host}: 応答なし",
     "detail_resolve_outside": "{name} -> {addrs} ({ms} ms) ({resolver}経由): リゾルバにはトンネルではなくローカルネットワーク経由で到達します",
     "hint_route_unmanaged": "Tableが設定されているため、WireGuideはメインテーブルにルートを追加しません。手動で追加してください。"
+  },
+  "lint": {
+    "dns_global_outside": "{servers} はトンネルではなく通常のネットワーク経由で到達し、接続中はすべてのインターフェースでシステム DNS を置き換えます(その後 DNS 保護はこのサーバーのみ許可)。~domain で範囲を限定するか、DNS を削除してください。",
+    "dns_mdns": "~{domain} は mDNS(.local)と重なり、トンネルの DNS サーバーに届かない場合があります。.lan や .corp など別のサフィックスを推奨します。",
+    "dns_split_windows": "Windows ではスプリット DNS(~domain)はサポートされません。このトンネルの DNS 設定は無視され、システム DNS が使われます。",
+    "address_shared": "{tunnel} と Address {address} を共有しています",
+    "mtu_missing": "MTU が未設定です(自動)。大きな転送で接続が止まる場合は MTU = 1420 以下を試してください。",
+    "mtu_high": "MTU {mtu} は {max} を超えており、一般的な 1500 バイト経路でパケットが断片化する可能性があります。",
+    "dns_lan_none": "プライベート名を解決できません: リモートネットワークの名前を解決するには DNS = {gateway}, ~<ドメイン> を追加してください。",
+    "dns_no_reverse": "スプリット DNS に逆引きゾーンがないため、リモートネットワークの IP から名前への検索はシステム DNS を使います。{zones} を追加するとトンネル経由になります。",
+    "fix_remove_dns": "DNS 行を削除",
+    "fix_append_dns": "逆引きゾーンを追加",
+    "cmp_tilde": "スプリット DNS ドメイン",
+    "cmp_tilde_info": "このドメイン(とサブドメイン)のみトンネルの DNS サーバーへ送ります。それ以外のクエリはシステム DNS のままです。同じ行に DNS サーバーの IP が 1 つ以上必要です。",
+    "cmp_gateway": "AllowedIPs から推定したゲートウェイ",
+    "cmp_zone": "AllowedIPs から導出した逆引きゾーン",
+    "cmp_template": "スプリット DNS 行",
+    "cmp_template_info": "サーバー、スプリットドメイン 1 つ、その逆引きゾーン。corp.lan をプライベートドメインに置き換えてください。",
+    "hover_global_title": "グローバル。",
+    "hover_global": "DNS = 1.1.1.1 は接続中すべてのインターフェースのシステム DNS を置き換えます。",
+    "hover_split_title": "スプリット。",
+    "hover_split": "DNS = 10.0.0.1, ~corp.lan は corp.lan のクエリだけをトンネルのサーバーに送り、システム DNS はそのままです。",
+    "hover_none_title": "なし。",
+    "hover_none": "DNS 行がなければシステム DNS は変更されないため、プライベート名はトンネル経由で解決されません。",
+    "hover_nxdomain": "トンネルのサーバーが知らない名前は NXDOMAIN を返し、システム DNS へのフォールバックはありません。",
+    "hover_dig": "dig はスプリット DNS を回避してサーバーに直接問い合わせます。アプリから見える結果は dscacheutil -q host -a name <名前> で確認してください。",
+    "hover_match": "スプリット DNS: {domain} とそのサブドメインのクエリはこのトンネルの DNS サーバーへ、それ以外はシステム DNS を使います。"
   }
 }

@@ -17,6 +17,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as config$0 from "../config/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as diag$0 from "../diag/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -411,6 +414,35 @@ export function ImportZipData(data) {
 }
 
 /**
+ * LintConfig returns advisory (non-blocking) editor diagnostics for a raw
+ * config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
+ * It never affects whether a config is valid. Content that does not parse
+ * yields no diagnostics (ValidateConfig reports the parse error).
+ * @param {string} content
+ * @returns {$CancellablePromise<config$0.Diagnostic[]>}
+ */
+export function LintConfig(content) {
+    return $Call.ByID(165708614, content).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType26($result);
+    }));
+}
+
+/**
+ * LintConfigFor is LintConfig for a config being edited under the saved
+ * tunnel name `editing` ("" for a new tunnel). That tunnel is excluded from
+ * the cross-tunnel duplicate-Address check so an edit never "conflicts" with
+ * its own saved copy.
+ * @param {string} editing
+ * @param {string} content
+ * @returns {$CancellablePromise<config$0.Diagnostic[]>}
+ */
+export function LintConfigFor(editing, content) {
+    return $Call.ByID(527601885, editing, content).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType26($result);
+    }));
+}
+
+/**
  * ListTunnels returns every stored tunnel with its summary info.
  * 
  * The active-tunnel marker used to come from an IPC round-trip on every call.
@@ -424,7 +456,7 @@ export function ImportZipData(data) {
  */
 export function ListTunnels() {
     return $Call.ByID(3587038916).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType25($result);
+        return $$createType27($result);
     }));
 }
 
@@ -439,7 +471,7 @@ export function ListTunnels() {
  */
 export function ListTunnelsLocal() {
     return $Call.ByID(3031176175).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType25($result);
+        return $$createType27($result);
     }));
 }
 
@@ -531,7 +563,7 @@ export function RenameTunnel(oldName, newName) {
  */
 export function ResolveHost(name) {
     return $Call.ByID(3083149897, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType27($result);
+        return $$createType29($result);
     }));
 }
 
@@ -543,7 +575,7 @@ export function ResolveHost(name) {
  */
 export function RunDNSLeakTest() {
     return $Call.ByID(2469114850).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType29($result);
+        return $$createType31($result);
     }));
 }
 
@@ -749,7 +781,7 @@ export function ValidateConfig(content) {
  */
 export function Verify(tunnelName, pingHost, resolveName) {
     return $Call.ByID(2039407192, tunnelName, pingHost, resolveName).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType31($result);
+        return $$createType33($result);
     }));
 }
 
@@ -779,10 +811,12 @@ const $$createType21 = $models.TunnelInfo.createFrom;
 const $$createType22 = $Create.Nullable($$createType21);
 const $$createType23 = $models.ZipImportResult.createFrom;
 const $$createType24 = $Create.Array($$createType23);
-const $$createType25 = $Create.Array($$createType21);
-const $$createType26 = $models.ResolveResult.createFrom;
-const $$createType27 = $Create.Nullable($$createType26);
-const $$createType28 = $models.DNSLeakResult.createFrom;
+const $$createType25 = config$0.Diagnostic.createFrom;
+const $$createType26 = $Create.Array($$createType25);
+const $$createType27 = $Create.Array($$createType21);
+const $$createType28 = $models.ResolveResult.createFrom;
 const $$createType29 = $Create.Nullable($$createType28);
-const $$createType30 = $models.VerifyRow.createFrom;
-const $$createType31 = $Create.Array($$createType30);
+const $$createType30 = $models.DNSLeakResult.createFrom;
+const $$createType31 = $Create.Nullable($$createType30);
+const $$createType32 = $models.VerifyRow.createFrom;
+const $$createType33 = $Create.Array($$createType32);
