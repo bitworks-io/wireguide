@@ -27,6 +27,16 @@ type DNSLeakResult struct {
 	// default system resolvers are expected there, so they are not leaks.
 	SplitMode           bool     `json:"split_mode,omitempty"`
 	MissingMatchDomains []string `json:"missing_match_domains,omitempty"`
+	// Domains has one row per split-DNS match domain: which resolver
+	// (if any) the system routes it to.
+	Domains []DomainCheck `json:"domains,omitempty"`
+}
+
+// DomainCheck is the per-"~domain" result of the split-mode check.
+type DomainCheck struct {
+	Domain     string `json:"domain"`
+	Resolver   string `json:"resolver,omitempty"` // tunnel nameserver registered for the domain
+	Registered bool   `json:"registered"`
 }
 
 // DNSServer represents a detected DNS resolver.

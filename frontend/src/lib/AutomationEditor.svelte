@@ -12,12 +12,23 @@
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
   import SSIDPermissionBanner from './SSIDPermissionBanner.svelte';
+  import { automationPreview, automationCheckedAt, AUTOMATION_POLL_MS, refreshAutomationPreview } from '../stores/automation.js';
+  import { networkLines, verdictFor, verdictText, verdictTone } from './automationLine.js';
 
   export let TunnelService;
   export let tunnelName = '';
   export let open = false;
 
   let rules = [];
+
+  // Live "why" strip: what network the engine sees and what it decided for
+  // THIS tunnel. Fed by the shared poller (App.svelte); opening the editor
+  // also refreshes immediately so it never opens on a stale reading.
+  $: whyNet = networkLines($t, $automationPreview);
+  $: whyVerdict = verdictFor($automationPreview, tunnelName);
+  $: whyLine = whyVerdict ? verdictText($t, whyVerdict) : '';
+  $: whySlowPoll = AUTOMATION_POLL_MS > 5000;
+  $: if (open) refreshAutomationPreview();
   // Local-only row identity for the {#each} key; never persisted
   // (persistSet() rebuilds plain objects). Monotonic and never reset, so
   // keys stay unique across loads. Note this does NOT preserve DOM across
@@ -351,6 +362,20 @@
         </div>
         <button class="am-close" on:click={close} aria-label="Close"><Icon name="x" size={16} strokeWidth={2} /></button>
       </div>
+      {#if $automationPreview?.available}
+        <div class="am-why" role="status" aria-live="polite" aria-label={$t('automation.why.title')}>
+          <div class="am-why-net">
+            <span>{whyNet.network}</span>
+            {#if whyNet.settle}<span class="am-why-sep">·</span><span>{whyNet.settle}</span>{/if}
+            {#if whySlowPoll && $automationCheckedAt}
+              <span class="am-why-sep">·</span><span>{$t('automation.why.checked_at', { time: new Date($automationCheckedAt).toLocaleTimeString() })}</span>
+            {/if}
+          </div>
+          {#if whyVerdict}
+            <div class="am-why-verdict am-why-{verdictTone(whyVerdict)}">{whyLine || $t('automation.why.v_no_match')}</div>
+          {/if}
+        </div>
+      {/if}
       <p class="am-hint">{$t('automation.hint')}</p>
 
       <SSIDPermissionBanner {TunnelService} />
@@ -444,6 +469,20 @@
 {/if}
 
 <style>
+  .am-why {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    font: 400 12px/16px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .am-why-net { display: flex; flex-wrap: wrap; gap: 0 6px; }
+  .am-why-sep { color: var(--text-muted); }
+  .am-why-verdict { margin-top: 3px; font-weight: 500; color: var(--text-primary); }
+  .am-why-warn { color: var(--orange, #FF9500); }
+
   .am-backdrop {
     position: fixed; inset: 0; z-index: 1000;
     background: color-mix(in srgb, #000 45%, transparent);

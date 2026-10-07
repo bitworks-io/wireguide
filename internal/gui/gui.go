@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
@@ -263,11 +264,19 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	var (
 		shutdownOnce sync.Once
 		doShutdown   func()
+		quitNotifier atomic.Pointer[notifier]
 	)
 	doShutdown = func() {
 		shutdownOnce.Do(func() {
 			stopHealth() // before any RPC to the helper; see healthDone above
 			slog.Info("shutting down GUI + helper")
+			// Our own quit tears the tunnels down: record it as a user
+			// disconnect and silence the notifier so the status stream
+			// catching up never reads as "disconnected outside the app".
+			tunnelService.UserActions().Begin(wgapp.AnyTunnel, false)
+			if nt := quitNotifier.Load(); nt != nil {
+				nt.stop()
+			}
 			// Close any in-flight history sessions BEFORE the helper goes
 			// away — snapshotActiveStats needs the helper alive to fetch
 			// last-known rx/tx counters.
@@ -320,6 +329,8 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	// Pass the tray's cheap icon-update hook — NOT the full menu rebuild —
 	// so the 1 Hz status stream doesn't trigger IPC round-trips on every event.
 	bridge := newEventBridge(app, clients, trayMgr.setIconState, tunnelService.ReconcileHistoryFromStatus, trayMgr.quitApp)
+	bridge.notify = newNotifier(settingsStore, tunnelService.UserActions())
+	quitNotifier.Store(bridge.notify)
 	bridge.start()
 
 	// Push the persisted log level to the helper now that the event

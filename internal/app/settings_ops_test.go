@@ -51,3 +51,9 @@ func TestOpenURL_JavascriptScheme(t *testing.T) {
 		t.Errorf("expected 'URL not allowed' error, got: %v", err)
 	}
 }
+
+func TestRepoURL(t *testing.T) {
+	if got := repoURL(); got != "https://github.com/bitworks-io/wireguide" {
+		t.Fatalf("repoURL = %q", got)
+	}
+}

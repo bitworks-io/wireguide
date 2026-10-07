@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { Events } from '@wailsio/runtime';
   import { t } from '../i18n/index.js';
+  import { errText } from './errors.js';
   import { connectionStatus } from '../stores/tunnels.js';
 
   // Dismissible top-of-window banner — *not* a modal — matching the
@@ -51,7 +52,7 @@
       if (onInstall) await onInstall();
       // RunUpdate verifies the installed version and schedules the restart.
     } catch (e) {
-      errorMsg = ($t('update.install_failed') || 'Update failed') + ': ' + (e?.message || e);
+      errorMsg = ($t('update.install_failed') || 'Update failed') + ': ' + errText(e);
     } finally {
       installing = false;
       phase = '';

@@ -72,6 +72,8 @@ func Run(args []string) int {
 		return cmdDNSLeak(rest)
 	case "routes":
 		return cmdRoutes(rest)
+	case "verify":
+		return cmdVerify(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -117,6 +119,9 @@ Settings & diagnostics:
   wireguide ctl set loglevel <debug|info|warn|error>
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
+  wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]
+                                               check handshake, routes, split-DNS resolvers and
+                                               optionally ping / resolve a host (exit 1 on any red)
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]
@@ -280,15 +285,42 @@ func cmdStatus(args []string) int {
 	if jsonOut {
 		return printJSON(rows)
 	}
+	dns := tunnelDNSModes(rows)
 	for _, r := range rows {
-		hs := r.LastHandshake
-		if hs == "" {
-			hs = "—"
-		}
-		fmt.Printf("● %s  %s  rx=%s tx=%s  handshake=%s\n",
-			r.TunnelName, r.Duration, humanBytes(r.RxBytes), humanBytes(r.TxBytes), hs)
+		fmt.Println(formatStatusRow(r, dns[r.TunnelName]))
 	}
 	return 0
+}
+
+// formatStatusRow renders one `ctl status` line. dns is the DNSMode
+// StatusString ("" when the config could not be read).
+func formatStatusRow(r domain.ConnectionStatus, dns string) string {
+	hs := r.LastHandshake
+	if hs == "" {
+		hs = "—"
+	}
+	line := fmt.Sprintf("● %s  %s  rx=%s tx=%s  handshake=%s",
+		r.TunnelName, r.Duration, humanBytes(r.RxBytes), humanBytes(r.TxBytes), hs)
+	if dns != "" {
+		line += "  dns=" + dns
+	}
+	return line
+}
+
+// tunnelDNSModes maps each row's tunnel to its intended DNS mode, read from
+// the stored config (no IPC). Unreadable configs are simply absent.
+func tunnelDNSModes(rows []domain.ConnectionStatus) map[string]string {
+	out := make(map[string]string, len(rows))
+	store, err := tunnelStore()
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if cfg, err := store.Load(r.TunnelName); err == nil && cfg != nil {
+			out[r.TunnelName] = diag.DNSModeOf(cfg.Interface.DNS).StatusString()
+		}
+	}
+	return out
 }
 
 // tunnelListEntry is the --json shape for `ctl list`; domain.ConnectionStatus
@@ -1075,4 +1107,106 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// flagValue returns the value following flag in args ("" when absent).
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, flag+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// formatVerifyRows renders verify rows as aligned text; the exit code is 1
+// when any row is red.
+func formatVerifyRows(rows []diag.VerifyRow) (string, int) {
+	var b strings.Builder
+	code := 0
+	for _, r := range rows {
+		mark := map[string]string{diag.StatusGreen: "OK  ", diag.StatusAmber: "WARN", diag.StatusRed: "FAIL"}[r.Status]
+		if r.Status == diag.StatusRed {
+			code = 1
+		}
+		fmt.Fprintf(&b, "%s %-9s %s\n", mark, r.Check, r.Detail)
+		if r.Hint != "" && r.Status != diag.StatusGreen {
+			fmt.Fprintf(&b, "     %-9s hint: %s\n", "", r.Hint)
+		}
+	}
+	return b.String(), code
+}
+
+func cmdVerify(args []string) int {
+	jsonOut := hasFlag(args, "--json")
+	resolveName := flagValue(args, "--resolve")
+	pingHost := flagValue(args, "--ping")
+	var name string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--resolve" || a == "--ping":
+			i++
+		case strings.HasPrefix(a, "-"):
+		default:
+			if name == "" {
+				name = a
+			}
+		}
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]")
+		return 2
+	}
+	store, err := tunnelStore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "verify:", err)
+		return 1
+	}
+	cfg, err := store.Load(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: tunnel %q: %v\n", name, err)
+		return 1
+	}
+	c, err := dialHelper()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer c.Close()
+	var st domain.ConnectionStatus
+	if err := c.Call(ipc.MethodStatus, nil, &st); err != nil {
+		fmt.Fprintln(os.Stderr, "verify:", err)
+		return 1
+	}
+	in := diag.VerifyInput{Tunnel: name, DNS: cfg.Interface.DNS, PingHost: pingHost, ResolveName: resolveName}
+	for _, p := range cfg.Peers {
+		in.AllowedIPs = append(in.AllowedIPs, p.AllowedIPs...)
+	}
+	rows := st.Tunnels
+	if len(rows) == 0 {
+		rows = []domain.ConnectionStatus{st}
+	}
+	for _, r := range rows {
+		if r.TunnelName == name && r.State == domain.StateConnected {
+			in.Connected, in.Interface, in.LastHandshake = true, r.InterfaceName, r.LastHandshake
+		}
+	}
+	res := diag.Verify(context.Background(), in)
+	if jsonOut {
+		if code := printJSON(res); code != 0 {
+			return code
+		}
+		for _, r := range res {
+			if r.Status == diag.StatusRed {
+				return 1
+			}
+		}
+		return 0
+	}
+	text, code := formatVerifyRows(res)
+	fmt.Print(text)
+	return code
 }

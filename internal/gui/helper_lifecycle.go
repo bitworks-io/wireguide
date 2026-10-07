@@ -344,6 +344,9 @@ func startHelperHealthMonitor(app *application.App, clients *ipc.ClientHolder, d
 					Detail: "The VPN helper is unavailable. Quit and reopen WireGuide to retry helper setup.",
 				})
 				outageReported = true
+				if bridge != nil && bridge.notify != nil {
+					bridge.notify.onCriticalError("Helper connection")
+				}
 			}
 		}
 	}()

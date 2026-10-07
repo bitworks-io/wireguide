@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	wgapp "github.com/korjwl1/wireguide/internal/app"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -29,6 +30,10 @@ type eventBridge struct {
 	// onQuitRequested terminates the app. Fired for ipc.EventQuit, which
 	// the helper broadcasts when someone runs `wireguide ctl stop`.
 	onQuitRequested func()
+
+	// notify posts native notifications for automatic changes. Optional;
+	// wired after construction by gui.Run.
+	notify *notifier
 
 	mu           sync.Mutex
 	subscribedTo *ipc.Client // tracks which client we're currently subscribed on
@@ -69,6 +74,9 @@ func (b *eventBridge) Resubscribe() {
 	b.resubscribe()
 	// Let the frontend know that state is now fresh — it should re-fetch the
 	// tunnel list and status since the helper lost any in-memory state.
+	if b.notify != nil {
+		b.notify.reset()
+	}
 	b.app.Event.Emit("helper_reset", struct{}{})
 }
 
@@ -103,6 +111,9 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			slog.Debug("event bridge: unmarshal status failed", "error", err)
 		} else {
 			b.app.Event.Emit("status", status)
+			if b.notify != nil {
+				b.notify.onStatus(wgapp.ConnectedTunnels(status))
+			}
 			if b.onStatusChange != nil {
 				hsMap := make(map[string]bool)
 				for _, ts := range status.Tunnels {
@@ -167,6 +178,9 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			slog.Debug("event bridge: unmarshal auto_connect failed", "error", err)
 		} else {
 			b.app.Event.Emit("auto_connected", payload)
+			if b.notify != nil {
+				b.notify.onAutoConnected(payload.TunnelName)
+			}
 		}
 	case ipc.EventQuit:
 		// `wireguide ctl stop` — the user asked for the whole app to go
@@ -199,6 +213,9 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 		} else {
 			slog.Error("helper background goroutine died permanently", "where", payload.Where, "detail", payload.Detail)
 			b.app.Event.Emit("critical_error", payload)
+			if b.notify != nil {
+				b.notify.onCriticalError(payload.Where)
+			}
 		}
 	}
 }

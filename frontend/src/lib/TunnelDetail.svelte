@@ -6,6 +6,9 @@
   import { createEventDispatcher, tick, onDestroy } from 'svelte';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
+  import VerifyPanel from './VerifyPanel.svelte';
+  import { automationPreview } from '../stores/automation.js';
+  import { verdictFor, verdictText, verdictTone } from './automationLine.js';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -166,7 +169,7 @@
   }
 
   // Splits an [Interface] DNS= list into servers, search domains and
-  // "~domain" split-DNS (routing-only) domains, mirroring domain.ParseDNSEntries.
+  // "~domain" split-DNS (routing-only) domains, for the info rows below.
   function parseDnsEntries(list) {
     const out = { servers: [], search: [], match: [] };
     for (const raw of list || []) {
@@ -180,6 +183,15 @@
   }
 
   $: dnsInfo = parseDnsEntries(detail?.interface?.dns);
+  // Intended DNS behaviour from the config (not read back from the OS). It
+  // comes from the backend classifier (diag.DNSModeOf) so the hero chip, the
+  // list row, `ctl status` and the tray tooltip always agree.
+  $: dnsChipMode = $selectedTunnel?.dns_mode || '';
+  $: dnsDomains = $selectedTunnel?.dns_domains || [];
+  // Why automation is / isn't acting on this tunnel (same one-liner as the
+  // Automation editor strip and the list row).
+  $: autoVerdict = verdictFor($automationPreview, $selectedTunnel?.name);
+  $: autoLine = autoVerdict ? verdictText($t, autoVerdict) : '';
   $: autoLatency = autoLatencyTarget(detail, $selectedTunnel);
   $: latencyTargetDisplay = latencyTargetSaved
     ? latencyTargetSaved
@@ -396,7 +408,7 @@
 <div class="detail-panel">
   {#if !$selectedTunnel}
     <div class="no-selection">
-      <p>{$t('tunnel.no_tunnels')}</p>
+      <p>{$t($tunnels.length > 0 ? 'tunnel.no_selection' : 'tunnel.no_tunnels')}</p>
     </div>
   {:else}
     <!-- HERO STATUS CARD: big visual, gradient bg by state, large icon -->
@@ -461,6 +473,18 @@
             <span class="hero-endpoint">{$selectedTunnel.endpoint}</span>
           {/if}
         </div>
+        {#if dnsChipMode}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-{dnsChipMode}" title={$t('tunnel.dns_chip_' + dnsChipMode + '_hint')}>
+              {$t('tunnel.dns_chip_' + dnsChipMode, { domains: dnsDomains.join(', ') })}
+            </span>
+          </div>
+        {/if}
+        {#if autoLine}
+          <div class="hero-dns-line">
+            <span class="dns-chip auto-chip auto-chip-{verdictTone(autoVerdict)}" title={autoLine}>{autoLine}</span>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -602,6 +626,13 @@
           </div>
         {/if}
       </div>
+    {/if}
+
+    <!-- VERIFY: manual post-connect checks -->
+    {#if isConnected && status.state === 'connected'}
+      {#key $selectedTunnel.name}
+        <VerifyPanel {TunnelService} tunnelName={$selectedTunnel.name} resolveHint={dnsDomains[0] ? 'nas.' + dnsDomains[0] : ''} />
+      {/key}
     {/if}
 
     <!-- NOTES -->
@@ -881,6 +912,23 @@
   .hero-card.hero-connecting .hero-state-text { color: var(--yellow); }
   .hero-card.hero-warning .hero-state-text { color: var(--orange, #FF9500); }
   .hero-sep { color: var(--text-muted); opacity: 0.6; }
+  .hero-dns-line { margin-top: 6px; min-width: 0; }
+  .dns-chip {
+    display: inline-block;
+    max-width: 100%;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 0.5px solid var(--border);
+    background: var(--bg-card);
+    font: 500 11px/16px var(--font-sans);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: top;
+  }
+  .dns-chip-split { color: var(--blue, var(--accent)); }
+  .auto-chip-warn { color: var(--orange, #FF9500); }
   .hero-endpoint {
     color: var(--text-secondary);
     font-family: var(--font-mono);

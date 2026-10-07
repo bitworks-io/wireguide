@@ -55,28 +55,39 @@ func parseScutilDNS(out string) []scutilResolver {
 	return blocks
 }
 
-// evaluateSplitDNS checks, for every split-DNS match domain, that an
+// evaluateSplitDomains reports, for every split-DNS match domain, whether an
 // unscoped supplemental resolver exists whose nameservers include one of the
-// tunnel's servers. It returns the domains lacking one. Pure.
-func evaluateSplitDNS(blocks []scutilResolver, p domain.DNSEntries) (missing []string) {
+// tunnel's servers, and which one. Rows are in config order. Pure.
+func evaluateSplitDomains(blocks []scutilResolver, p domain.DNSEntries) []DomainCheck {
 	servers := make(map[string]bool, len(p.Servers))
 	for _, s := range p.Servers {
 		servers[s] = true
 	}
+	rows := make([]DomainCheck, 0, len(p.Match))
 	for _, d := range p.Match {
-		found := false
+		row := DomainCheck{Domain: d}
 		for _, b := range blocks {
 			if b.Scoped || b.Domain != strings.ToLower(d) {
 				continue
 			}
 			for _, ns := range b.Nameservers {
-				if servers[ns] {
-					found = true
+				if servers[ns] && !row.Registered {
+					row.Registered = true
+					row.Resolver = ns
 				}
 			}
 		}
-		if !found {
-			missing = append(missing, d)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// evaluateSplitDNS returns the match domains lacking a tunnel supplemental
+// resolver, sorted. Pure.
+func evaluateSplitDNS(blocks []scutilResolver, p domain.DNSEntries) (missing []string) {
+	for _, row := range evaluateSplitDomains(blocks, p) {
+		if !row.Registered {
+			missing = append(missing, row.Domain)
 		}
 	}
 	sort.Strings(missing)
@@ -119,6 +130,7 @@ func runSplitDNSCheck(ctx context.Context, result *DNSLeakResult, p domain.DNSEn
 			}
 		}
 	}
+	result.Domains = evaluateSplitDomains(blocks, p)
 	result.MissingMatchDomains = evaluateSplitDNS(blocks, p)
 	if len(result.MissingMatchDomains) > 0 {
 		result.Error = "split DNS: no supplemental resolver for " + strings.Join(result.MissingMatchDomains, ", ")

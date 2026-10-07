@@ -53,6 +53,7 @@ func (s *TunnelService) ListTunnelsLocal() ([]TunnelInfo, error) {
 		if created == 0 {
 			created = s.tunnelStore.ModTimeUnix(name)
 		}
+		dnsMode := diag.DNSModeOf(cfg.Interface.DNS)
 		result = append(result, TunnelInfo{
 			Name:               name,
 			Endpoint:           endpoint,
@@ -60,6 +61,8 @@ func (s *TunnelService) ListTunnelsLocal() ([]TunnelInfo, error) {
 			LatencyProbeTarget: latencyProbeTarget,
 			CreatedAtUnix:      created,
 			LastUsedUnix:       lastUsed[name],
+			DNSMode:            dnsMode.Mode,
+			DNSDomains:         dnsMode.Domains,
 		})
 	}
 	return result, nil
@@ -164,6 +167,7 @@ func (s *TunnelService) ListTunnels() ([]TunnelInfo, error) {
 		if created == 0 {
 			created = s.tunnelStore.ModTimeUnix(name)
 		}
+		dnsMode := diag.DNSModeOf(cfg.Interface.DNS)
 		result = append(result, TunnelInfo{
 			Name:               name,
 			IsConnected:        name == active.Value,
@@ -172,6 +176,8 @@ func (s *TunnelService) ListTunnels() ([]TunnelInfo, error) {
 			LatencyProbeTarget: latencyProbeTarget,
 			CreatedAtUnix:      created,
 			LastUsedUnix:       lastUsed[name],
+			DNSMode:            dnsMode.Mode,
+			DNSDomains:         dnsMode.Domains,
 		})
 	}
 	return result, nil
@@ -219,6 +225,8 @@ func (s *TunnelService) Connect(name string) error {
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()
 
+	s.userActions.Begin(name, true)
+	defer s.userActions.End(name, true)
 	return s.callLong(ipc.MethodConnect, ipc.ConnectRequest{
 		Config: cfg,
 	}, nil)
@@ -238,6 +246,15 @@ func (s *TunnelService) Connect(name string) error {
 func (s *TunnelService) Disconnect() error {
 	name, rx, tx := s.snapshotActiveStats("")
 	s.markUserDisconnect(name, rx, tx)
+
+	// Empty name = "whatever is active" — mark the wildcard so a status
+	// diff for any tunnel in this window counts as user-initiated.
+	actionName := name
+	if actionName == "" {
+		actionName = AnyTunnel
+	}
+	s.userActions.Begin(actionName, false)
+	defer s.userActions.End(actionName, false)
 
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()
@@ -263,6 +280,8 @@ func (s *TunnelService) Disconnect() error {
 func (s *TunnelService) DisconnectTunnel(name string) error {
 	_, rx, tx := s.snapshotActiveStats(name)
 	s.markUserDisconnect(name, rx, tx)
+	s.userActions.Begin(name, false)
+	defer s.userActions.End(name, false)
 
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()

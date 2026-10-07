@@ -17,6 +17,7 @@
   import { startLogListener, stopLogListener } from './stores/logs.js';
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
+  import { startAutomationPolling, stopAutomationPolling, refreshAutomationPreview } from './stores/automation.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -169,6 +170,8 @@
       }
     });
 
+    startAutomationPolling(TunnelService);
+
     // Helper reset — the GUI's IPC client was swapped after a helper
     // restart. Local caches may be stale; re-fetch everything AND
     // close any in-flight modals whose state references something
@@ -184,26 +187,27 @@
       criticalErrors = [];
       await initialLoad(TunnelService);
       await refreshStatus(TunnelService);
+      refreshAutomationPreview();
     });
 
-    // Wi-Fi SSID change events are still broadcast by the helper for
-    // observability, but rule evaluation now lives in the helper
-    // itself (internal/helper/wifi_rules_darwin.go). That keeps
-    // auto-connect / auto-disconnect working when the GUI is fully
-    // quit — the helper has KeepAlive=true and runs the rules
-    // independently. We just show a brief toast here so the user
-    // sees what happened.
-    wifiSsidUnsub = Events.On('wifi_ssid', (event) => {
-      const { new_ssid } = event.data || {};
-      if (new_ssid) {
-        showToast(`Wi-Fi: ${new_ssid}`);
-      }
+    // Wi-Fi SSID change events are still broadcast by the helper, but rule
+    // evaluation lives in the helper itself (internal/helper/wifi_rules*.go)
+    // so auto-connect / auto-disconnect keep working with the GUI quit.
+    // No toast here: a raw "Wi-Fi: X" on every roam is noise. The Automation
+    // status strip and the per-tunnel chips show the network and what the
+    // rules decided; just refresh them now rather than at the next poll.
+    wifiSsidUnsub = Events.On('wifi_ssid', () => {
+      refreshAutomationPreview();
     });
 
-    // Helper auto-connected a tunnel via Wi-Fi rules.
+    // Helper auto-connected a tunnel via Automation rules.
     // EventStatus broadcast handles tunnel state/status update within 1s.
-    // Only need to apply firewall settings here (same as after manual connect).
-    autoConnectedUnsub = Events.On('auto_connected', async () => {
+    // Apply firewall settings here (same as after manual connect) and tell
+    // the user which tunnel automation brought up.
+    autoConnectedUnsub = Events.On('auto_connected', async (event) => {
+      const name = event.data?.tunnel_name;
+      if (name) showToast($t('automation.why.toast_connected', { name }));
+      refreshAutomationPreview();
       await applyFirewallSettings();
     });
 
@@ -246,6 +250,7 @@
     if (updateUnsub) updateUnsub();
     if (configChangedUnsub) configChangedUnsub();
     if (tunnelsChangedUnsub) tunnelsChangedUnsub();
+    stopAutomationPolling();
     if (toastTimer) clearTimeout(toastTimer);
   });
 
@@ -567,7 +572,7 @@
         showToast(`Exported to ${path}`);
       }
     } catch (err) {
-      showToast('Export failed: ' + err.toString());
+      showToast('Export failed: ' + errText(err));
     }
   }
 
@@ -632,7 +637,7 @@
     try {
       await TunnelService.RunUpdate(updateInfo);
     } catch (e) {
-      showToast('Update failed: ' + (e?.message || e));
+      showToast('Update failed: ' + errText(e));
       // Rethrow: modal-context callers (Settings → About, the banner)
       // render the failure inline — a toast alone can sit underneath an
       // open modal where it is never seen.

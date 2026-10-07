@@ -34,6 +34,11 @@ type TunnelService struct {
 	clients       *ipc.ClientHolder
 	app           *application.App
 
+	// userActions records connects/disconnects the user (window, tray)
+	// made in THIS process, so the notifier can tell them apart from
+	// automatic changes. See autonotify.go.
+	userActions *UserActions
+
 	// updateScheduler + updateStore are wired in by the GUI Run() entry
 	// after the Wails service registers (we can't inject them at
 	// construction time because the scheduler needs the app reference to
@@ -87,8 +92,15 @@ func NewTunnelService(ts *storage.TunnelStore, ss *storage.SettingsStore, hs *st
 		settingsStore: ss,
 		historyStore:  hs,
 		clients:       clients,
+		userActions:   NewUserActions(),
 	}
 }
+
+// UserActions exposes the record of user-initiated connects/disconnects
+// to the GUI's notifier. Not bound to the frontend.
+//
+//wails:ignore
+func (s *TunnelService) UserActions() *UserActions { return s.userActions }
 
 // SetApp injects the Wails app for dialog access.
 func (s *TunnelService) SetApp(app *application.App) {
@@ -151,6 +163,10 @@ type TunnelInfo struct {
 	// feed the tunnel-list "date added" / "last used" sort (issue #17).
 	CreatedAtUnix int64 `json:"created_at_unix,omitempty"`
 	LastUsedUnix  int64 `json:"last_used_unix,omitempty"`
+	// DNSMode is the intended DNS behaviour from the config: "global"
+	// (replaces system DNS), "split" (only DNSDomains) or "none".
+	DNSMode    string   `json:"dns_mode,omitempty"`
+	DNSDomains []string `json:"dns_domains,omitempty"`
 }
 
 // ConnectionStatus is re-exported from the domain package so Wails bindings

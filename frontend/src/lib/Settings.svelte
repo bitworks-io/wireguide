@@ -6,6 +6,7 @@
   import { connectionStatus, tunnels } from '../stores/tunnels.js';
   import { compactList } from '../stores/ui.js';
   import Icon from './Icon.svelte';
+  import { errText } from './errors.js';
 
   export let TunnelService;
   export let onClose = () => {};
@@ -70,7 +71,7 @@
       // timestamp flipping to "just now" is the silent feedback that
       // the click actually did something.
     } catch (e) {
-      aboutCheckResult = ($t('update.check_failed') || 'Check failed') + ': ' + (e?.message || e);
+      aboutCheckResult = ($t('update.check_failed') || 'Check failed') + ': ' + errText(e);
     } finally {
       aboutChecking = false;
     }
@@ -122,10 +123,20 @@
     } catch (e) {
       // Inline, next to the button that failed — the toast alone renders
       // under this modal.
-      aboutCheckResult = ($t('update.install_failed') || 'Update failed') + ': ' + (e?.message || e);
+      aboutCheckResult = ($t('update.install_failed') || 'Update failed') + ': ' + errText(e);
     } finally {
       aboutUpdating = false;
     }
+  }
+
+  // About links come from the backend's build-time repo (fork builds point
+  // at their own repository), not a hard-coded upstream URL.
+  function repoLink(path) {
+    const base = (updateState?.repo_url || 'https://github.com/bitworks-io/wireguide').replace(/\/+$/, '');
+    return base + path;
+  }
+  function formatErrorTime(unix) {
+    return unix ? new Date(unix * 1000).toLocaleString() : '—';
   }
 
   let activeTab = 'general';
@@ -141,6 +152,7 @@
     tray_icon_style: 'color',
     auto_update_check: true,
     compact_list: false,
+    notify_auto_changes: true,
   };
   let loaded = false;
   let appVersion = '';
@@ -159,6 +171,7 @@
         settings.log_level = s.log_level || 'info';
         settings.tray_icon_style = s.tray_icon_style || 'color';
         settings.compact_list = s.compact_list ?? false;
+        settings.notify_auto_changes = s.notify_auto_changes ?? true;
         // Legacy settings.json predates this field — *bool null on
         // the Go side becomes undefined here; default to true to match
         // Settings.AutoUpdateCheckEnabled() semantics.
@@ -201,6 +214,7 @@
         log_level: settings.log_level,
         auto_update_check: settings.auto_update_check,
         compact_list: settings.compact_list,
+        notify_auto_changes: settings.notify_auto_changes,
         // List-ordering prefs are owned by the tunnel-list header, not
         // this screen — carry them from the fresh fetch so saving any
         // Settings toggle doesn't wipe them back to defaults.
@@ -445,6 +459,16 @@
                   <span class="toggle-track"></span>
                 </label>
               </div>
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <label class="setting-label" for="notify-auto">{$t('settings.notify_auto')}</label>
+                  <p class="setting-desc">{$t('settings.notify_auto_hint')}</p>
+                </div>
+                <label class="toggle">
+                  <input id="notify-auto" type="checkbox" bind:checked={settings.notify_auto_changes} on:change={scheduleSave} />
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -567,6 +591,9 @@
                   </button>
                   <span class="check-meta">{formatLastChecked(updateState?.last_check_unix, nowTick)}</span>
                 </div>
+                {#if updateState?.consecutive_errors > 0}
+                  <div class="check-result">{$t('settings.update_check_failing', { n: updateState.consecutive_errors, when: formatErrorTime(updateState.last_error_unix) })}</div>
+                {/if}
                 {#if updateState?.is_dev_build}
                   <!-- Explains why "Never checked" sticks even on a healthy install:
                        dev builds intentionally skip the auto-check loop so local
@@ -598,10 +625,10 @@
             {/if}
 
             <div class="about-links">
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide')}>GitHub</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/releases')}>{$t('settings.about_releases')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/issues')}>{$t('settings.about_issues')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/blob/main/LICENSE')}>{$t('settings.about_license')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink(''))}>GitHub</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/releases'))}>{$t('settings.about_releases')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/issues'))}>{$t('settings.about_issues')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/blob/main/LICENSE'))}>{$t('settings.about_license')}</button>
             </div>
 
             <p class="about-credits-line">{$t('settings.about_credits')}</p>

@@ -8,13 +8,18 @@ export {
 };
 
 export {
+    AutomationPreview,
+    AutomationVerdict,
     ConnectionStatus,
     CurrentNetwork,
     DNSLeakResult,
     DNSServer,
+    DomainCheck,
     KnownSSIDs,
+    ResolveResult,
     RouteEntry,
     TunnelInfo,
     UpdateState,
+    VerifyRow,
     ZipImportResult
 } from "./models.js";

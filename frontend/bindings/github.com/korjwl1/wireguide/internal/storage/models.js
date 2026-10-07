@@ -185,6 +185,16 @@ export class Settings {
              */
             this["compact_list"] = false;
         }
+        if (!("notify_auto_changes" in $$source)) {
+            /**
+             * NotifyAutoChanges: show a native notification when a tunnel
+             * connects/disconnects without a user action in the GUI (automation,
+             * wake, CLI) and on critical helper errors. Defaults to on.
+             * @member
+             * @type {boolean}
+             */
+            this["notify_auto_changes"] = false;
+        }
         if (!("list_sort" in $$source)) {
             /**
              * ListSort controls tunnel-list ordering: "name_asc" (default),
@@ -256,14 +266,14 @@ export class Settings {
      * @returns {Settings}
      */
     static createFrom($$source = {}) {
-        const $$createField14_0 = $$createType0;
-        const $$createField15_0 = $$createType2;
+        const $$createField15_0 = $$createType0;
+        const $$createField16_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("wifi_rules" in $$parsedSource) {
-            $$parsedSource["wifi_rules"] = $$createField14_0($$parsedSource["wifi_rules"]);
+            $$parsedSource["wifi_rules"] = $$createField15_0($$parsedSource["wifi_rules"]);
         }
         if ("automation" in $$parsedSource) {
-            $$parsedSource["automation"] = $$createField15_0($$parsedSource["automation"]);
+            $$parsedSource["automation"] = $$createField16_0($$parsedSource["automation"]);
         }
         return new Settings(/** @type {Partial<Settings>} */($$parsedSource));
     }

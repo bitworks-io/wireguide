@@ -1,5 +1,6 @@
 <script>
   import { t } from '../i18n/index.js';
+  import { errText } from './errors.js';
   import { TunnelService } from '../../bindings/github.com/korjwl1/wireguide/internal/app';
   import { onMount } from 'svelte';
 
@@ -13,7 +14,7 @@
     try {
       routes = (await TunnelService.GetRoutingTable()) || [];
     } catch (e) {
-      error = e?.message || String(e);
+      error = errText(e);
     }
     loading = false;
   }

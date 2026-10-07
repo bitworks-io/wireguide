@@ -312,6 +312,14 @@ type UpdateState struct {
 	DismissedVersions []string `json:"dismissed_versions"`
 	IsDevBuild        bool     `json:"is_dev_build"`
 	AutoEnabled       bool     `json:"auto_enabled"`
+	// LastErrorUnix / ConsecutiveErrors come from update.json: the time of
+	// the most recent failed check and how many failed in a row since the
+	// last success (0 = healthy). RepoURL is the project the About links
+	// and update checks target (a build-time constant: fork builds point
+	// at their own repo).
+	LastErrorUnix     int64  `json:"last_error_unix"`
+	ConsecutiveErrors int    `json:"consecutive_errors"`
+	RepoURL           string `json:"repo_url"`
 }
 
 // GetUpdateState returns persisted state for the About tab UI.
@@ -320,6 +328,7 @@ func (s *TunnelService) GetUpdateState() UpdateState {
 		CurrentVersion: update.CurrentVersion(),
 		IsDevBuild:     update.IsDevBuild(),
 		AutoEnabled:    true,
+		RepoURL:        repoURL(),
 	}
 	if s.settingsStore != nil {
 		if cfg, _ := s.settingsStore.Load(); cfg != nil {
@@ -331,8 +340,17 @@ func (s *TunnelService) GetUpdateState() UpdateState {
 		out.LastCheckUnix = st.LastCheckUnix
 		out.LastSeenVersion = st.LastSeenVersion
 		out.DismissedVersions = st.DismissedVersions
+		out.LastErrorUnix = st.LastErrorUnix
+		out.ConsecutiveErrors = st.ConsecutiveErrors
 	}
 	return out
+}
+
+// repoURL derives the repository root from the update package's
+// build-time release URL so the About links can't drift from the repo
+// updates are fetched from.
+func repoURL() string {
+	return strings.TrimSuffix(update.ReleasesURL(), "/releases/latest")
 }
 
 // DismissUpdate persists a version dismissal so the in-app banner stays
