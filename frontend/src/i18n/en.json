@@ -200,7 +200,12 @@
     "helper_reason_launchd_socket": "launchd started the helper because a client connected to its socket",
     "helper_reason_legacy": "launchd did not hand over a socket; the helper listens on its own",
     "helper_reason_direct": "Started directly, without launchd",
-    "dns_protection_idle": "Turned on. Nothing to protect until a tunnel with DNS servers connects."
+    "dns_protection_idle": "Turned on. Nothing to protect until a tunnel with DNS servers connects.",
+    "export_diagnostics": "Export diagnostics…",
+    "export_diagnostics_hint": "Saves a zip with logs, redacted tunnel configs, DNS, routes and firewall state for bug reports. Private and preshared keys are never included.",
+    "export_diagnostics_busy": "Exporting…",
+    "export_diagnostics_done": "Saved to {path}",
+    "export_diagnostics_failed": "Export failed"
   },
   "confirm": {
     "delete_title": "Delete Tunnel",
@@ -467,5 +472,14 @@
     "dns_only": "WireGuide recovered from an interrupted session and restored your DNS settings.",
     "firewall_only": "WireGuide removed leftover firewall rules from an interrupted session.",
     "dismiss": "Dismiss"
+  },
+  "url_action": {
+    "connect_title": "Connect from a link?",
+    "disconnect_title": "Disconnect from a link?",
+    "connect_message": "A link or shortcut asked WireGuide to connect \"{name}\".",
+    "disconnect_message": "A link or shortcut asked WireGuide to disconnect \"{name}\".",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "cancel": "Cancel"
   }
 }

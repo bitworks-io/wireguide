@@ -331,11 +331,12 @@ func (s *TunnelService) markUserDisconnect(name string, snapRx, snapTx int64) {
 	}
 	if cached, ok := s.lastKnownStats.Load(name); ok {
 		if st, ok := cached.(lastKnownTunnelStats); ok {
-			s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: st.rx, tx: st.tx, reason: "user"})
+			st.reason = "user"
+			s.lastKnownStats.Store(name, st)
 			return
 		}
 	}
-	s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: snapRx, tx: snapTx, reason: "user"})
+	s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: snapRx, tx: snapTx, rawRx: snapRx, rawTx: snapTx, reason: "user"})
 }
 
 // clearUserDisconnect removes the "user" reason hint after a failed
@@ -347,7 +348,8 @@ func (s *TunnelService) clearUserDisconnect(name string) {
 	}
 	if cached, ok := s.lastKnownStats.Load(name); ok {
 		if st, ok := cached.(lastKnownTunnelStats); ok && st.reason == "user" {
-			s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: st.rx, tx: st.tx, reason: ""})
+			st.reason = ""
+			s.lastKnownStats.Store(name, st)
 		}
 	}
 }
@@ -428,13 +430,14 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		if txByTunnel != nil {
 			tx = txByTunnel[name]
 		}
-		reason := ""
+		// Fold the reading into the session totals instead of overwriting:
+		// a Connecting/Disconnecting tunnel reports 0/0 while still active,
+		// which used to wipe the real counters one tick before the close.
+		var prev lastKnownTunnelStats
 		if cached, ok := s.lastKnownStats.Load(name); ok {
-			if st, ok := cached.(lastKnownTunnelStats); ok {
-				reason = st.reason
-			}
+			prev, _ = cached.(lastKnownTunnelStats)
 		}
-		s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: rx, tx: tx, reason: reason})
+		s.lastKnownStats.Store(name, prev.merge(rx, tx))
 	}
 
 	// Build a stable signature of the active set and compare to the prior
@@ -552,11 +555,13 @@ func (s *TunnelService) CloseHistorySessions(reason string) {
 			// Fall back to last-known cache when the helper status
 			// didn't include this tunnel (e.g. helper already torn
 			// down the interface but the GUI's session map is fresh).
-			if rx == 0 && tx == 0 {
-				if cached, ok := s.lastKnownStats.Load(name); ok {
-					if st, ok := cached.(lastKnownTunnelStats); ok {
-						rx, tx = st.rx, st.tx
-					}
+			// Merge rather than only fall back on zero: a status taken
+			// mid-teardown can report small non-zero counters from a fresh
+			// device that are below what the session already transferred.
+			if cached, ok := s.lastKnownStats.Load(name); ok {
+				if st, ok := cached.(lastKnownTunnelStats); ok {
+					m := st.merge(rx, tx)
+					rx, tx = m.rx, m.tx
 				}
 			}
 			s.historyStore.RecordDisconnect(id, rx, tx, reason)

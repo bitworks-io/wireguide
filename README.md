@@ -230,6 +230,7 @@ wireguide ctl set pin-interface <on|off>
 wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
+wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 
 # Teach coding agents (Claude Code, Codex, ...) how to drive the CLI:
 wireguide ctl install-skills
@@ -253,10 +254,52 @@ disconnect a tunnel by hand, automation leaves that tunnel alone until the
 network changes. Tunnels with automation rules are also not restored by the
 sleep/wake reconnect; the rules decide.
 
+**Diagnostics bundle.** `wireguide ctl diag bundle` (or Settings → Logging →
+"Export diagnostics…") writes a zip with the last 5 MB of the helper log, the
+list of rotated log files, `config.json`, every tunnel `.conf` with
+`PrivateKey` and `PresharedKey` replaced by `<redacted>`, the `.meta.json`
+files, `history.json`, `scutil --dns`, `networksetup -getdnsservers` per
+service, both WireGuide pf anchors (read by the helper, since `pfctl` needs
+root), `netstat -nr`, the Automation preview, a DNS leak test and versions.
+Private keys are never included; PreUp/PostUp lines are, so skim the bundle
+before sharing it. The helper log rotates itself at 10 MB (five files,
+`/var/log/wireguide-helper.log` to `.5`); launchd's own capture goes to
+`/var/log/wireguide-helper.stderr.log` and holds startup output, fatal errors
+from before logging is set up, and panics.
+
 Connect/disconnect/status need the app (or its helper) running — start it with
 `wireguide ctl start` (or by opening the app); nothing else starts a VPN stack
 behind your back. list, import, rename, delete and automation edits work
 directly against the local files.
+
+---
+
+## URL scheme and Shortcuts (macOS)
+
+WireGuide registers `wireguide://` so Shortcuts, Focus filters, Raycast or a
+shell (`open "wireguide://connect/Home"`) can drive it:
+
+| URL | Effect |
+| --- | --- |
+| `wireguide://connect/<name>` | connect the tunnel named `<name>` |
+| `wireguide://disconnect/<name>` | disconnect it |
+| `wireguide://show` | bring the window forward |
+
+Tunnel names are validated like everywhere else (letters, digits, `-`, `_`,
+spaces; percent-encode spaces as `%20`). The scheme cannot import, delete,
+rename or edit a config. A connect or disconnect always
+shows a confirmation sheet in the window first, so a web page cannot silently
+toggle your VPN. `wireguide://automation/pause` is not
+implemented yet (it needs a helper-side latch); use `wireguide ctl` or a
+manual connect/disconnect, which already pause automation for that tunnel
+until the network changes.
+
+**Shortcuts recipe:** add the *Open URLs* action (Safari category), set the URL
+to `wireguide://connect/Home`, and name the shortcut "VPN on". Make a second
+one with `disconnect` for "VPN off". Both then work from Spotlight, Siri, the
+menu bar and Shortcuts automations. For Focus modes, a Shortcuts *Personal
+Automation* triggered by the Focus turning on can run the same *Open URLs*
+action. You will see the confirmation sheet each time.
 
 ---
 

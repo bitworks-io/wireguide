@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/korjwl1/wireguide/internal/diag"
+	"github.com/korjwl1/wireguide/internal/diagbundle"
 	"github.com/korjwl1/wireguide/internal/ipc"
 )
 
@@ -177,4 +180,54 @@ func (s *TunnelService) Verify(tunnelName, pingHost, resolveName string) ([]Veri
 		out = append(out, VerifyRow(r))
 	}
 	return out, nil
+}
+
+// helperCaller adapts the service's reconnecting client holder to the
+// diagnostics bundle's Caller.
+type helperCaller struct{ s *TunnelService }
+
+func (h helperCaller) Call(method string, params, result interface{}) error {
+	return h.s.call(method, params, result)
+}
+
+// ExportDiagnostics shows a native save dialog and writes the diagnostics
+// zip (helper log tail, redacted configs, DNS/route/pf state, versions).
+// Private keys are never included. Returns the saved path, or "" if the user
+// cancelled.
+func (s *TunnelService) ExportDiagnostics() (string, error) {
+	if s.app == nil {
+		return "", fmt.Errorf("app not initialized")
+	}
+	path, err := s.app.Dialog.SaveFile().
+		SetFilename(fmt.Sprintf("wireguide-diagnostics-%s.zip", time.Now().Format("20060102-150405"))).
+		AddFilter("Zip archive", "*.zip").
+		PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil // user cancelled
+	}
+	var caller diagbundle.Caller
+	if s.clients != nil && s.clients.Get() != nil {
+		caller = helperCaller{s}
+	}
+	src, err := diagbundle.DefaultSources(caller)
+	if err != nil {
+		return "", err
+	}
+	return path, writeDiagnostics(path, src)
+}
+
+func writeDiagnostics(path string, src diagbundle.Sources) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := diagbundle.Build(f, src); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	return f.Close()
 }

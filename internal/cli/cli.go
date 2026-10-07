@@ -78,6 +78,8 @@ func Run(args []string) int {
 		return cmdResetDNS(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
+	case "diag":
+		return cmdDiag(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
 		usage(os.Stderr)
@@ -124,6 +126,8 @@ Settings & diagnostics:
                                                disconnects tunnels first)
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
+  wireguide ctl diag bundle [--out path]       write a diagnostics zip (logs, redacted configs,
+                                               DNS/route/pf state); private keys are never included
   wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]
                                                check handshake, routes, split-DNS resolvers and
                                                optionally ping / resolve a host (exit 1 on any red)

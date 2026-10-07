@@ -199,6 +199,17 @@ export function ExportConfig(name) {
 }
 
 /**
+ * ExportDiagnostics shows a native save dialog and writes the diagnostics
+ * zip (helper log tail, redacted configs, DNS/route/pf state, versions).
+ * Private keys are never included. Returns the saved path, or "" if the user
+ * cancelled.
+ * @returns {$CancellablePromise<string>}
+ */
+export function ExportDiagnostics() {
+    return $Call.ByID(4002171981);
+}
+
+/**
  * ExportTunnel shows a native save dialog and writes the .conf file.
  * Returns the saved path, or empty string if the user cancelled.
  * @param {string} name
@@ -813,6 +824,18 @@ export function SplitDNSSupported() {
 }
 
 /**
+ * TakeURLActions returns (and clears) the URL actions waiting for the user's
+ * confirmation. The frontend shows a sheet per action and, on approval,
+ * calls the ordinary Connect / DisconnectTunnel methods.
+ * @returns {$CancellablePromise<$models.URLAction[]>}
+ */
+export function TakeURLActions() {
+    return $Call.ByID(1243665022).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType37($result);
+    }));
+}
+
+/**
  * TunnelExists reports whether a tunnel with the given name is stored.
  * @param {string} name
  * @returns {$CancellablePromise<boolean>}
@@ -856,7 +879,7 @@ export function ValidateConfig(content) {
  */
 export function Verify(tunnelName, pingHost, resolveName) {
     return $Call.ByID(2039407192, tunnelName, pingHost, resolveName).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType37($result);
+        return $$createType39($result);
     }));
 }
 
@@ -897,5 +920,7 @@ const $$createType32 = $models.ResolveResult.createFrom;
 const $$createType33 = $Create.Nullable($$createType32);
 const $$createType34 = $models.DNSLeakResult.createFrom;
 const $$createType35 = $Create.Nullable($$createType34);
-const $$createType36 = $models.VerifyRow.createFrom;
+const $$createType36 = $models.URLAction.createFrom;
 const $$createType37 = $Create.Array($$createType36);
+const $$createType38 = $models.VerifyRow.createFrom;
+const $$createType39 = $Create.Array($$createType38);

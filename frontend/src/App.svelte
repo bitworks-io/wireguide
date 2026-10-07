@@ -220,6 +220,11 @@
 
     // External config.json / tunnel-file changes (the CLI) — reflect them
     // in the running GUI so it never sits on stale state.
+    // wireguide:// links and Shortcuts: connect/disconnect requests that
+    // arrived while WireGuide was not frontmost wait here for approval.
+    urlActionUnsub = Events.On('url-action', () => { takeURLActions(); });
+    takeURLActions();
+
     configChangedUnsub = Events.On('config_changed', () => {
       applySettingsToUI().catch(() => {});
     });
@@ -289,6 +294,7 @@
 
   onDestroy(() => {
     unsubscribe();
+    if (urlActionUnsub) urlActionUnsub();
     stopLogListener();
     if (filesDroppedUnsub) filesDroppedUnsub();
     if (helperUnsub) helperUnsub();
@@ -303,6 +309,31 @@
     stopAutomationPolling();
     if (toastTimer) clearTimeout(toastTimer);
   });
+
+  // wireguide:// confirmation sheet. Approval runs the ordinary Connect /
+  // DisconnectTunnel calls; nothing else can be requested through a URL.
+  let urlActionUnsub = null;
+  let urlActions = [];
+  async function takeURLActions() {
+    try {
+      const got = await TunnelService.TakeURLActions();
+      if (got && got.length) urlActions = [...urlActions, ...got];
+    } catch (_) { /* queue is best-effort */ }
+  }
+  async function approveURLAction() {
+    const [a, ...rest] = urlActions;
+    urlActions = rest;
+    if (!a) return;
+    try {
+      if (a.kind === 'connect') await TunnelService.Connect(a.tunnel);
+      else if (a.kind === 'disconnect') await TunnelService.DisconnectTunnel(a.tunnel);
+    } catch (e) {
+      showToast(errText(e));
+    }
+  }
+  function denyURLAction() {
+    urlActions = urlActions.slice(1);
+  }
 
   function dismissCriticalError(idx) {
     criticalErrors = criticalErrors.filter((_, i) => i !== idx);
@@ -753,7 +784,7 @@
      separate components mounted conditionally below; they pick up the new
      language on their next open (deliberate — otherwise changing language
      mid-interaction would destroy the modal). -->
-<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
+<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult || urlActions.length > 0} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
   <!-- Wails adds .file-drop-target-active class to .app when dragging files.
        We only render the overlay when drop-target is actually active — i.e.
        on the tunnels view with no modal open — so it can never steal clicks
@@ -968,6 +999,19 @@
       on:proceed={handleConflictProceed}
       on:disconnect_proceed={handleConflictDisconnectProceed}
       on:cancel={handleConflictCancel} />
+  {/if}
+
+  {#if urlActions.length}
+    <div class="modal-backdrop">
+      <div class="modal modal-zip-result" role="alertdialog" aria-modal="true" aria-labelledby="url-action-title">
+        <h3 id="url-action-title">{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_title' : 'url_action.disconnect_title')}</h3>
+        <p>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_message' : 'url_action.disconnect_message', { name: urlActions[0].tunnel })}</p>
+        <div class="zip-result-footer">
+          <button class="btn-secondary" on:click={denyURLAction}>{$t('url_action.cancel')}</button>
+          <button class="btn-primary" on:click={approveURLAction}>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect' : 'url_action.disconnect')}</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if showZipResult}

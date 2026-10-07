@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/config"
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/domain"
+	"github.com/korjwl1/wireguide/internal/firewall"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/update"
 	"github.com/korjwl1/wireguide/internal/wifi"
@@ -41,6 +43,17 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodFirewallStatus, h.handleFirewallStatus)
 	h.server.Handle(ipc.MethodResetDNS, h.handleResetDNS)
 	h.server.Handle(ipc.MethodHelperInfo, h.handleHelperInfo)
+	h.server.Handle(ipc.MethodDiagSnapshot, h.handleDiagSnapshot)
+}
+
+// handleDiagSnapshot returns the read-only root-only diagnostics for the
+// diagnostics bundle. It takes no parameters and runs only fixed commands.
+func (h *Helper) handleDiagSnapshot(_ json.RawMessage) (interface{}, error) {
+	resp := ipc.DiagSnapshotResponse{Platform: runtime.GOOS}
+	for _, a := range firewall.DumpAnchors() {
+		resp.Anchors = append(resp.Anchors, ipc.DiagAnchor{Name: a.Name, Rules: a.Rules, Error: a.Error})
+	}
+	return resp, nil
 }
 
 func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) {

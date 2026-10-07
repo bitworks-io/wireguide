@@ -24,6 +24,24 @@
   // could leave About showing "up to date" for days after a release).
   let updateState = null;
   let aboutChecking = false;
+
+  // Diagnostics export (native save dialog on the Go side). The result is
+  // shown inline — a toast would render underneath this modal.
+  let exportBusy = false;
+  let exportResult = '';
+  async function exportDiagnostics() {
+    if (exportBusy) return;
+    exportBusy = true;
+    exportResult = '';
+    try {
+      const path = await TunnelService.ExportDiagnostics();
+      if (path) exportResult = $t('settings.export_diagnostics_done', { path });
+    } catch (e) {
+      exportResult = $t('settings.export_diagnostics_failed') + ': ' + errText(e);
+    } finally {
+      exportBusy = false;
+    }
+  }
   let aboutCheckResult = '';
   // nowTick drives formatLastChecked re-evaluation. Without this, opening
   // Settings and leaving it on the About tab for 10 minutes would still
@@ -651,6 +669,16 @@
                   <option value="warn">{$t('settings.log_level_warn')}</option>
                   <option value="error">{$t('settings.log_level_error')}</option>
                 </select>
+              </div>
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <span class="setting-label">{$t('settings.export_diagnostics')}</span>
+                  <p class="setting-desc">{$t('settings.export_diagnostics_hint')}</p>
+                  {#if exportResult}<p class="setting-desc" role="status">{exportResult}</p>{/if}
+                </div>
+                <button type="button" class="check-btn" on:click={exportDiagnostics} disabled={exportBusy}>
+                  {exportBusy ? $t('settings.export_diagnostics_busy') : $t('settings.export_diagnostics')}
+                </button>
               </div>
             </div>
           </div>

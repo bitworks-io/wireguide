@@ -315,6 +315,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 
 	trayMgr := newTrayManager(app, win, tray, tunnelService, doShutdown)
 	trayMgr.initialBuild()
+	registerURLHandler(app, win, tunnelService)
 
 	if runtime.GOOS == "darwin" {
 		app.Event.OnApplicationEvent(events.Mac.ApplicationWillTerminate, func(_ *application.ApplicationEvent) {

@@ -200,7 +200,12 @@
     "helper_reason_launchd_socket": "클라이언트가 소켓에 연결되어 launchd가 도우미를 시작했습니다",
     "helper_reason_legacy": "launchd가 소켓을 넘기지 않아 도우미가 자체 소켓으로 대기합니다",
     "helper_reason_direct": "launchd 없이 직접 시작됨",
-    "dns_protection_idle": "켜져 있습니다. DNS 서버가 있는 터널이 연결되기 전에는 보호할 대상이 없습니다."
+    "dns_protection_idle": "켜져 있습니다. DNS 서버가 있는 터널이 연결되기 전에는 보호할 대상이 없습니다.",
+    "export_diagnostics": "진단 정보 내보내기…",
+    "export_diagnostics_hint": "버그 신고용으로 로그, 비밀 값을 가린 터널 설정, DNS, 라우팅, 방화벽 상태를 zip으로 저장합니다. 개인 키와 사전 공유 키는 포함되지 않습니다.",
+    "export_diagnostics_busy": "내보내는 중…",
+    "export_diagnostics_done": "{path}에 저장했습니다",
+    "export_diagnostics_failed": "내보내기에 실패했습니다"
   },
   "confirm": {
     "delete_title": "터널 삭제",
@@ -467,5 +472,14 @@
     "dns_only": "중단된 세션에서 복구하여 DNS 설정을 복원했습니다.",
     "firewall_only": "중단된 세션에서 남아 있던 방화벽 규칙을 제거했습니다.",
     "dismiss": "닫기"
+  },
+  "url_action": {
+    "connect_title": "링크로 연결할까요?",
+    "disconnect_title": "링크로 연결을 끊을까요?",
+    "connect_message": "링크 또는 단축어가 WireGuide에 \"{name}\" 연결을 요청했습니다.",
+    "disconnect_message": "링크 또는 단축어가 WireGuide에 \"{name}\" 연결 해제를 요청했습니다.",
+    "connect": "연결",
+    "disconnect": "연결 해제",
+    "cancel": "취소"
   }
 }

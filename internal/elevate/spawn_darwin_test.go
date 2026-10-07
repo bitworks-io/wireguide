@@ -161,7 +161,7 @@ func TestLaunchdDemandLifecycle(t *testing.T) {
 	plist = strings.ReplaceAll(plist, ipc.DarwinSocketPath, sock)
 	plist = strings.ReplaceAll(plist, daemonBinary, fixture)
 	plist = strings.ReplaceAll(plist, daemonLabel, label)
-	plist = strings.ReplaceAll(plist, "/var/log/wireguide-helper.log", filepath.Join(dir, "helper.log"))
+	plist = strings.ReplaceAll(plist, "/var/log/wireguide-helper.stderr.log", filepath.Join(dir, "helper.log"))
 	path := filepath.Join(dir, "helper.plist")
 	if err := os.WriteFile(path, []byte(plist), 0600); err != nil {
 		t.Fatal(err)

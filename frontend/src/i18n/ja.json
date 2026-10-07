@@ -200,7 +200,12 @@
     "helper_reason_launchd_socket": "クライアントがソケットに接続したため、launchd がヘルパーを起動しました",
     "helper_reason_legacy": "launchd がソケットを渡さなかったため、ヘルパーは独自のソケットで待機しています",
     "helper_reason_direct": "launchd を使わず直接起動",
-    "dns_protection_idle": "オンです。DNS サーバーを持つトンネルが接続されるまで、保護する対象はありません。"
+    "dns_protection_idle": "オンです。DNS サーバーを持つトンネルが接続されるまで、保護する対象はありません。",
+    "export_diagnostics": "診断情報を書き出す…",
+    "export_diagnostics_hint": "バグ報告用に、ログ、秘密情報を伏せたトンネル設定、DNS、ルート、ファイアウォールの状態を zip で保存します。秘密鍵と事前共有鍵は含まれません。",
+    "export_diagnostics_busy": "書き出し中…",
+    "export_diagnostics_done": "{path} に保存しました",
+    "export_diagnostics_failed": "書き出しに失敗しました"
   },
   "confirm": {
     "delete_title": "トンネルを削除",
@@ -467,5 +472,14 @@
     "dns_only": "中断されたセッションから復旧し、DNS 設定を復元しました。",
     "firewall_only": "中断されたセッションで残っていたファイアウォールルールを削除しました。",
     "dismiss": "閉じる"
+  },
+  "url_action": {
+    "connect_title": "リンクから接続しますか?",
+    "disconnect_title": "リンクから切断しますか?",
+    "connect_message": "リンクまたはショートカットが WireGuide に「{name}」の接続を要求しました。",
+    "disconnect_message": "リンクまたはショートカットが WireGuide に「{name}」の切断を要求しました。",
+    "connect": "接続",
+    "disconnect": "切断",
+    "cancel": "キャンセル"
   }
 }
