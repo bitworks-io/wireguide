@@ -77,3 +77,30 @@ func TestBuildAutomationPreviewSSIDUnknown(t *testing.T) {
 		t.Fatalf("unknown iface online: %+v", got)
 	}
 }
+
+func TestBuildAutomationPreviewMediumAndLists(t *testing.T) {
+	rules := map[string][]wifi.Rule{
+		"wired": {
+			{When: wifi.Condition{Type: wifi.CondSSID, SSIDs: []string{"Home", "Office"}}, Do: wifi.ActionDisconnect},
+			{When: wifi.Condition{Type: wifi.CondMedium, Medium: "wired"}, Do: wifi.ActionConnect},
+		},
+		"list": {{When: wifi.Condition{Type: wifi.CondSSID, Negate: true, SSIDs: []string{"Home", "Office"}}, Do: wifi.ActionConnect}},
+	}
+	resp := ipc.AutomationPreviewResponse{
+		Online: true, Settled: true, PrimaryIface: "en5", Medium: "wired",
+		Tunnels: []ipc.AutomationTunnelDecision{
+			{Name: "wired", Decision: "connect"},
+			{Name: "list", Decision: "connect"},
+		},
+	}
+	got := buildAutomationPreview(resp, rules, nil)
+	if got.Medium != "wired" {
+		t.Fatalf("medium %q", got.Medium)
+	}
+	if v := got.Tunnels[0]; v.RuleIndex != 2 || v.RuleType != "medium" || v.RuleValue != "wired" {
+		t.Errorf("medium rule must be named via local re-eval: %+v", v)
+	}
+	if v := got.Tunnels[1]; v.RuleIndex != 1 || !v.RuleNegate || v.RuleValue != "Home, Office" || !v.RuleMulti {
+		t.Errorf("list rule: %+v", v)
+	}
+}

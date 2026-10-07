@@ -17,6 +17,7 @@ export {
     DomainCheck,
     FirewallStatus,
     HelperInfo,
+    HistoryReconcile,
     KnownSSIDs,
     ResolveResult,
     RouteEntry,

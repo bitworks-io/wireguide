@@ -54,6 +54,19 @@ type ConnectionStatus struct {
 	// not install because they overlap the local network.
 	RoutesSkipped []string `json:"routes_skipped,omitempty"`
 
+	// LastChangeReason / LastChangeAt say what last brought this tunnel up
+	// (protocol minor 4): one of the ChangeReason* values and an RFC3339
+	// time. Empty when the helper does not know (older helper, or a tunnel
+	// it did not connect itself).
+	LastChangeReason string `json:"last_change_reason,omitempty"`
+	LastChangeAt     string `json:"last_change_at,omitempty"`
+
+	// RecentDisconnects maps a tunnel that went down in the last minute to
+	// why (top-level only; protocol minor 4). A disconnected tunnel is no
+	// longer in the status at all, so this is how its end reason reaches
+	// the GUI's history.
+	RecentDisconnects map[string]TunnelChange `json:"recent_disconnects,omitempty"`
+
 	// ActiveTunnels lists the names of all currently connected (or connecting)
 	// tunnels. Populated by the multi-tunnel manager so the frontend can show
 	// which tunnels are active.
@@ -62,6 +75,24 @@ type ConnectionStatus struct {
 	// Tunnels carries per-tunnel status for multi-tunnel setups. The frontend
 	// uses this to show stats for the selected tunnel rather than the "primary".
 	Tunnels []ConnectionStatus `json:"tunnels,omitempty"`
+}
+
+// Reasons a tunnel was connected or disconnected (ConnectionStatus
+// LastChangeReason, RecentDisconnects, GUI history).
+const (
+	ChangeReasonUser          = "user"
+	ChangeReasonAutomation    = "automation"
+	ChangeReasonWake          = "wake"
+	ChangeReasonNetworkChange = "network_change"
+	ChangeReasonHealthCheck   = "health_check"
+	ChangeReasonReconnect     = "reconnect"
+	ChangeReasonRecovery      = "recovery"
+)
+
+// TunnelChange is one recorded connect/disconnect reason.
+type TunnelChange struct {
+	Reason string `json:"reason"`
+	At     string `json:"at"` // RFC3339
 }
 
 // FormatDuration renders a duration in a compact "1h 2m 3s" form used by the

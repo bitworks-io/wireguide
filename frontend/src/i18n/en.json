@@ -28,7 +28,20 @@
     "reason_reconnect": "Reconnected",
     "reason_app_quit": "App quit",
     "reason_health_check": "Auto-recovered",
-    "reason_error": "Error"
+    "reason_error": "Error",
+    "started_by": "Started by",
+    "ssid": "Wi-Fi network",
+    "reason_automation": "Disconnected by automation",
+    "reason_wake": "Reconnected after wake",
+    "reason_network_change": "Reconnected after network change",
+    "reason_recovery": "Reset by recovery",
+    "start_user": "You",
+    "start_automation": "Automation",
+    "start_wake": "Wake from sleep",
+    "start_network_change": "Network change",
+    "start_health_check": "Health check",
+    "start_reconnect": "Reconnect",
+    "start_recovery": "Recovery"
   },
   "tunnel": {
     "list_title": "Tunnels",
@@ -86,7 +99,12 @@
     "routes_skipped_one": "{n} route skipped (overlaps your LAN)",
     "routes_skipped_other": "{n} routes skipped (overlap your LAN)",
     "routes_skipped_hint": "These AllowedIPs ranges overlap your local network, so they are not routed through the tunnel and traffic to them stays local.",
-    "preview_title": "What will change when you connect"
+    "preview_title": "What will change when you connect",
+    "health_check_override": "Handshake health check",
+    "health_check_inherit": "Use Settings",
+    "health_check_on": "On",
+    "health_check_off": "Off",
+    "health_check_override_hint": "Overrides the Settings health check for this tunnel only. Checks pause for 90 s after wake and while offline."
   },
   "import": {
     "zip_result_title": "Import Results",
@@ -305,7 +323,10 @@
   "wifi_permission": {
     "title": "Location Services required",
     "desc": "Wi-Fi auto-connect rules need access to your current network name. Grant permission in System Settings → Privacy & Security → Location Services.",
-    "open_settings": "Open Settings"
+    "open_settings": "Open Settings",
+    "desc_denied": "Location Services is denied for WireGuide, so Wi-Fi names can't be read and 'is not' SSID rules stay on hold. Allow it in System Settings → Privacy & Security → Location Services.",
+    "desc_restricted": "Location Services is restricted on this Mac (for example by a profile), so WireGuide can't read Wi-Fi names and 'is not' SSID rules stay on hold.",
+    "desc_not_determined": "Location Services has not been allowed for WireGuide yet, so Wi-Fi names can't be read. Allow it in System Settings → Privacy & Security → Location Services."
   },
   "automation": {
     "title": "Automation",
@@ -333,7 +354,7 @@
     "negated_hint": "\"is not\" matches only when the value is known and different; while unknown the tunnel is left as it is.",
     "why": {
       "title": "Automation status",
-      "net_ssid": "Network: {ssid}",
+      "net_ssid": "Network: Wi-Fi: {ssid}",
       "net_unknown": "Wi-Fi name unknown — Location Services may be off; \"is not\" rules hold",
       "net_no_wifi": "Network: no Wi-Fi (Ethernet/tethering)",
       "net_offline": "Network: offline",
@@ -358,7 +379,32 @@
       "v_paused_disconnected": "paused — you disconnected it by hand; resumes when the network changes",
       "v_overlap": "not connecting — {cidr} overlaps your current LAN",
       "v_no_match": "no rule matches the current network",
-      "toast_connected": "Automation connected {name}"
+      "toast_connected": "Automation connected {name}",
+      "net_wired": "Network: wired",
+      "net_tethered": "Network: tethered",
+      "cond_ssid_in": "ssid is one of {value}",
+      "cond_ssid_not_in": "ssid is none of {value}",
+      "cond_medium_is": "connection is {value}",
+      "cond_medium_not": "connection is not {value}",
+      "net_unknown_denied": "Location Services denied for WireGuide — Wi-Fi names unknown, 'is not' SSID rules on hold",
+      "net_unknown_not_allowed": "Location Services not yet allowed for WireGuide — Wi-Fi names unknown, 'is not' SSID rules on hold",
+      "net_unknown_roaming": "Wi-Fi name momentarily unavailable (reconnecting or roaming) — 'is not' rules hold"
+    },
+    "cond_medium": "on connection type",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "wired (Ethernet)",
+    "medium_tethered": "tethered (phone USB/Bluetooth)",
+    "ssid_add_placeholder": "add another…",
+    "ssid_tags_hint": "Wi-Fi names — press Enter or type a comma to add another; the rule matches any of them",
+    "remove_ssid": "Remove {ssid}",
+    "safety": {
+      "removed": "Rule removed",
+      "undo": "Undo",
+      "restore_open": "Restore previous rules…",
+      "restore": "Restore",
+      "no_backups": "No saved copies yet.",
+      "rule_count": "{n} rules",
+      "external": "Rules for {name} changed outside the app"
     }
   },
   "ping_health": {

@@ -50,6 +50,7 @@ func init() {
 	application.RegisterEvent[update.UpdateInfo]("update-available")
 	application.RegisterEvent[map[string]any]("update_progress")
 	application.RegisterEvent[ipc.SettingsChangedPayload]("settings_changed")
+	application.RegisterEvent[ipc.AutomationEventPayload]("automation_event")
 	application.RegisterEvent[struct{}]("config_changed")
 	application.RegisterEvent[struct{}]("tunnels_changed")
 }
@@ -329,7 +330,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	// process restarts. The health monitor swaps the client in the holder.
 	// Pass the tray's cheap icon-update hook — NOT the full menu rebuild —
 	// so the 1 Hz status stream doesn't trigger IPC round-trips on every event.
-	bridge := newEventBridge(app, clients, trayMgr.setIconState, tunnelService.ReconcileHistoryFromStatus, trayMgr.quitApp)
+	bridge := newEventBridge(app, clients, trayMgr.setIconState, tunnelService.ReconcileHistory, trayMgr.quitApp)
 	bridge.notify = newNotifier(settingsStore, tunnelService.UserActions())
 	quitNotifier.Store(bridge.notify)
 	bridge.start()

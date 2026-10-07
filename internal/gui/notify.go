@@ -12,7 +12,9 @@ import (
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
+	"github.com/korjwl1/wireguide/internal/wifi"
 )
 
 // upNotifyDelay holds back "tunnel connected outside the app" so the
@@ -58,7 +60,11 @@ type notifier struct {
 	mu         sync.Mutex
 	pendingUp  map[string]*time.Timer
 	recentAuto map[string]time.Time // tunnel -> when auto_connected was seen
-	quitting   bool
+	// detailedAuto marks tunnels whose automation connect was already
+	// announced from event.automation (with the rule); the generic
+	// auto_connected that follows it is then skipped.
+	detailedAuto map[string]time.Time
+	quitting     bool
 	// upNotifyDelay overrides the package default (tests).
 	upNotifyDelay time.Duration
 
@@ -75,10 +81,11 @@ type notifier struct {
 
 func newNotifier(settings *storage.SettingsStore, actions *wgapp.UserActions) *notifier {
 	n := &notifier{
-		settings:   settings,
-		actions:    actions,
-		pendingUp:  map[string]*time.Timer{},
-		recentAuto: map[string]time.Time{},
+		settings:     settings,
+		actions:      actions,
+		pendingUp:    map[string]*time.Timer{},
+		recentAuto:   map[string]time.Time{},
+		detailedAuto: map[string]time.Time{},
 	}
 	n.post = n.deliver
 	return n
@@ -192,21 +199,89 @@ func (n *notifier) cancelPendingUp(name string) bool {
 	return ok
 }
 
-// onAutoConnected handles the helper's auto_connected event.
-func (n *notifier) onAutoConnected(name string) {
+// claimAuto records that an automation connect of name was seen at now
+// (suppressing the generic "connected outside the app" for it) and reports
+// whether event.automation already announced it in detail. detailed marks
+// this call as that detailed announcement.
+func (n *notifier) claimAuto(name string, now time.Time, detailed bool) (alreadyDetailed bool) {
 	n.mu.Lock()
-	now := time.Now()
+	defer n.mu.Unlock()
 	for k, t := range n.recentAuto { // prune
 		if now.Sub(t) >= autoClaimTTL {
 			delete(n.recentAuto, k)
 		}
 	}
+	for k, t := range n.detailedAuto {
+		if now.Sub(t) >= autoClaimTTL {
+			delete(n.detailedAuto, k)
+		}
+	}
+	_, alreadyDetailed = n.detailedAuto[name]
 	n.recentAuto[name] = now
-	n.mu.Unlock()
+	if detailed {
+		n.detailedAuto[name] = now
+	} else {
+		delete(n.detailedAuto, name) // consumed by this auto_connected
+	}
+	return alreadyDetailed
+}
+
+// onAutoConnected handles the helper's auto_connected event. When the
+// helper (protocol minor >= 4) already sent event.automation for this
+// connect, that notification named the rule and this one is skipped.
+func (n *notifier) onAutoConnected(name string) {
+	detailed := n.claimAuto(name, time.Now(), false)
 	n.cancelPendingUp(name) // same change; this message is more specific
+	if detailed {
+		return
+	}
 	if wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyAutoConnected, Tunnel: name}, n.actions, time.Now()) {
 		n.send(msgAuto, name)
 	}
+}
+
+// onAutomation handles the helper's event.automation. Only a successful
+// executed connect notifies — naming the rule and SSID — with the same
+// dedupe (it claims the tunnel like auto_connected) and user-action
+// suppression as the generic message. Held/latched/skipped decisions and
+// failed connects never notify; disconnects keep the status-diff path.
+func (n *notifier) onAutomation(ev ipc.AutomationEventPayload) {
+	if ev.Action != ipc.AutomationActionConnect || ev.Error != "" || ev.Tunnel == "" {
+		return
+	}
+	n.claimAuto(ev.Tunnel, time.Now(), true)
+	n.cancelPendingUp(ev.Tunnel)
+	if !wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyAutoConnected, Tunnel: ev.Tunnel}, n.actions, time.Now()) {
+		return
+	}
+	rules := n.rulesFor(ev.Tunnel)
+	n.mu.Lock()
+	q := n.quitting
+	n.mu.Unlock()
+	if q {
+		return
+	}
+	go func() {
+		title, body := automationNotifyText(n.language(), ev, rules)
+		n.post(title, body)
+	}()
+}
+
+// rulesFor returns tunnel's current automation rules from settings (nil
+// when unavailable).
+func (n *notifier) rulesFor(tunnel string) []wifi.Rule {
+	if n.settings == nil {
+		return nil
+	}
+	s, err := n.settings.Load()
+	if err != nil || s == nil {
+		return nil
+	}
+	s.EnsureAutomation()
+	if s.Automation == nil {
+		return nil
+	}
+	return s.Automation.PerTunnel[tunnel]
 }
 
 // onCriticalError handles the helper's critical_error event.
@@ -348,6 +423,112 @@ var notifyStrings = map[string]map[msgKind]string{
 		msgAuto:     "自動化が “%s” を接続しました。",
 		msgCritical: "ヘルパーの問題 (%s)。復旧するには WireGuide を再起動してください。",
 	},
+}
+
+// ruleStrings localise an automation rule's condition (see
+// wifi.DescribeCondition for the English log form).
+var ruleStrings = map[string]map[string]string{
+	"en": {
+		"ssid": "SSID is %s", "ssid_not": "SSID is not %s",
+		"subnet": "subnet is %s", "subnet_not": "subnet is not %s",
+		"network": "network is %s", "network_not": "network is not %s",
+		"ssid_in": "SSID is one of %s", "ssid_not_in": "SSID is none of %s",
+		"medium": "connection is %s", "medium_not": "connection is not %s",
+		"m_wifi": "Wi-Fi", "m_wired": "wired", "m_tethered": "tethered",
+		"none_match": "no other rule matches",
+		"auto_rule":  "Automation connected “%s” — %s",
+		"on_wifi":    "%s (Wi-Fi: %s)",
+	},
+	"ko": {
+		"ssid": "SSID가 %s임", "ssid_not": "SSID가 %s이(가) 아님",
+		"subnet": "서브넷이 %s임", "subnet_not": "서브넷이 %s이(가) 아님",
+		"network": "네트워크가 %s임", "network_not": "네트워크가 %s이(가) 아님",
+		"ssid_in": "SSID가 %s 중 하나임", "ssid_not_in": "SSID가 %s 중 어느 것도 아님",
+		"medium": "연결 유형이 %s임", "medium_not": "연결 유형이 %s이(가) 아님",
+		"m_wifi": "Wi-Fi", "m_wired": "유선", "m_tethered": "테더링",
+		"none_match": "다른 규칙이 일치하지 않음",
+		"auto_rule":  "자동화가 “%s” 터널을 연결했습니다 — %s",
+		"on_wifi":    "%s (Wi-Fi: %s)",
+	},
+	"ja": {
+		"ssid": "SSID が %s", "ssid_not": "SSID が %s ではない",
+		"subnet": "サブネットが %s", "subnet_not": "サブネットが %s ではない",
+		"network": "ネットワークが %s", "network_not": "ネットワークが %s ではない",
+		"ssid_in": "SSID が %s のいずれか", "ssid_not_in": "SSID が %s のいずれでもない",
+		"medium": "接続種別が %s", "medium_not": "接続種別が %s ではない",
+		"m_wifi": "Wi-Fi", "m_wired": "有線", "m_tethered": "テザリング",
+		"none_match": "他のルールに一致しない",
+		"auto_rule":  "自動化が “%s” を接続しました — %s",
+		"on_wifi":    "%s（Wi-Fi: %s）",
+	},
+}
+
+// describeConditionLocalized renders c in lang (English fallback).
+func describeConditionLocalized(lang string, c wifi.Condition) string {
+	table, ok := ruleStrings[lang]
+	if !ok {
+		table = ruleStrings["en"]
+	}
+	key, val := c.Type, ""
+	switch c.Type {
+	case wifi.CondSSID:
+		val = c.SSID
+		if set := wifi.SSIDSet(c); len(c.SSIDs) > 0 && len(set) > 1 {
+			key, val = "ssid_in", strings.Join(set, ", ")
+		} else if len(c.SSIDs) > 0 && len(set) == 1 {
+			val = set[0]
+		}
+	case wifi.CondMedium:
+		val = c.Medium
+		if m, ok := table["m_"+strings.ToLower(strings.TrimSpace(c.Medium))]; ok {
+			val = m
+		}
+	case wifi.CondSubnet:
+		val = c.Subnet
+	case wifi.CondNetwork:
+		val = c.GatewayMAC
+		if c.Label != "" {
+			val = c.Label
+		}
+	case wifi.CondNoneMatch:
+		return table["none_match"]
+	default:
+		return wifi.DescribeCondition(c)
+	}
+	if c.Negate {
+		if key == "ssid_in" {
+			key = "ssid_not_in"
+		} else {
+			key += "_not"
+		}
+	}
+	return fmt.Sprintf(table[key], val)
+}
+
+// automationNotifyText is the body for an automation connect: the tunnel,
+// the deciding rule (localised from the tunnel's current rules when they
+// still match what the helper evaluated, else the helper's English
+// rule_text) and the SSID unless a positive SSID rule already names it.
+func automationNotifyText(lang string, ev ipc.AutomationEventPayload, rules []wifi.Rule) (title, body string) {
+	table, ok := ruleStrings[lang]
+	if !ok {
+		table = ruleStrings["en"]
+	}
+	rule := ev.RuleText
+	positiveSSID := ev.SSID != "" && ev.RuleText == wifi.DescribeCondition(wifi.Condition{Type: wifi.CondSSID, SSID: ev.SSID})
+	if ev.RuleIndex >= 0 && ev.RuleIndex < len(rules) && wifi.DescribeRule(rules, ev.RuleIndex) == ev.RuleText {
+		c := rules[ev.RuleIndex].When
+		rule = describeConditionLocalized(lang, c)
+		// A multi-SSID rule doesn't name the network, so keep the suffix.
+		positiveSSID = c.Type == wifi.CondSSID && !c.Negate && len(wifi.SSIDSet(c)) <= 1
+	}
+	if rule == "" {
+		return notifyText(lang, msgAuto, ev.Tunnel)
+	}
+	if ev.SSID != "" && !positiveSSID {
+		rule = fmt.Sprintf(table["on_wifi"], rule, ev.SSID)
+	}
+	return "WireGuide", fmt.Sprintf(table["auto_rule"], ev.Tunnel, rule)
 }
 
 // notifyText returns the notification title and body for lang (falling

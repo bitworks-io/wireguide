@@ -28,7 +28,20 @@
     "reason_reconnect": "再接続",
     "reason_app_quit": "アプリ終了",
     "reason_health_check": "自動復旧",
-    "reason_error": "エラー"
+    "reason_error": "エラー",
+    "started_by": "開始の理由",
+    "ssid": "Wi-Fi ネットワーク",
+    "reason_automation": "自動化で切断",
+    "reason_wake": "スリープ解除後に再接続",
+    "reason_network_change": "ネットワーク変更後に再接続",
+    "reason_recovery": "復旧によりリセット",
+    "start_user": "ユーザー",
+    "start_automation": "自動化",
+    "start_wake": "スリープ解除",
+    "start_network_change": "ネットワーク変更",
+    "start_health_check": "ヘルスチェック",
+    "start_reconnect": "再接続",
+    "start_recovery": "復旧"
   },
   "tunnel": {
     "list_title": "トンネル",
@@ -86,7 +99,12 @@
     "routes_skipped_one": "{n} 件のルートをスキップ (LAN と重複)",
     "routes_skipped_other": "{n} 件のルートをスキップ (LAN と重複)",
     "routes_skipped_hint": "これらの AllowedIPs の範囲はローカルネットワークと重複するため、トンネル経由にはならず、通信はローカルのままです。",
-    "preview_title": "接続すると変わること"
+    "preview_title": "接続すると変わること",
+    "health_check_override": "ハンドシェイクのヘルスチェック",
+    "health_check_inherit": "設定に従う",
+    "health_check_on": "オン",
+    "health_check_off": "オフ",
+    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。スリープ解除後 90 秒間とオフライン中はチェックを休止します。"
   },
   "import": {
     "zip_result_title": "インポート結果",
@@ -305,7 +323,10 @@
   "wifi_permission": {
     "title": "位置情報サービスの許可が必要",
     "desc": "Wi-Fi 自動接続ルールが動作するには、現在のネットワーク名へのアクセスが必要です。System Settings → プライバシーとセキュリティ → 位置情報サービスで許可してください。",
-    "open_settings": "設定を開く"
+    "open_settings": "設定を開く",
+    "desc_denied": "WireGuide の位置情報サービスが拒否されているため、Wi-Fi 名を取得できず「でない」SSID ルールは保留されます。システム設定 → プライバシーとセキュリティ → 位置情報サービスで許可してください。",
+    "desc_restricted": "この Mac では位置情報サービスが制限されている（プロファイルなど）ため、WireGuide は Wi-Fi 名を取得できず「でない」SSID ルールは保留されます。",
+    "desc_not_determined": "WireGuide の位置情報サービスがまだ許可されていないため、Wi-Fi 名を取得できません。システム設定 → プライバシーとセキュリティ → 位置情報サービスで許可してください。"
   },
   "automation": {
     "title": "オートメーション",
@@ -333,7 +354,7 @@
     "negated_hint": "「でない」は値が判明していて異なる場合にのみ一致し、不明な間はトンネルをそのままにします。",
     "why": {
       "title": "自動化の状態",
-      "net_ssid": "ネットワーク: {ssid}",
+      "net_ssid": "ネットワーク: Wi-Fi: {ssid}",
       "net_unknown": "Wi-Fi 名が不明 — 位置情報サービスがオフの可能性があります。「でない」ルールは保留されます",
       "net_no_wifi": "ネットワーク: Wi-Fi なし (イーサネット/テザリング)",
       "net_offline": "ネットワーク: オフライン",
@@ -358,7 +379,32 @@
       "v_paused_disconnected": "一時停止 — 手動で切断しました。ネットワークが変わると再開します",
       "v_overlap": "接続しません — {cidr} が現在の LAN と重複しています",
       "v_no_match": "現在のネットワークに一致するルールはありません",
-      "toast_connected": "自動化が {name} を接続しました"
+      "toast_connected": "自動化が {name} を接続しました",
+      "net_wired": "ネットワーク: 有線",
+      "net_tethered": "ネットワーク: テザリング",
+      "cond_ssid_in": "SSID が {value} のいずれか",
+      "cond_ssid_not_in": "SSID が {value} のいずれでもない",
+      "cond_medium_is": "接続種別が {value}",
+      "cond_medium_not": "接続種別が {value} でない",
+      "net_unknown_denied": "WireGuide の位置情報サービスが拒否されています — Wi-Fi 名が不明のため「でない」SSID ルールは保留中です",
+      "net_unknown_not_allowed": "WireGuide の位置情報サービスがまだ許可されていません — Wi-Fi 名が不明のため「でない」SSID ルールは保留中です",
+      "net_unknown_roaming": "Wi-Fi 名を一時的に取得できません (再接続またはローミング中) — 「でない」ルールは保留中です"
+    },
+    "cond_medium": "接続種別が",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "有線 (イーサネット)",
+    "medium_tethered": "テザリング (スマホ USB/Bluetooth)",
+    "ssid_add_placeholder": "追加…",
+    "ssid_tags_hint": "Wi-Fi名 — Enter またはカンマで追加でき、いずれかに一致するとルールが適用されます",
+    "remove_ssid": "{ssid} を削除",
+    "safety": {
+      "removed": "ルールを削除しました",
+      "undo": "元に戻す",
+      "restore_open": "以前のルールを復元…",
+      "restore": "復元",
+      "no_backups": "保存されたコピーはまだありません。",
+      "rule_count": "ルール {n} 件",
+      "external": "アプリの外で {name} のルールが変更されました"
     }
   },
   "ping_health": {

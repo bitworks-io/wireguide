@@ -47,11 +47,36 @@ func DefaultRoute() (gateway, iface string) {
 
 const wifiDeviceCacheTTL = 60 * time.Second
 
+// hwPortMissRefresh rate-limits, per interface, the extra refresh
+// InterfaceMedium does when the interface isn't in the cached listing (a
+// phone just plugged in). It is keyed on the interface's own last miss
+// refresh, not on the cache's fetch time, so the first miss after any
+// ordinary (TTL) refresh always re-reads the listing.
+const hwPortMissRefresh = 5 * time.Second
+
 var wifiDevCache struct {
 	mu      sync.Mutex
 	devs    map[string]bool
+	ports   map[string]string // device → hardware port name
 	ok      bool
 	fetched time.Time
+	// missRefreshed: device → time of the last refresh a miss on it
+	// triggered. Entries are dropped once the device is listed.
+	missRefreshed map[string]time.Time
+}
+
+// refreshHWPortsLocked re-reads the hardware-port listing. Caller holds
+// wifiDevCache.mu. Returns false (cache untouched) when the listing fails.
+func refreshHWPortsLocked(now time.Time) bool {
+	out, err := hardwarePortsOutput()
+	if err != nil || out == "" {
+		return false
+	}
+	wifiDevCache.devs = parseWiFiHardwarePorts(out)
+	wifiDevCache.ports = parseHardwarePorts(out)
+	wifiDevCache.ok = true
+	wifiDevCache.fetched = now
+	return true
 }
 
 // IsWiFiInterface reports whether iface is a Wi-Fi device, from
@@ -63,13 +88,47 @@ func IsWiFiInterface(iface string) bool {
 	defer wifiDevCache.mu.Unlock()
 	now := routeNow()
 	if !wifiDevCache.ok || now.Sub(wifiDevCache.fetched) > wifiDeviceCacheTTL {
-		out, err := hardwarePortsOutput()
-		if err != nil || out == "" {
+		if !refreshHWPortsLocked(now) {
 			return true
 		}
-		wifiDevCache.devs = parseWiFiHardwarePorts(out)
-		wifiDevCache.ok = true
-		wifiDevCache.fetched = now
 	}
 	return wifiDevCache.devs[iface]
+}
+
+// InterfaceMedium classifies iface as MediumWiFi, MediumTethered (iPhone/
+// iPad USB, Bluetooth PAN, RNDIS) or MediumWired from its hardware port in
+// the same cached listing IsWiFiInterface uses. "" when iface is "", the
+// listing fails, or iface is not in the listing (even after a rate-limited
+// re-read) — never a guess, since positive medium rules don't wait.
+func InterfaceMedium(iface string) string {
+	if iface == "" {
+		return ""
+	}
+	wifiDevCache.mu.Lock()
+	defer wifiDevCache.mu.Unlock()
+	now := routeNow()
+	if !wifiDevCache.ok || now.Sub(wifiDevCache.fetched) > wifiDeviceCacheTTL {
+		if !refreshHWPortsLocked(now) {
+			return ""
+		}
+	}
+	port, found := wifiDevCache.ports[iface]
+	if !found {
+		last, tried := wifiDevCache.missRefreshed[iface]
+		if !tried || now.Sub(last) >= hwPortMissRefresh {
+			if wifiDevCache.missRefreshed == nil {
+				wifiDevCache.missRefreshed = make(map[string]time.Time)
+			}
+			wifiDevCache.missRefreshed[iface] = now
+			if !refreshHWPortsLocked(now) {
+				return ""
+			}
+			port, found = wifiDevCache.ports[iface]
+		}
+	}
+	if !found {
+		return ""
+	}
+	delete(wifiDevCache.missRefreshed, iface)
+	return classifyHardwarePort(port)
 }

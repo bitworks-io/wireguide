@@ -299,6 +299,9 @@ type Helper struct {
 	// connectedFn, when set, replaces manager.ActiveTunnels() in the legacy
 	// reconnect path (tests only).
 	connectedFn func() []string
+	// tunnelConnectFn, when set, replaces manager.Connect/ConnectWithContext
+	// in doConnectHeld and reconnectFn (tests only).
+	tunnelConnectFn func(ctx context.Context, cfg *domain.WireGuardConfig) error
 
 	// reevalMu serialises Automation re-evaluations. The three triggers
 	// (SSID change, network change, poll) can fire concurrently; the
@@ -312,12 +315,50 @@ type Helper struct {
 	settleMu    sync.Mutex
 	settle      *wifi.SettleTracker
 	settleTimer *time.Timer
+	// mediumRetryIface / mediumRetrySince track how long the primary
+	// interface's medium has been unknown, for the bounded re-evaluation
+	// retry (see mediumRetryDue). Guarded by reevalMu.
+	mediumRetryIface string
+	mediumRetrySince time.Time
+	// Test seams for mediumRetryDue (per Helper, so background timers of
+	// other helpers never race on package state).
+	mediumRetryForce bool
+	mediumRetryClock func() time.Time
 
 	// manualOverride latches an explicit user connect/disconnect per tunnel
 	// (with the network identity it was made on) so automation doesn't undo
 	// it until the network settles on a different identity. Guarded by
 	// wifiMu.
 	manualOverride map[string]manualLatch
+
+	// lastAutoEvent is the (action, rule) last emitted per tunnel as an
+	// event.automation, so held/latched/skipped states are reported only
+	// when they change. Guarded by autoEvMu (its own lock: never connectMu).
+	autoEvMu      sync.Mutex
+	lastAutoEvent map[string]autoDecision
+	// emitAutomationFn replaces the broadcast of automation events, and
+	// automationActiveFn the active-tunnel list automation evaluates
+	// against (tests only).
+	emitAutomationFn   func(ipc.AutomationEventPayload)
+	automationActiveFn func() []string
+	// rulesHash is a digest of each tunnel's rules at the last evaluation,
+	// for the change-only "rules loaded" log. Guarded by rulesHashMu.
+	rulesHashMu sync.Mutex
+	rulesHash   map[string]string
+
+	// connectReasons / endReasons record why each tunnel last came up /
+	// went down (status last_change_reason and recent_disconnects).
+	// Guarded by changeMu, which is safe to take under connectMu and is
+	// never held while taking another lock.
+	changeMu       sync.Mutex
+	connectReasons map[string]changeRecord
+	endReasons     map[string]changeRecord
+
+	// healthOverride is the per-tunnel handshake health-check override
+	// ("on"/"off"; absent = inherit) received with the connect request or
+	// read from the sidecar for automation connects. Its lifetime follows
+	// activeCfgs. Guarded by mu.
+	healthOverride map[string]string
 
 	// userTunnelStore reads .conf files from the user's home dir
 	// (derived from the uid passed at launch). Needed so wifi rules
@@ -443,6 +484,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 	// Reconnect monitor — uses cached config
 	h.monitor = reconnect.NewMonitor(manager, h.reconnectFn, h.onReconnectState, reconnect.DefaultConfig())
 	h.monitor.SetFirewallCallbacks(h.suspendFirewall, h.resumeFirewall)
+	h.monitor.SetHealthCheckFilter(h.healthCheckEnabledFor)
 	h.monitor.SetLegacyTeardown(h.legacyTeardown)
 	h.monitor.Start()
 
@@ -693,10 +735,25 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 
 	// connectMu is released by defer so a panic in Connect unwinds it BEFORE
 	// the monitor's deferred resumeFirewall (which takes connectMu) runs.
+	// The trigger kind the monitor attached to ctx (wake, network change,
+	// health check) becomes the tunnel's change reason.
+	reason := reconnectReason(ctx)
 	connectLocked := func(cfg *domain.WireGuardConfig) error {
 		h.connectMu.Lock()
 		defer h.connectMu.Unlock()
-		return h.manager.ConnectWithContext(ctx, cfg)
+		commitReason, undoReason := h.beginConnectReason(cfg.Name, reason)
+		var err error
+		if h.tunnelConnectFn != nil {
+			err = h.tunnelConnectFn(ctx, cfg)
+		} else {
+			err = h.manager.ConnectWithContext(ctx, cfg)
+		}
+		if err == nil {
+			commitReason()
+		} else {
+			undoReason()
+		}
+		return err
 	}
 
 	if name != "" {

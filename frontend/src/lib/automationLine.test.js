@@ -52,3 +52,29 @@ test('verdictFor finds by name', () => {
   assert.equal(verdictFor({ tunnels: [{ name: 'a' }, { name: 'b', verdict: 'x' }] }, 'b').verdict, 'x');
   assert.equal(verdictFor(null, 'a'), null);
 });
+
+test('condition text: ssid lists and connection type', () => {
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_multi: true, rule_value: 'A, B' }), 'automation.why.cond_ssid_in|value=A, B');
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_multi: true, rule_negate: true, rule_value: 'A, B' }), 'automation.why.cond_ssid_not_in|value=A, B');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_value: 'wired' }), 'automation.why.cond_medium_is|value=automation.medium_wired');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_negate: true, rule_value: 'wifi' }), 'automation.why.cond_medium_not|value=automation.medium_wifi');
+});
+
+test('network lines show the connection type', () => {
+  assert.equal(networkLines(tr, { available: true, online: true, medium: 'wifi', ssid: 'Home' }).network, 'automation.why.net_ssid|ssid=Home');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true, medium: 'wired' }).network, 'automation.why.net_wired');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true, medium: 'tethered', ssid: 'Cafe' }).network, 'automation.why.net_tethered');
+  // Older helper / Windows: no medium, previous behaviour.
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true }).network, 'automation.why.net_no_wifi');
+  assert.equal(networkLines(tr, { available: true, online: false, medium: 'wired' }).network, 'automation.why.net_offline');
+});
+
+test('unreadable Wi-Fi name says why, by Location Services state', () => {
+  const p = { available: true, online: true, ssid_unknown: true };
+  assert.equal(networkLines(tr, p, 'denied').network, 'automation.why.net_unknown_denied');
+  assert.equal(networkLines(tr, p, 'restricted').network, 'automation.why.net_unknown_denied');
+  assert.equal(networkLines(tr, p, 'not_determined').network, 'automation.why.net_unknown_not_allowed');
+  assert.equal(networkLines(tr, p, 'authorized').network, 'automation.why.net_unknown_roaming');
+  assert.equal(networkLines(tr, p).network, 'automation.why.net_unknown');
+  assert.equal(networkLines(tr, { ...p, ssid_unknown: false, ssid: 'Home' }, 'denied').network, 'automation.why.net_ssid|ssid=Home');
+});

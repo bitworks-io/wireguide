@@ -108,8 +108,19 @@
       case 'app_quit': return $t('history.reason_app_quit');
       case 'health_check': return $t('history.reason_health_check');
       case 'error': return $t('history.reason_error');
+      case 'automation': return $t('history.reason_automation');
+      case 'wake': return $t('history.reason_wake');
+      case 'network_change': return $t('history.reason_network_change');
+      case 'recovery': return $t('history.reason_recovery');
       default: return $t('history.reason_user');
     }
+  }
+
+  // What started a session (helper last_change_reason; empty on records
+  // made before it existed or with an older helper).
+  const START_REASONS = ['user', 'automation', 'wake', 'network_change', 'health_check', 'reconnect', 'recovery'];
+  function startLabel(reason) {
+    return START_REASONS.includes(reason) ? $t('history.start_' + reason) : '';
   }
 
   function toggle(id) {
@@ -176,6 +187,18 @@
                       {/if}
                     </span>
                   </div>
+                  {#if startLabel(s.start_reason)}
+                    <div class="detail-row">
+                      <span class="detail-label">{$t('history.started_by')}</span>
+                      <span class="detail-value">{startLabel(s.start_reason)}</span>
+                    </div>
+                  {/if}
+                  {#if s.ssid}
+                    <div class="detail-row">
+                      <span class="detail-label">{$t('history.ssid')}</span>
+                      <span class="detail-value">{s.ssid}</span>
+                    </div>
+                  {/if}
                   <div class="detail-row">
                     <span class="detail-label">{$t('history.started')}</span>
                     <span class="detail-value">{formatDateTime(s.start_time)}</span>

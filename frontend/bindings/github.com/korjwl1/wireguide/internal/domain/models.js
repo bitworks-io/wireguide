@@ -134,6 +134,35 @@ export class ConnectionStatus {
         }
         if (/** @type {any} */(false)) {
             /**
+             * LastChangeReason / LastChangeAt say what last brought this tunnel up
+             * (protocol minor 4): one of the ChangeReason* values and an RFC3339
+             * time. Empty when the helper does not know (older helper, or a tunnel
+             * it did not connect itself).
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_change_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_change_at"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RecentDisconnects maps a tunnel that went down in the last minute to
+             * why (top-level only; protocol minor 4). A disconnected tunnel is no
+             * longer in the status at all, so this is how its end reason reaches
+             * the GUI's history.
+             * @member
+             * @type {{ [_ in string]?: TunnelChange } | undefined}
+             */
+            this["recent_disconnects"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * ActiveTunnels lists the names of all currently connected (or connecting)
              * tunnels. Populated by the multi-tunnel manager so the frontend can show
              * which tunnels are active.
@@ -163,8 +192,9 @@ export class ConnectionStatus {
     static createFrom($$source = {}) {
         const $$createField11_0 = $$createType0;
         const $$createField13_0 = $$createType0;
-        const $$createField14_0 = $$createType0;
-        const $$createField15_0 = $$createType2;
+        const $$createField16_0 = $$createType2;
+        const $$createField17_0 = $$createType0;
+        const $$createField18_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_servers" in $$parsedSource) {
             $$parsedSource["dns_servers"] = $$createField11_0($$parsedSource["dns_servers"]);
@@ -172,11 +202,14 @@ export class ConnectionStatus {
         if ("routes_skipped" in $$parsedSource) {
             $$parsedSource["routes_skipped"] = $$createField13_0($$parsedSource["routes_skipped"]);
         }
+        if ("recent_disconnects" in $$parsedSource) {
+            $$parsedSource["recent_disconnects"] = $$createField16_0($$parsedSource["recent_disconnects"]);
+        }
         if ("active_tunnels" in $$parsedSource) {
-            $$parsedSource["active_tunnels"] = $$createField14_0($$parsedSource["active_tunnels"]);
+            $$parsedSource["active_tunnels"] = $$createField17_0($$parsedSource["active_tunnels"]);
         }
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField15_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField18_0($$parsedSource["tunnels"]);
         }
         return new ConnectionStatus(/** @type {Partial<ConnectionStatus>} */($$parsedSource));
     }
@@ -299,7 +332,7 @@ export class InterfaceConfig {
     static createFrom($$source = {}) {
         const $$createField1_0 = $$createType0;
         const $$createField2_0 = $$createType0;
-        const $$createField11_0 = $$createType3;
+        const $$createField11_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("address" in $$parsedSource) {
             $$parsedSource["address"] = $$createField1_0($$parsedSource["address"]);
@@ -382,7 +415,7 @@ export class PeerConfig {
      */
     static createFrom($$source = {}) {
         const $$createField3_0 = $$createType0;
-        const $$createField5_0 = $$createType3;
+        const $$createField5_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowed_ips" in $$parsedSource) {
             $$parsedSource["allowed_ips"] = $$createField3_0($$parsedSource["allowed_ips"]);
@@ -410,6 +443,45 @@ export const State = {
     StateConnected: "connected",
     StateError: "error",
 };
+
+/**
+ * TunnelChange is one recorded connect/disconnect reason.
+ */
+export class TunnelChange {
+    /**
+     * Creates a new TunnelChange instance.
+     * @param {Partial<TunnelChange>} [$$source = {}] - The source object to create the TunnelChange.
+     */
+    constructor($$source = {}) {
+        if (!("reason" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["reason"] = "";
+        }
+        if (!("at" in $$source)) {
+            /**
+             * RFC3339
+             * @member
+             * @type {string}
+             */
+            this["at"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TunnelChange instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TunnelChange}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TunnelChange(/** @type {Partial<TunnelChange>} */($$parsedSource));
+    }
+}
 
 /**
  * WireGuardConfig represents a complete WireGuard configuration file.
@@ -454,8 +526,8 @@ export class WireGuardConfig {
      * @returns {WireGuardConfig}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType4;
-        const $$createField2_0 = $$createType6;
+        const $$createField1_0 = $$createType6;
+        const $$createField2_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("interface" in $$parsedSource) {
             $$parsedSource["interface"] = $$createField1_0($$parsedSource["interface"]);
@@ -469,9 +541,11 @@ export class WireGuardConfig {
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = ConnectionStatus.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = $Create.Map($Create.Any, $Create.Any);
-const $$createType4 = InterfaceConfig.createFrom;
-const $$createType5 = PeerConfig.createFrom;
-const $$createType6 = $Create.Array($$createType5);
+const $$createType1 = TunnelChange.createFrom;
+const $$createType2 = $Create.Map($Create.Any, $$createType1);
+const $$createType3 = ConnectionStatus.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $Create.Map($Create.Any, $Create.Any);
+const $$createType6 = InterfaceConfig.createFrom;
+const $$createType7 = PeerConfig.createFrom;
+const $$createType8 = $Create.Array($$createType7);

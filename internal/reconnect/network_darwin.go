@@ -56,6 +56,7 @@ import "C"
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -89,6 +90,17 @@ type darwinNetworkChangeDetector struct {
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
 	running  bool
+	// offline is set by poll (never under mu: Stop holds mu across the
+	// poller's exit) when the last successful read found no primary
+	// interface. False until the first read, so the detector reports
+	// online until it knows otherwise.
+	offline atomic.Bool
+}
+
+// Online reports whether a primary network interface exists (see
+// OnlineReporter). True until the first poll has completed.
+func (d *darwinNetworkChangeDetector) Online() bool {
+	return !d.offline.Load()
 }
 
 const networkPollInterval = 1 * time.Second
@@ -194,6 +206,7 @@ func (d *darwinNetworkChangeDetector) poll() {
 				slog.Warn("SCDynamicStoreCopyValue failed")
 				continue
 			}
+			d.offline.Store(iface == "")
 			if !hasInitial {
 				hasInitial = true
 				lastIface = iface

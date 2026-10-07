@@ -154,6 +154,10 @@ func NewSettingsStore(configDir string) *SettingsStore {
 	}
 }
 
+// Dir returns the config directory holding config.json (siblings such as
+// automation-backups live next to it).
+func (s *SettingsStore) Dir() string { return filepath.Dir(s.path) }
+
 // Load reads settings from disk. Returns defaults if file doesn't exist.
 func (s *SettingsStore) Load() (*Settings, error) {
 	s.mu.Lock()

@@ -407,7 +407,18 @@ type TunnelMeta struct {
 	// (issue #17). 0 means "unknown" (tunnel predates this field) — callers
 	// fall back to the mtime.
 	CreatedUnix int64 `json:"created_unix,omitempty"`
+	// HealthCheck overrides the global handshake health check for this
+	// tunnel: HealthCheckOn, HealthCheckOff, or HealthCheckInherit / ""
+	// (follow the global setting). Unknown values read as inherit.
+	HealthCheck string `json:"health_check,omitempty"`
 }
+
+// Per-tunnel handshake health-check override values (TunnelMeta.HealthCheck).
+const (
+	HealthCheckInherit = "inherit"
+	HealthCheckOn      = "on"
+	HealthCheckOff     = "off"
+)
 
 func (s *TunnelStore) metaPath(name string) string {
 	return filepath.Join(s.dir, name+".meta.json")

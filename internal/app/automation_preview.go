@@ -2,6 +2,7 @@ package app
 
 import (
 	"net"
+	"strings"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/network"
@@ -24,11 +25,14 @@ type AutomationPreview struct {
 	SSIDUnknown bool `json:"ssid_unknown"`
 	// PrimaryKnown is true when the helper identified the default-route
 	// interface; when false, PrimaryIsWiFi is only a placeholder.
-	PrimaryKnown       bool `json:"primary_known"`
-	PrimaryIsWiFi      bool `json:"primary_is_wifi"`
-	Online             bool `json:"online"`
-	Settled            bool `json:"settled"`
-	SettleRemainingSec int  `json:"settle_remaining_sec"`
+	PrimaryKnown  bool `json:"primary_known"`
+	PrimaryIsWiFi bool `json:"primary_is_wifi"`
+	// Medium is the primary interface's connection type: wifi, wired or
+	// tethered ("" unknown, e.g. on Windows or an older helper).
+	Medium             string `json:"medium,omitempty"`
+	Online             bool   `json:"online"`
+	Settled            bool   `json:"settled"`
+	SettleRemainingSec int    `json:"settle_remaining_sec"`
 	// HasNegatedRules is true when any tunnel has an "is not" rule, i.e.
 	// the settle window actually holds something back.
 	HasNegatedRules bool                `json:"has_negated_rules"`
@@ -53,10 +57,14 @@ type AutomationVerdict struct {
 	// RuleIndex is the 1-based position of the deciding rule (0 = none).
 	RuleIndex int `json:"rule_index,omitempty"`
 	// RuleType/RuleNegate/RuleValue describe the deciding rule's condition:
-	// type is ssid|subnet|network|none_match, value the SSID/CIDR/MAC.
-	RuleType    string `json:"rule_type,omitempty"`
-	RuleNegate  bool   `json:"rule_negate,omitempty"`
-	RuleValue   string `json:"rule_value,omitempty"`
+	// type is ssid|subnet|network|medium|none_match, value the SSID (a
+	// comma-separated list for a multi-SSID rule) / CIDR / MAC / medium.
+	RuleType   string `json:"rule_type,omitempty"`
+	RuleNegate bool   `json:"rule_negate,omitempty"`
+	RuleValue  string `json:"rule_value,omitempty"`
+	// RuleMulti is true for an ssid rule over several SSIDs (RuleValue is
+	// then the comma-separated list: "is one of" / "is none of").
+	RuleMulti   bool   `json:"rule_multi,omitempty"`
 	OverlapCIDR string `json:"overlap_cidr,omitempty"`
 }
 
@@ -71,6 +79,7 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 		SSIDUnknown:        resp.SSID == "" && resp.Online && resp.PrimaryIface != "" && resp.PrimaryIsWiFi,
 		PrimaryKnown:       resp.PrimaryIface != "",
 		PrimaryIsWiFi:      resp.PrimaryIsWiFi,
+		Medium:             resp.Medium,
 		Online:             resp.Online,
 		Settled:            resp.Settled,
 		SettleRemainingSec: resp.SettleRemainingSec,
@@ -83,6 +92,7 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 		PrimaryIface:  resp.PrimaryIface,
 		PrimaryIsWiFi: resp.PrimaryIsWiFi,
 		Online:        resp.Online,
+		Medium:        resp.Medium,
 	}
 	for _, s := range resp.PhysicalIPs {
 		if ip := net.ParseIP(s); ip != nil {
@@ -108,6 +118,13 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 			switch c.Type {
 			case wifi.CondSSID:
 				v.RuleValue = c.SSID
+				if len(c.SSIDs) > 0 {
+					set := wifi.SSIDSet(c)
+					v.RuleValue = strings.Join(set, ", ")
+					v.RuleMulti = len(set) > 1
+				}
+			case wifi.CondMedium:
+				v.RuleValue = strings.ToLower(strings.TrimSpace(c.Medium))
 			case wifi.CondSubnet:
 				v.RuleValue = c.Subnet
 			case wifi.CondNetwork:
@@ -134,7 +151,7 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 			v.Verdict = VerdictDisconnect
 		default:
 			v.Verdict = VerdictNoMatch
-			v.RuleIndex, v.RuleType, v.RuleNegate, v.RuleValue = 0, "", false, ""
+			v.RuleIndex, v.RuleType, v.RuleNegate, v.RuleValue, v.RuleMulti = 0, "", false, "", false
 		}
 		out.Tunnels = append(out.Tunnels, v)
 	}

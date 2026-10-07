@@ -18,6 +18,8 @@
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
   import { startAutomationPolling, stopAutomationPolling, refreshAutomationPreview } from './stores/automation.js';
+  import { takeExternalRuleChanges } from './stores/automationWatch.js';
+  import { get } from 'svelte/store';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -87,6 +89,11 @@
   // writes is harmless.
   async function applySettingsToUI() {
     const s = await TunnelService.GetSettings();
+    // Rules edited outside this window (CLI / another process): say so.
+    // The first call only seeds the baseline; the editor's own saves
+    // advance it (noteOwnSave) so they never read as external.
+    const changedRules = takeExternalRuleChanges(s, new Set(get(tunnels).map((x) => x.name)));
+    if (changedRules.length) showToast(get(t)('automation.safety.external', { name: changedRules.join(', ') }), 6000);
     applyTheme(s?.theme || 'system');
     compactList.set(s?.compact_list ?? false);
     listSort.set(s?.list_sort || 'name_asc');

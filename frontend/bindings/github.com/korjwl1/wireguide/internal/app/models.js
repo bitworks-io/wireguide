@@ -71,6 +71,15 @@ export class AutomationPreview {
              */
             this["primary_is_wifi"] = false;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Medium is the primary interface's connection type: wifi, wired or
+             * tethered ("" unknown, e.g. on Windows or an older helper).
+             * @member
+             * @type {string | undefined}
+             */
+            this["medium"] = undefined;
+        }
         if (!("online" in $$source)) {
             /**
              * @member
@@ -118,10 +127,10 @@ export class AutomationPreview {
      * @returns {AutomationPreview}
      */
     static createFrom($$source = {}) {
-        const $$createField9_0 = $$createType1;
+        const $$createField10_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField9_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField10_0($$parsedSource["tunnels"]);
         }
         return new AutomationPreview(/** @type {Partial<AutomationPreview>} */($$parsedSource));
     }
@@ -168,7 +177,8 @@ export class AutomationVerdict {
         if (/** @type {any} */(false)) {
             /**
              * RuleType/RuleNegate/RuleValue describe the deciding rule's condition:
-             * type is ssid|subnet|network|none_match, value the SSID/CIDR/MAC.
+             * type is ssid|subnet|network|medium|none_match, value the SSID (a
+             * comma-separated list for a multi-SSID rule) / CIDR / MAC / medium.
              * @member
              * @type {string | undefined}
              */
@@ -187,6 +197,15 @@ export class AutomationVerdict {
              * @type {string | undefined}
              */
             this["rule_value"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RuleMulti is true for an ssid rule over several SSIDs (RuleValue is
+             * then the comma-separated list: "is one of" / "is none of").
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["rule_multi"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**
@@ -580,6 +599,102 @@ export class HelperInfo {
 }
 
 /**
+ * HistoryReconcile is one status event's input to history reconciliation.
+ * StartReasons / EndReasons come from the helper's last_change_reason and
+ * recent_disconnects (protocol minor 4; nil from older helpers). SSID is the
+ * GUI's current Wi-Fi network, recorded on sessions that open now.
+ */
+export class HistoryReconcile {
+    /**
+     * Creates a new HistoryReconcile instance.
+     * @param {Partial<HistoryReconcile>} [$$source = {}] - The source object to create the HistoryReconcile.
+     */
+    constructor($$source = {}) {
+        if (!("active" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["active"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: number } | undefined}
+             */
+            this["rx"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: number } | undefined}
+             */
+            this["tx"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["disappear_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["start_reasons"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["end_reasons"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryReconcile instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HistoryReconcile}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType4;
+        const $$createField1_0 = $$createType11;
+        const $$createField2_0 = $$createType11;
+        const $$createField4_0 = $$createType12;
+        const $$createField5_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("active" in $$parsedSource) {
+            $$parsedSource["active"] = $$createField0_0($$parsedSource["active"]);
+        }
+        if ("rx" in $$parsedSource) {
+            $$parsedSource["rx"] = $$createField1_0($$parsedSource["rx"]);
+        }
+        if ("tx" in $$parsedSource) {
+            $$parsedSource["tx"] = $$createField2_0($$parsedSource["tx"]);
+        }
+        if ("start_reasons" in $$parsedSource) {
+            $$parsedSource["start_reasons"] = $$createField4_0($$parsedSource["start_reasons"]);
+        }
+        if ("end_reasons" in $$parsedSource) {
+            $$parsedSource["end_reasons"] = $$createField5_0($$parsedSource["end_reasons"]);
+        }
+        return new HistoryReconcile(/** @type {Partial<HistoryReconcile>} */($$parsedSource));
+    }
+}
+
+/**
  * KnownSSIDs is the response shape for GetKnownSSIDs. The frontend uses
  * it to render a picker so users can tap saved networks instead of
  * retyping SSIDs they've already joined.
@@ -866,7 +981,7 @@ export class TunnelInfo {
      */
     static createFrom($$source = {}) {
         const $$createField8_0 = $$createType4;
-        const $$createField9_0 = $$createType12;
+        const $$createField9_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_domains" in $$parsedSource) {
             $$parsedSource["dns_domains"] = $$createField8_0($$parsedSource["dns_domains"]);
@@ -1103,7 +1218,7 @@ export class VerifyRow {
      * @returns {VerifyRow}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType13;
+        const $$createField4_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("detail_params" in $$parsedSource) {
             $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
@@ -1153,7 +1268,7 @@ export class ZipImportResult {
      * @returns {ZipImportResult}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType12;
+        const $$createField2_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("warnings" in $$parsedSource) {
             $$parsedSource["warnings"] = $$createField2_0($$parsedSource["warnings"]);
@@ -1174,6 +1289,7 @@ const $$createType7 = ipc$0.FirewallStatusResponse.createFrom;
 const $$createType8 = $Create.Nullable($$createType7);
 const $$createType9 = ipc$0.HelperRecovery.createFrom;
 const $$createType10 = $Create.Nullable($$createType9);
-const $$createType11 = config$0.Diagnostic.createFrom;
-const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $Create.Map($Create.Any, $Create.Any);
+const $$createType11 = $Create.Map($Create.Any, $Create.Any);
+const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType13 = config$0.Diagnostic.createFrom;
+const $$createType14 = $Create.Array($$createType13);

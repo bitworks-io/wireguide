@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -190,18 +191,82 @@ func (s *TunnelService) SaveAutomationRules(tunnel string, rules []wifi.Rule) er
 			return fmt.Errorf("automation: rule %d: %w", i+1, err)
 		}
 	}
-	return s.settingsStore.Update(func(st *storage.Settings) error {
+	var before, snapshot *wifi.Automation
+	err := s.settingsStore.Update(func(st *storage.Settings) error {
 		st.EnsureAutomation()
+		// Deep copy via JSON so snapshots are independent of st. The
+		// pre-change image is what makes a mistaken removal recoverable.
+		before = cloneAutomation(st.Automation)
 		if len(rules) == 0 {
 			delete(st.Automation.PerTunnel, tunnel)
-			return nil
+		} else {
+			if st.Automation.PerTunnel == nil {
+				st.Automation.PerTunnel = map[string][]wifi.Rule{}
+			}
+			st.Automation.PerTunnel[tunnel] = rules
 		}
-		if st.Automation.PerTunnel == nil {
-			st.Automation.PerTunnel = map[string][]wifi.Rule{}
-		}
-		st.Automation.PerTunnel[tunnel] = rules
+		snapshot = cloneAutomation(st.Automation)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// Safety net only: a failed backup must never fail the save.
+	if snapshot != nil {
+		if bErr := storage.SnapshotAutomation(s.settingsStore.Dir(), before, snapshot, time.Now()); bErr != nil {
+			slog.Warn("automation backup failed", "error", bErr)
+		}
+	}
+	return nil
+}
+
+func cloneAutomation(a *wifi.Automation) *wifi.Automation {
+	data, err := json.Marshal(a)
+	if err != nil {
+		return nil
+	}
+	var cp wifi.Automation
+	if json.Unmarshal(data, &cp) != nil {
+		return nil
+	}
+	return &cp
+}
+
+// ListAutomationBackups lists the saved automation snapshots, newest
+// first, counting the rules each holds for tunnel.
+func (s *TunnelService) ListAutomationBackups(tunnel string) []storage.AutomationBackupInfo {
+	return storage.ListAutomationBackups(s.settingsStore.Dir(), tunnel)
+}
+
+// RestoreAutomationBackup replaces tunnel's rules with the ones in the
+// named snapshot. It goes through SaveAutomationRules, so every rule is
+// validated again and the restore is itself snapshotted (and undoable).
+func (s *TunnelService) RestoreAutomationBackup(name, tunnel string) error {
+	if tunnel == "" {
+		return fmt.Errorf("automation: empty tunnel name")
+	}
+	rules, err := storage.ReadAutomationBackupRules(s.settingsStore.Dir(), name, tunnel)
+	if err != nil {
+		return err
+	}
+	return s.SaveAutomationRules(tunnel, rules)
+}
+
+// AutomationBackupRules returns the rules one tunnel had in the named
+// snapshot (validated; no path traversal) without changing anything, so the
+// GUI can register the write it is about to make as its own.
+func (s *TunnelService) AutomationBackupRules(name, tunnel string) ([]wifi.Rule, error) {
+	if tunnel == "" {
+		return nil, fmt.Errorf("automation: empty tunnel name")
+	}
+	return storage.ReadAutomationBackupRules(s.settingsStore.Dir(), name, tunnel)
+}
+
+// GetLocationAuthorization reports the GUI process's Location Services
+// status: authorized / denied / restricted / not_determined / unknown.
+// Read-only; it never prompts, and the root helper never calls it.
+func (s *TunnelService) GetLocationAuthorization() string {
+	return wifi.LocationAuthorization()
 }
 
 // SetLogLevel updates both the GUI's and the helper's slog level
