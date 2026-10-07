@@ -312,6 +312,19 @@ type Helper struct {
 	// time so they don't race on the same tunnel.
 	reevalMu sync.Mutex
 
+	// reevalTrigger, when set, replaces reevaluateAutomation for the
+	// rules-change watcher and the preview drift check (tests only).
+	reevalTrigger func(reason string)
+	// rulesWatchInterval overrides rulesWatchDefaultInterval; rulesStat
+	// replaces os.Stat of config.json (tests only).
+	rulesWatchInterval time.Duration
+	rulesStat          func(path string) (mtimeNano, size int64, err error)
+	// previewDriftMu guards previewDriftLast (rate limit for the preview's
+	// self-heal); previewDriftNow overrides time.Now (tests only).
+	previewDriftMu   sync.Mutex
+	previewDriftLast time.Time
+	previewDriftNow  func() time.Time
+
 	// settle tracks how long the network fingerprint has been stable so
 	// negated rules can wait out roam blips; settleTimer re-triggers a
 	// held evaluation when the window elapses. Both guarded by settleMu.
@@ -630,6 +643,10 @@ func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 		slog.Info("startup rule re-evaluation", "ssid", ssid)
 		h.reevaluateAutomation("startup")
 	})
+
+	// Rules-change trigger: nothing else re-evaluates when the user saves
+	// new Automation rules, so the settle tracker would never see them.
+	h.goSafe("automationRulesWatch", h.rulesWatchLoop)
 
 	// Hybrid subnet-rule trigger. Subnet-based Automation conditions must
 	// re-evaluate when the physical network changes even if the SSID

@@ -42,7 +42,10 @@ var probeNetwork = func() netProbeResult {
 		Iface:      iface,
 		GatewayMAC: wifi.GatewayMAC(),
 		IPs:        wifi.PhysicalInterfaceIPs(),
-		Subnets:    wifi.PhysicalSubnets(),
+		// Primary interface only: virtual bridges (bridge100, vmenet) count
+		// as physical for PhysicalIPs but flap and would restart the settle
+		// window forever.
+		Subnets: primarySubnets(iface),
 	}
 	// Unknown primary interface reads as Wi-Fi so an empty SSID holds.
 	r.PrimaryIsWiFi = iface == "" || wifi.IsWiFiInterface(iface)
@@ -51,6 +54,47 @@ var probeNetwork = func() netProbeResult {
 	// failed lookup is "" so positive medium rules can't fire on a guess.
 	r.Medium = wifi.InterfaceMedium(iface)
 	return r
+}
+
+// primarySubnets returns the masked network CIDRs (IPv4 and non-link-local
+// IPv6) of iface's addresses, sorted. A seam so tests don't need real
+// interfaces.
+var primarySubnets = func(iface string) []string {
+	if iface == "" {
+		return nil
+	}
+	ifi, err := net.InterfaceByName(iface)
+	if err != nil {
+		return nil
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return nil
+	}
+	return subnetsOfAddrs(addrs)
+}
+
+// subnetsOfAddrs masks each address down to its network CIDR, skipping
+// loopback and link-local; duplicates removed, output sorted.
+func subnetsOfAddrs(addrs []net.Addr) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP == nil {
+			continue
+		}
+		if ipnet.IP.IsLoopback() || ipnet.IP.IsLinkLocalUnicast() || ipnet.IP.IsLinkLocalMulticast() {
+			continue
+		}
+		cidr := (&net.IPNet{IP: ipnet.IP.Mask(ipnet.Mask), Mask: ipnet.Mask}).String()
+		if !seen[cidr] {
+			seen[cidr] = true
+			out = append(out, cidr)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // defaultRouteProbe reports whether a default route exists (seam for tests).
@@ -198,7 +242,14 @@ func (h *Helper) armSettleTimer(remaining time.Duration) {
 	if h.settleTimer != nil {
 		h.settleTimer.Stop()
 	}
-	h.settleTimer = time.AfterFunc(remaining+settleTimerSlack, func() {
+	var t *time.Timer
+	t = time.AfterFunc(remaining+settleTimerSlack, func() {
+		// Fired: no longer armed (the preview's drift check reads this).
+		h.settleMu.Lock()
+		if h.settleTimer == t {
+			h.settleTimer = nil
+		}
+		h.settleMu.Unlock()
 		select {
 		case <-h.done:
 			return
@@ -206,6 +257,14 @@ func (h *Helper) armSettleTimer(remaining time.Duration) {
 		}
 		h.reevaluateAutomation("settled")
 	})
+	h.settleTimer = t
+}
+
+// settleTimerArmed reports whether a settle re-evaluation is pending.
+func (h *Helper) settleTimerArmed() bool {
+	h.settleMu.Lock()
+	defer h.settleMu.Unlock()
+	return h.settleTimer != nil
 }
 
 // mediumRetryInterval / mediumRetryBudget bound the re-evaluation retry

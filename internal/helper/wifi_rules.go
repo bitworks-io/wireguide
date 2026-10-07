@@ -2,6 +2,8 @@ package helper
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -231,6 +233,8 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 		active[n] = true
 	}
 
+	h.previewDriftCheck(auto, st)
+
 	resp := ipc.AutomationPreviewResponse{
 		SSID: ctx.SSID, PhysicalIPs: ipStrs, GatewayMAC: ctx.GatewayMAC,
 		PrimaryIface: ctx.PrimaryIface, PrimaryIsWiFi: ctx.PrimaryIsWiFi,
@@ -390,4 +394,134 @@ func (h *Helper) disconnectAutoManaged(name string, ctx wifi.NetworkContext, rul
 	h.maybeArmShutdownAfterTeardown("rule-driven disconnect, no GUI attached")
 	ev := automationEvent(name, ipc.AutomationActionDisconnect, ruleIndex, rules, ctx, disconnectErr)
 	return &ev
+}
+
+// previewDriftInterval rate-limits the preview's self-heal evaluation.
+const previewDriftInterval = 5 * time.Second
+
+// previewDriftCheck heals a stale settle tracker. The preview only Peeks,
+// so if rules exist that depend on settling (a negated rule, or a manual
+// latch awaiting a settled identity) but the tracker has not settled and
+// no settle timer is pending, nothing would ever Observe the network and
+// the GUI would show "settling" forever. One real evaluation observes the
+// fingerprint and arms the timer. Asynchronous and rate-limited; never runs
+// under reevalMu/connectMu.
+func (h *Helper) previewDriftCheck(auto *wifi.Automation, st networkState) {
+	if st.ctx.Settled {
+		return
+	}
+	needs := h.hasManualOverrides()
+	if auto != nil && !needs {
+		for _, rules := range auto.PerTunnel {
+			if wifi.HasNegated(rules) {
+				needs = true
+				break
+			}
+		}
+	}
+	if !needs || h.settleTimerArmed() {
+		return
+	}
+	now := time.Now()
+	if h.previewDriftNow != nil {
+		now = h.previewDriftNow()
+	}
+	h.previewDriftMu.Lock()
+	if !h.previewDriftLast.IsZero() && now.Sub(h.previewDriftLast) < previewDriftInterval {
+		h.previewDriftMu.Unlock()
+		return
+	}
+	h.previewDriftLast = now
+	h.previewDriftMu.Unlock()
+	h.goSafe("previewDrift", func() { h.triggerReevaluate("preview-drift") })
+}
+
+// triggerReevaluate runs an automation evaluation, or the test hook.
+func (h *Helper) triggerReevaluate(reason string) {
+	if h.reevalTrigger != nil {
+		h.reevalTrigger(reason)
+		return
+	}
+	h.reevaluateAutomation(reason)
+}
+
+// rulesWatchDefaultInterval is how often config.json is polled for
+// Automation changes.
+const rulesWatchDefaultInterval = 2 * time.Second
+
+// rulesWatcher remembers the last config.json stat and automation hash.
+type rulesWatcher struct {
+	mtime, size int64
+	hash        string
+}
+
+func (h *Helper) rulesStatFn(path string) (int64, int64, error) {
+	if h.rulesStat != nil {
+		return h.rulesStat(path)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	return fi.ModTime().UnixNano(), fi.Size(), nil
+}
+
+// automationHash is a canonical hash of ONLY the automation block, so
+// unrelated settings changes (theme, ...) don't trigger evaluations.
+func (h *Helper) automationHash() (string, bool) {
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return "", false
+	}
+	settings.EnsureAutomation()
+	b, err := json.Marshal(settings.Automation)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), true
+}
+
+// rulesWatchTick checks config.json once. When its stat changed and the
+// automation block differs from the last one seen it re-evaluates. Holds no
+// locks while statting/loading.
+func (h *Helper) rulesWatchTick(w *rulesWatcher) {
+	mt, sz, err := h.rulesStatFn(filepath.Join(h.userAppSupport, "config.json"))
+	if err != nil || (mt == w.mtime && sz == w.size) {
+		return
+	}
+	w.mtime, w.size = mt, sz
+	hash, ok := h.automationHash()
+	if !ok || hash == w.hash {
+		return
+	}
+	w.hash = hash
+	slog.Info("automation rules changed; re-evaluating")
+	h.triggerReevaluate("rules-changed")
+}
+
+// rulesWatchLoop polls config.json for Automation changes (see
+// rulesWatchTick). The baseline is recorded without triggering: the
+// startup evaluation already covers the rules present at start.
+func (h *Helper) rulesWatchLoop() {
+	if h.userAppSupport == "" {
+		return
+	}
+	w := &rulesWatcher{}
+	w.mtime, w.size, _ = h.rulesStatFn(filepath.Join(h.userAppSupport, "config.json"))
+	w.hash, _ = h.automationHash()
+	interval := h.rulesWatchInterval
+	if interval <= 0 {
+		interval = rulesWatchDefaultInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-ticker.C:
+			h.rulesWatchTick(w)
+		}
+	}
 }

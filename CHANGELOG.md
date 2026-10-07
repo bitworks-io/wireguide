@@ -26,6 +26,7 @@ All notable changes to WireGuide will be documented in this file.
 - Health-check hint now says the trigger can also fire after sleep/wake or on idle tunnels without PersistentKeepalive. The tunnel detail pane shows "Select a tunnel" instead of "No tunnels configured" when tunnels exist but none is selected.
 
 ### Fixed
+- **Automation no longer stays "on hold — waiting for the network to settle" after rules are saved** — the helper now re-evaluates when the automation block of `config.json` changes (polled every 2 s; other settings are ignored), so the settle timer is armed for rules added while it was running. The settle fingerprint uses only the primary interface's subnets (virtual bridges such as `bridge100`/`vmenet` no longer restart the 15 s window), and the read-only Automation preview heals a stale settle tracker by triggering one evaluation (at most every 5 s).
 - **History rows with 0 B rx/tx** — a tunnel the helper lists as active while connecting or disconnecting reports 0/0 counters, and a reconnect restarts them from zero; the per-tick cache overwrote the real totals with those readings one tick before the session closed (49 of 76 sessions in one history were affected). Session totals now accumulate across zeroed or reset readings, and app-quit close merges the live status with the cache.
 - **Wi-Fi roam blips no longer bounce automation-owned tunnels** — the legacy wake/interface-change reconnect used to tear down an arbitrary tunnel before deciding anything, causing a ~20 s outage for tunnels with automation rules. The helper now leaves connected tunnels that have automation rules or a manual connect/disconnect latch untouched and only rebuilds plain tunnels.
 - **DNS permits respect LAN-overlap route skips** — a DNS server inside an AllowedIPs range that the macOS route installer skipped (it overlaps the local network) is no longer pinned to the tunnel interface, so another tunnel's DNS block cannot blackhole it.
@@ -65,7 +66,7 @@ All notable changes to WireGuide will be documented in this file.
 - `ctl automation` shows the primary interface, settle state, and `held`/`latched` decisions.
 
 ### Changed
-- Update checks now target `bitworks-io/wireguide`; version is `0.5.2-bitworks.4`.
+- Update checks now target `bitworks-io/wireguide`; version is `0.5.2-bitworks.5`.
 
 ## [0.5.2] - 2026-09-15
 
