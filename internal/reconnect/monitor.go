@@ -108,6 +108,7 @@ type Monitor struct {
 	cfg             Config
 	manager         TunnelManager
 	reconnectFn     ReconnectFunc
+	legacyTeardown  func() error
 	statusFn        StatusChangedFunc
 	fwSuspendFn     FirewallSuspendFunc
 	fwResumeFn      FirewallResumeFunc
@@ -154,6 +155,17 @@ func (m *Monitor) SetFirewallCallbacks(suspend FirewallSuspendFunc, resume Firew
 	defer m.mu.Unlock()
 	m.fwSuspendFn = suspend
 	m.fwResumeFn = resume
+}
+
+// SetLegacyTeardown installs the teardown used by the legacy all-tunnels
+// path (tunnelName == "") INSTEAD of manager.Disconnect(). It lets the owner
+// decide which tunnels may be torn down (e.g. leave automation-owned tunnels
+// alone). A nil error, or ErrNotConnected, counts as success. Must be called
+// before Start().
+func (m *Monitor) SetLegacyTeardown(fn func() error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.legacyTeardown = fn
 }
 
 // SetHealthCheck enables or disables the periodic handshake age check.
@@ -594,7 +606,21 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		if tunnelName != "" {
 			disconnectErr = m.manager.DisconnectTunnel(tunnelName)
 		} else {
-			disconnectErr = m.manager.Disconnect()
+			m.mu.Lock()
+			teardown := m.legacyTeardown
+			m.mu.Unlock()
+			if teardown != nil {
+				// First attempt only: the hook bounces every plain connected
+				// tunnel, so repeating it on later attempts would keep
+				// dropping tunnels that were already rebuilt while another
+				// one stays unreachable. Later attempts let reconnectFn("")
+				// restore just the tunnels that are still down.
+				if attempt == 1 {
+					disconnectErr = teardown()
+				}
+			} else {
+				disconnectErr = m.manager.Disconnect()
+			}
 		}
 		// Legacy path: ErrNotConnected only means there is nothing to tear
 		// down (everything is already down); fall through to the reconnect

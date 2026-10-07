@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"net"
 	"reflect"
 	"testing"
 
@@ -173,7 +174,86 @@ func TestDesiredDNSPermits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := desiredDNSPermits(tt.tunnels, tt.goos, tt.wanted)
+			got := desiredDNSPermits(tt.tunnels, tt.goos, tt.wanted, nil)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %+v want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDesiredDNSPermitsLANOverlap(t *testing.T) {
+	loc := func(cidr string) []*net.IPNet {
+		ip, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return []*net.IPNet{{IP: ip, Mask: n.Mask}}
+	}
+	lan24 := loc("192.168.1.50/24")
+	tests := []struct {
+		name    string
+		locals  []*net.IPNet
+		tunnels []reconcileTunnel
+		want    []firewall.DNSPermit
+	}{
+		{
+			name:   "protected server only inside skipped range is unpinned",
+			locals: lan24,
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"192.168.1.1"}, "192.168.1.0/24")),
+				rt("b", "utun5", testCfg("b", []string{"10.9.0.1"}, "10.9.0.0/24")),
+			},
+			want: []firewall.DNSPermit{
+				{Interface: "", Server: "192.168.1.1"},
+				{Interface: "utun5", Server: "10.9.0.1"},
+			},
+		},
+		{
+			name:   "default route does not pin a LAN-colliding resolver (skipped /24 + 0/0)",
+			locals: lan24,
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"192.168.1.1"}, "0.0.0.0/0", "192.168.1.0/24")),
+			},
+			want: []firewall.DNSPermit{{Interface: "", Server: "192.168.1.1"}},
+		},
+		{
+			name:   "supernet of the LAN does not pin the resolver",
+			locals: lan24,
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"192.168.1.1"}, "192.168.0.0/16")),
+			},
+			want: []firewall.DNSPermit{{Interface: "", Server: "192.168.1.1"}},
+		},
+		{
+			name:   "range narrower than the LAN subnet stays pinned",
+			locals: loc("192.168.0.50/16"),
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"192.168.50.1"}, "192.168.50.0/24", "192.168.0.0/16")),
+			},
+			want: []firewall.DNSPermit{{Interface: "utun4", Server: "192.168.50.1"}},
+		},
+		{
+			name:   "default route pins an off-LAN resolver",
+			locals: lan24,
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"10.9.0.1"}, "0.0.0.0/0")),
+			},
+			want: []firewall.DNSPermit{{Interface: "utun4", Server: "10.9.0.1"}},
+		},
+		{
+			name:   "unprotected split tunnel server inside skipped range gets no permit",
+			locals: lan24,
+			tunnels: []reconcileTunnel{
+				rt("a", "utun4", testCfg("a", []string{"192.168.1.1", "~corp.example"}, "192.168.1.0/24")),
+				rt("b", "utun5", testCfg("b", []string{"10.9.0.1"}, "10.9.0.0/24")),
+			},
+			want: []firewall.DNSPermit{{Interface: "utun5", Server: "10.9.0.1"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := desiredDNSPermits(tt.tunnels, "darwin", true, tt.locals)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("got %+v want %+v", got, tt.want)
 			}

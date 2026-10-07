@@ -304,7 +304,11 @@ func (f *LinuxFirewall) SetDNSPermits(permits []DNSPermit) error {
 	defer f.mu.Unlock()
 	if rules == "" {
 		if out, err := nftDeleteDNSTable(); err != nil && !isNftNotFound(fmt.Errorf("%s", out)) {
+			// Surface the failure: the table (and its port-53 drop) is
+			// still in the kernel, so the reconcile must not be marked
+			// clean or it would never retry.
 			slog.Warn("nft delete dns table failed", "error", err, "output", strings.TrimSpace(string(out)))
+			return fmt.Errorf("nft delete dns table: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
 		f.dnsProtectionEnabled = false
 		return nil
@@ -335,8 +339,9 @@ func (f *LinuxFirewall) DisableDNSProtection() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// LOW: Log errors from nft delete
-	if out, err := nftDeleteDNSTable(); err != nil {
+	if out, err := nftDeleteDNSTable(); err != nil && !isNftNotFound(fmt.Errorf("%s", out)) {
 		slog.Warn("nft delete dns table failed", "error", err, "output", strings.TrimSpace(string(out)))
+		return fmt.Errorf("nft delete dns table: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	f.dnsProtectionEnabled = false
 	return nil
@@ -401,7 +406,7 @@ func nftApply(rules string) error {
 
 // nftDeleteDNSTable removes the wireguide_dns nftables table with a bounded
 // timeout. Returns the same (output, error) shape callers expect.
-func nftDeleteDNSTable() ([]byte, error) {
+var nftDeleteDNSTable = func() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), nftCmdTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, "nft", "delete", "table", "inet", nftTable+"_dns").CombinedOutput()

@@ -97,9 +97,22 @@ func (h *Helper) currentNetworkState() networkState {
 	gw := probe.GatewayMAC
 	if ssid != "" && gw != "" {
 		h.wifiMu.Lock()
+		fromGUI := h.ssidFromGUI
 		stamp := h.ssidStampGW
+		if !fromGUI {
+			// Helper-read SSID (Linux/Windows poll or events): always fresh.
+			stamp = gw
+		} else if stamp == "" {
+			// Lazy stamp: the gateway MAC was not resolvable when the GUI
+			// reported this SSID (no ARP entry yet). The SSID is still the
+			// one last reported, so bind it to the gateway known now;
+			// otherwise a GUI-less helper would trust it across a move to
+			// another network forever.
+			h.ssidStampGW = gw
+			stamp = gw
+		}
 		h.wifiMu.Unlock()
-		if stamp != "" && stamp != gw {
+		if stamp != gw {
 			slog.Debug("SSID considered stale: gateway changed since GUI report",
 				"ssid", ssid, "stamped_gw", stamp, "current_gw", gw)
 			ssid = ""

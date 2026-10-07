@@ -128,12 +128,13 @@ func runSplitDNSCheck(ctx context.Context, result *DNSLeakResult, p domain.DNSEn
 
 // ExpectedDNSForTunnels picks the DNS= entries the leak test should expect
 // when several tunnels are connected. A global-mode tunnel overrides system
-// DNS, so its servers are what can leak; if any exists, only the global
-// tunnels' entries are returned (split-mode tunnels would otherwise switch
-// the test to split mode and mask a global leak). With only split tunnels
+// DNS, so its servers are what can leak; if any exists, the global
+// tunnels' entries plus the split tunnels' server IPs (never their ~match
+// tokens, which would switch the test to split mode and mask a global leak). With only split tunnels
 // the entries are merged so every match domain is still verified.
 func ExpectedDNSForTunnels(perTunnel [][]string) []string {
 	var global, split []string
+	var splitEntries [][]string
 	for _, entries := range perTunnel {
 		p := domain.ParseDNSEntries(entries)
 		if len(p.Servers) == 0 && len(p.Match) == 0 {
@@ -143,9 +144,17 @@ func ExpectedDNSForTunnels(perTunnel [][]string) []string {
 			global = append(global, entries...)
 		} else {
 			split = append(split, entries...)
+			splitEntries = append(splitEntries, entries)
 		}
 	}
 	if len(global) > 0 {
+		// Mixed mode: split tunnels' resolver IPs are legitimate tunnel
+		// resolvers (scutil lists them from the supplemental resolver), so
+		// add them to the expected set without their ~match tokens, which
+		// would flip the test into split mode.
+		for _, entries := range splitEntries {
+			global = append(global, domain.ParseDNSEntries(entries).Servers...)
+		}
 		return global
 	}
 	return split

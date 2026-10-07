@@ -3,6 +3,7 @@
 package firewall
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -37,5 +38,34 @@ func TestRenderDNSTableEmptyOrInvalid(t *testing.T) {
 	}
 	if renderDNSTable([]DNSPermit{{Interface: "bad iface!", Server: "1.1.1.1"}, {Server: "nope"}}) != "" {
 		t.Fatal("invalid permits must be skipped")
+	}
+}
+
+func TestSetDNSPermitsNilPropagatesDeleteFailure(t *testing.T) {
+	orig := nftDeleteDNSTable
+	defer func() { nftDeleteDNSTable = orig }()
+	calls := 0
+	nftDeleteDNSTable = func() ([]byte, error) {
+		calls++
+		return []byte("netlink busy"), errors.New("exit status 1")
+	}
+	f := &LinuxFirewall{dnsProtectionEnabled: true}
+	if err := f.SetDNSPermits(nil); err == nil {
+		t.Fatal("failed delete must propagate")
+	}
+	if !f.dnsProtectionEnabled {
+		t.Fatal("flag must stay set while the table may still exist")
+	}
+	if err := f.SetDNSPermits(nil); err == nil || calls != 2 {
+		t.Fatalf("second reconcile must retry the delete, calls=%d err=%v", calls, err)
+	}
+	if err := f.DisableDNSProtection(); err == nil {
+		t.Fatal("DisableDNSProtection must propagate")
+	}
+	nftDeleteDNSTable = func() ([]byte, error) {
+		return []byte("Error: No such file or directory"), errors.New("exit status 1")
+	}
+	if err := f.SetDNSPermits(nil); err != nil || f.dnsProtectionEnabled {
+		t.Fatalf("not-found is success: err=%v", err)
 	}
 }

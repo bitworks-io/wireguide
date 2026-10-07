@@ -1063,3 +1063,57 @@ func TestLegacyReconnectToleratesNotConnectedDisconnect(t *testing.T) {
 	sd.sendWake()
 	waitFor(t, 2*time.Second, "reconnectFn reached despite ErrNotConnected", func() bool { return calls.Load() >= 1 })
 }
+
+func TestLegacyTeardownHookReplacesManagerDisconnect(t *testing.T) {
+	var calls, hook atomic.Int32
+	mon, mgr, sd := newTestMonitor(testConfig(), func(context.Context, string) error {
+		calls.Add(1)
+		return nil
+	})
+	var mgrDisconnects atomic.Int32
+	mgr.disconnectFn = func() error {
+		mgrDisconnects.Add(1)
+		return nil
+	}
+	mon.SetLegacyTeardown(func() error {
+		hook.Add(1)
+		return &tunnel.TunnelError{Kind: tunnel.ErrNotConnected, Message: "nothing to tear down"}
+	})
+	mgr.setConnected(true, "t")
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+	waitFor(t, 2*time.Second, "reconnectFn reached", func() bool { return calls.Load() >= 1 })
+	if hook.Load() != 1 {
+		t.Errorf("legacy teardown hook calls = %d, want 1", hook.Load())
+	}
+	if mgrDisconnects.Load() != 0 {
+		t.Errorf("manager.Disconnect must not be called when the hook is set, got %d", mgrDisconnects.Load())
+	}
+}
+
+// The legacy teardown hook runs only on the first attempt of a retry entry:
+// later attempts must not bounce tunnels rebuilt by earlier ones.
+func TestLegacyTeardownHookRunsOnFirstAttemptOnly(t *testing.T) {
+	var calls, hook atomic.Int32
+	mon, mgr, sd := newTestMonitor(testConfig(), func(context.Context, string) error {
+		if calls.Add(1) < 3 {
+			return errors.New("unreachable")
+		}
+		return nil
+	})
+	mon.SetLegacyTeardown(func() error {
+		hook.Add(1)
+		return nil
+	})
+	mgr.setConnected(true, "t")
+	mon.Start()
+	defer mon.Stop()
+
+	sd.sendWake()
+	waitFor(t, 5*time.Second, "third attempt reached", func() bool { return calls.Load() >= 3 })
+	if hook.Load() != 1 {
+		t.Errorf("legacy teardown hook calls = %d, want 1", hook.Load())
+	}
+}

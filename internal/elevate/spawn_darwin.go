@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/update"
@@ -78,6 +80,15 @@ func SpawnHelper(ctx context.Context, args Args) error {
 // leave old plists in place.
 func generatePlistContent(exe string, args Args) string {
 	uid := os.Getuid()
+	// --app-bundle lets a helper that outlives its app (socket activation
+	// keeps the job loaded) notice the removal and uninstall itself. Omitted
+	// when exe is not inside a .app (dev runs).
+	appBundleArg := ""
+	if b := appBundleOf(exe); b != "" {
+		var esc bytes.Buffer
+		_ = xml.EscapeText(&esc, []byte(b))
+		appBundleArg = "\n        <string>--app-bundle=" + esc.String() + "</string>"
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -90,7 +101,7 @@ func generatePlistContent(exe string, args Args) string {
         <string>--helper</string>
         <string>--socket=%s</string>
         <string>--uid=%d</string>
-        <string>--data-dir=%s</string>
+        <string>--data-dir=%s</string>%s
     </array>
     <!-- RunAtLoad is deliberately false. The job stays loaded across
          reboots (the plist lives in /Library/LaunchDaemons), but launchd
@@ -145,7 +156,54 @@ func generatePlistContent(exe string, args Args) string {
     <string>/var/log/wireguide-helper.log</string>
 </dict>
 </plist>
-`, daemonLabel, daemonBinary, args.SocketPath, uid, args.DataDir, ipc.DarwinSocketPath, uid)
+`, daemonLabel, daemonBinary, args.SocketPath, uid, args.DataDir, appBundleArg, ipc.DarwinSocketPath, uid)
+}
+
+// appBundleOf returns the .app bundle containing exe (walking up from
+// Contents/MacOS/<exe>), or "" when exe is not inside one. Symlinks are
+// resolved first (os.Executable returns the Homebrew symlink when launched
+// via /opt/homebrew/bin/wireguide) so every launch path yields the same
+// plist. A path XML 1.0 cannot represent is rejected: a wrong flag would make
+// the helper uninstall itself on every start, a missing one only loses the
+// orphan cleanup.
+func appBundleOf(exe string) string {
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	dir := filepath.Dir(exe)
+	if filepath.Base(dir) != "MacOS" {
+		return ""
+	}
+	contents := filepath.Dir(dir)
+	if filepath.Base(contents) != "Contents" {
+		return ""
+	}
+	bundle := filepath.Dir(contents)
+	if !strings.HasSuffix(bundle, ".app") || !filepath.IsAbs(bundle) {
+		return ""
+	}
+	if !xmlRepresentable(bundle) {
+		return ""
+	}
+	return bundle
+}
+
+// xmlRepresentable reports whether every rune of s survives xml.EscapeText
+// unchanged in meaning (it replaces XML 1.0-illegal runes with U+FFFD).
+func xmlRepresentable(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		ok := r == 0x9 || r == 0xA || r == 0xD ||
+			(r >= 0x20 && r <= 0xD7FF) ||
+			(r >= 0xE000 && r <= 0xFFFD) ||
+			(r >= 0x10000 && r <= 0x10FFFF)
+		if !ok || r == utf8.RuneError {
+			return false
+		}
+	}
+	return true
 }
 
 // PlistNeedsReinstall reports whether the on-disk LaunchDaemon plist differs

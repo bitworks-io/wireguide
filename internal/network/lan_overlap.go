@@ -78,6 +78,13 @@ func isNonPhysicalIfaceName(name string) bool {
 // never reported: those are full-tunnel routes, handled separately with an
 // endpoint bypass.
 func LocalNetworkOverlap(cidr string) (net.IP, bool) {
+	return LocalNetworkOverlapIn(cidr, LocalPhysicalAddrs())
+}
+
+// LocalNetworkOverlapIn is LocalNetworkOverlap against an explicit snapshot
+// of local addresses (from LocalPhysicalAddrs), so callers checking many
+// ranges enumerate the interfaces once.
+func LocalNetworkOverlapIn(cidr string, locals []*net.IPNet) (net.IP, bool) {
 	_, ipnet, err := net.ParseCIDR(strings.TrimSpace(cidr))
 	if err != nil {
 		return nil, false
@@ -86,7 +93,7 @@ func LocalNetworkOverlap(cidr string) (net.IP, bool) {
 	if ones <= 1 {
 		return nil, false
 	}
-	for _, local := range LocalPhysicalAddrs() {
+	for _, local := range locals {
 		if local == nil || local.IP == nil || !ipnet.Contains(local.IP) {
 			continue
 		}

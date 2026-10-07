@@ -237,3 +237,71 @@ sleep() { :; }
 		})
 	}
 }
+
+func TestAppBundleOf(t *testing.T) {
+	for exe, want := range map[string]string{
+		"/Applications/WireGuide.app/Contents/MacOS/wireguide": "/Applications/WireGuide.app",
+		"/Users/u/Apps/Wire & Guide.app/Contents/MacOS/wg":     "/Users/u/Apps/Wire & Guide.app",
+		"/Library/PrivilegedHelperTools/com.wireguide.helper":  "",
+		"/Users/u/dev/wireguide/wireguide":                     "",
+		"/Applications/NotAnApp/Contents/MacOS/wireguide":      "",
+		"relative/X.app/Contents/MacOS/wireguide":              "",
+		"/Applications/A\x01B.app/Contents/MacOS/wireguide":    "",
+	} {
+		if got := appBundleOf(exe); got != want {
+			t.Errorf("appBundleOf(%q) = %q, want %q", exe, got, want)
+		}
+	}
+}
+
+// The plist pins the installing app bundle so an orphaned helper can
+// uninstall itself. A dev run (exe outside a .app) omits the flag, and an
+// install written by an older build (no flag) no longer matches, so it is
+// detected as needing a reinstall exactly once.
+func TestPlistCarriesAppBundle(t *testing.T) {
+	const exe = "/Applications/Wire & Guide.app/Contents/MacOS/wireguide"
+	withApp := generatePlistContent(exe, testArgs())
+	dev := generatePlistContent("/Users/u/dev/wireguide", testArgs())
+	if withApp == dev {
+		t.Fatal("plist must differ when an app bundle is pinned")
+	}
+	if strings.Contains(dev, "--app-bundle") {
+		t.Error("dev run must not pin an app bundle")
+	}
+
+	path := filepath.Join(t.TempDir(), "test.plist")
+	if err := os.WriteFile(path, []byte(withApp), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("plutil", "-lint", path).CombinedOutput(); err != nil {
+		t.Fatalf("plutil -lint: %v\n%s", err, out)
+	}
+	if got, want := plistExtract(t, path, "ProgramArguments.5"), "--app-bundle=/Applications/Wire & Guide.app"; got != want {
+		t.Errorf("ProgramArguments.5 = %q, want %q", got, want)
+	}
+}
+
+// A symlinked executable (Homebrew's /opt/homebrew/bin/wireguide) resolves to
+// the real bundle so all launch paths produce the same plist.
+func TestAppBundleOfResolvesSymlinks(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	macos := filepath.Join(root, "WireGuide.app", "Contents", "MacOS")
+	if err := os.MkdirAll(macos, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(macos, "wireguide")
+	if err := os.WriteFile(real, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "bin-wireguide")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "WireGuide.app")
+	if got := appBundleOf(link); got != want {
+		t.Errorf("appBundleOf(symlink) = %q, want %q", got, want)
+	}
+}

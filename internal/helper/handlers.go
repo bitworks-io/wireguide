@@ -627,6 +627,7 @@ func (h *Helper) handleReportSSID(params json.RawMessage) (interface{}, error) {
 	gw := wifi.GatewayMAC()
 	h.wifiMu.Lock()
 	h.ssidStampGW = gw
+	h.ssidFromGUI = true
 	h.wifiMu.Unlock()
 	h.wifiMon.ReportExternalSSID(req.SSID)
 	return ipc.Empty{}, nil

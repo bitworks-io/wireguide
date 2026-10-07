@@ -271,6 +271,14 @@ type Helper struct {
 	// report, so evaluation treats the SSID as unknown rather than acting
 	// on the old network's name. Guarded by wifiMu.
 	ssidStampGW string
+	// ssidFromGUI is set once the GUI has reported an SSID (macOS). The
+	// stamp and its staleness guard apply only then: on Linux/Windows the
+	// helper reads the SSID itself, so it is always fresh. Guarded by wifiMu.
+	ssidFromGUI bool
+
+	// connectedFn, when set, replaces manager.ActiveTunnels() in the legacy
+	// reconnect path (tests only).
+	connectedFn func() []string
 
 	// reevalMu serialises Automation re-evaluations. The three triggers
 	// (SSID change, network change, poll) can fire concurrently; the
@@ -327,7 +335,7 @@ const signalShutdownTimeout = 3 * time.Second
 // ownerSID: spawning user's SID (Windows only, "" on Unix) — scopes the
 // pipe ACL and per-connection peer checks to that user (issue #20).
 // dataDir: persistent data dir for crash recovery state.
-func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
+func Run(addr string, ownerUID int, ownerSID, dataDir, appBundle string) error {
 	// wireguard-go allocates sizeable per-Device transient buffer pools. With
 	// the runtime default GOGC=100, repeated connect/disconnect on a long-lived
 	// helper retained hundreds of MiB of reclaimable heap before GC caught up
@@ -393,23 +401,34 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	// own firewall instance so cleanup reuses its in-memory state
 	// instead of constructing a fresh one inside the tunnel package
 	// (which previously decoupled the cleanup from the helper's view).
-	if recovered := tunnel.RecoverFromCrash(dataDir, fw); len(recovered) > 0 {
-		slog.Warn("recovered from previous crash", "tunnels", recovered)
+	recoverAll := func() {
+		if recovered := tunnel.RecoverFromCrash(dataDir, fw); len(recovered) > 0 {
+			slog.Warn("recovered from previous crash", "tunnels", recovered)
+		}
+
+		// Firewall crash recovery. A helper restart means every tunnel interface
+		// the previous process owned is gone, so no WireGuide firewall rule can
+		// still be valid: the firewall implementation clears stale state
+		// unconditionally (on macOS: flush both pf anchors, release the persisted
+		// pf reference, drop legacy markers), whether or not any state file
+		// exists. Must run BEFORE any tunnel brings new rules up.
+		if recovered := fw.RecoverFromCrash(); recovered {
+			slog.Warn("recovered firewall state from previous crash")
+		}
 	}
 
-	// Firewall crash recovery. A helper restart means every tunnel interface
-	// the previous process owned is gone, so no WireGuide firewall rule can
-	// still be valid: the firewall implementation clears stale state
-	// unconditionally (on macOS: flush both pf anchors, release the persisted
-	// pf reference, drop legacy markers), whether or not any state file
-	// exists. Must run BEFORE any tunnel brings new rules up.
-	if recovered := fw.RecoverFromCrash(); recovered {
-		slog.Warn("recovered firewall state from previous crash")
+	// A socket-activated helper outlives its app. If the app that installed it
+	// is gone, uninstall instead of staying startable, but only AFTER recovery
+	// so no pf block or DNS override is left behind with no binary to undo it.
+	if HandleOrphanedInstall(appBundle, recoverAll) {
+		return nil
 	}
+	recoverAll()
 
 	// Reconnect monitor — uses cached config
 	h.monitor = reconnect.NewMonitor(manager, h.reconnectFn, h.onReconnectState, reconnect.DefaultConfig())
 	h.monitor.SetFirewallCallbacks(h.suspendFirewall, h.resumeFirewall)
+	h.monitor.SetLegacyTeardown(h.legacyTeardown)
 	h.monitor.Start()
 
 	// Register RPC handlers
@@ -596,10 +615,13 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt)
 	defer signal.Stop(sigCh)
 	go func() {
+		// Keep listening until cleanup has FINISHED (not merely started): a
+		// SIGTERM that arrives mid-cleanup (e.g. launchctl bootout during an
+		// upgrade) must still enforce the bounded exit below.
 		select {
 		case sig := <-sigCh:
 			slog.Info("signal received, shutting down", "signal", sig.String())
-		case <-h.done:
+		case <-h.cleanupDone:
 			return
 		}
 		h.shutdown()
@@ -701,7 +723,7 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	}
 
 	connected := make(map[string]bool)
-	for _, n := range h.manager.ActiveTunnels() {
+	for _, n := range h.connectedTunnels() {
 		connected[n] = true
 	}
 	ruleTunnels := h.automationRuleTunnels()
@@ -716,10 +738,16 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	attempted := 0
 	for _, n := range names {
 		cfg := cfgs[n]
+		latch, latched := h.manualLatchFor(n)
 		if connected[n] {
+			// A connected tunnel that automation or the user owns was left
+			// alone by legacyTeardown; the network may have changed under
+			// it, so make sure automation re-evaluates.
+			if latched || ruleTunnels[n] {
+				deferToAutomation = true
+			}
 			continue
 		}
-		latch, latched := h.manualLatchFor(n)
 		if latched && latch.disconnected {
 			slog.Info("legacy reconnect: skipping tunnel the user disconnected", "tunnel", n)
 			continue
@@ -766,6 +794,49 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 		}
 	}
 	return lastErr
+}
+
+// legacyTeardown is the reconnect monitor's teardown for the legacy
+// wake/interface-change path. Instead of dropping an arbitrary tunnel it
+// tears down only the connected tunnels that no one else owns, so
+// reconnectFn("") can rebuild them on the new network. Tunnels governed by
+// automation rules or held by a manual latch are left untouched: automation
+// decides them (it is re-evaluated after the legacy attempt), and bouncing
+// them would only cause an outage on every network blip.
+func (h *Helper) legacyTeardown() error {
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
+	return h.legacyTeardownWith(h.connectedTunnels(), h.manager.DisconnectTunnel)
+}
+
+// connectedTunnels lists the currently connected tunnels (test seam:
+// connectedFn overrides the manager).
+func (h *Helper) connectedTunnels() []string {
+	if h.connectedFn != nil {
+		return h.connectedFn()
+	}
+	return h.manager.ActiveTunnels()
+}
+
+// legacyTeardownWith implements legacyTeardown over an explicit set of
+// connected tunnels. Caller MUST hold h.connectMu.
+func (h *Helper) legacyTeardownWith(active []string, disconnect func(string) error) error {
+	ruleTunnels := h.automationRuleTunnels()
+	for _, n := range active {
+		if _, latched := h.manualLatchFor(n); latched || ruleTunnels[n] {
+			slog.Info("legacy reconnect: leaving connected tunnel untouched (owned by automation or manual choice)",
+				"tunnel", n, "latched", latched)
+			continue
+		}
+		if err := disconnect(n); err != nil {
+			var te *tunnel.TunnelError
+			if errors.As(err, &te) && te.Kind == tunnel.ErrNotConnected {
+				continue
+			}
+			return fmt.Errorf("legacy reconnect teardown of %q: %w", n, err)
+		}
+	}
+	return nil
 }
 
 // alreadyConnectedIsOK maps tunnel.ErrAlreadyConnected to success: the

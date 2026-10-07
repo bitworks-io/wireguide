@@ -33,6 +33,8 @@ WireGuard requires root to create TUN devices and modify routing tables. Rather 
 - **Helper does only privileged work** — smaller attack surface
 - **Helper survives GUI restarts** — closing the window doesn't kill the VPN
 - **LaunchDaemon socket activation + KeepAlive (crash-only)** — launchd owns the socket and starts the helper on demand (no admin prompt); it auto-restarts on crash, never runs at boot, stays dormant until a GUI attaches, and exits on its own once no GUI and no tunnels remain
+- **Orphaned-helper self-uninstall (macOS)** — the plist passes `--app-bundle=<installing .app>` (derived from the symlink-resolved GUI exe; omitted for dev runs). Socket activation keeps the job startable after the app is deleted, so after crash recovery, a root helper whose bundle path is missing on two checks 2 s apart (guards in-place updates) removes `/Library/LaunchDaemons/com.wireguide.helper.plist`, `/Library/PrivilegedHelperTools/com.wireguide.helper` and the launchd socket, then runs `launchctl bootout system/com.wireguide.helper` last and exits 0 without serving (`internal/helper/orphan.go`, seams for tests). The new argument changes the plist, so existing installs reinstall once.
+- **Legacy reconnect teardown hook** — `reconnect.Monitor.SetLegacyTeardown` replaces `manager.Disconnect()` on the wake/network-change path; the helper only disconnects connected tunnels without automation rules or a manual latch, so rule tunnels are decided by automation instead of being bounced.
 
 This mirrors the architecture of `wg-quick` (which also runs as root) but wraps it in a persistent daemon with IPC.
 
