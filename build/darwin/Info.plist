@@ -25,5 +25,7 @@
             <string>© 2026 korjwl1</string>
         <key>NSLocationWhenInUseUsageDescription</key>
             <string>WireGuide reads your current Wi-Fi network name to apply auto-connect and trusted-network rules.</string>
+        <key>NSLocalNetworkUsageDescription</key>
+            <string>WireGuide checks reachability of hosts on your local network to verify that a tunnel can reach private resources.</string>
     </dict>
 </plist>

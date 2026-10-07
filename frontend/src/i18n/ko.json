@@ -83,7 +83,9 @@
     "save": "저장",
     "cancel": "취소",
     "name_placeholder": "터널 이름",
-    "name_required": "터널 이름을 입력하세요"
+    "name_required": "터널 이름을 입력하세요",
+    "tpl_dns_global": "모든 쿼리를 터널로",
+    "tpl_dns_split": "스플릿: corp.lan만 터널로"
   },
   "settings": {
     "title": "설정",
@@ -108,7 +110,7 @@
     "kill_switch": "킬 스위치",
     "kill_switch_hint": "VPN이 끊기면 모든 트래픽을 차단합니다. 연결 시 자동 적용.",
     "dns_protection": "DNS 보호",
-    "dns_protection_hint": "DNS를 VPN 터널로만 강제합니다. 연결 시 자동 적용.",
+    "dns_protection_hint": "연결된 터널의 리졸버를 제외한 모든 서버로의 DNS를 차단합니다. 스플릿 DNS(~domain)를 사용하거나 DNS가 없는 터널은 시스템 DNS를 유지하며 영향을 받지 않습니다. 연결 시 자동 적용.",
     "health_check": "헬스 체크",
     "health_check_hint": "핸드셰이크 상태를 모니터링하고 180초 동안 응답 없으면 재연결합니다. PersistentKeepalive 사용 시 권장.",
     "pin_interface": "인터페이스 고정",
@@ -177,7 +179,11 @@
     "message": "연결하면 위 인터페이스들의 트래픽 라우팅에 영향이 있을 수 있습니다. 더 구체적인 경로가 우선 적용됩니다.",
     "proceed": "그래도 연결",
     "cancel": "취소",
-    "and_more": "… 외 {n}개"
+    "and_more": "… 외 {n}개",
+    "same_address": "동일한 Address",
+    "address_message": "연결된 터널이 이미 같은 인터페이스 Address를 사용하고 있습니다. 두 터널이 하나의 주소를 사용하면 라우팅이 모호해질 수 있습니다. 먼저 해당 터널을 연결 해제하거나 그대로 연결할 수 있습니다.",
+    "disconnect_and_connect": "{names} 연결 해제 후 연결",
+    "disconnect_failed": "연결 해제 실패: {error}"
   },
   "update": {
     "available": "v{version} 업데이트 가능",
@@ -250,5 +256,32 @@
     "saving": "저장 중…",
     "saved": "저장됨",
     "loading": "불러오는 중…"
+  },
+  "lint": {
+    "dns_global_outside": "{servers}은(는) 터널이 아닌 일반 네트워크로 접근하며, 연결되어 있는 동안 모든 인터페이스의 시스템 DNS를 대체합니다(이후 DNS 보호는 이 서버만 허용). ~domain을 추가해 범위를 제한하거나 DNS를 제거하세요.",
+    "dns_mdns": "~{domain}은(는) mDNS(.local)와 겹쳐 조회가 터널의 DNS 서버에 도달하지 않을 수 있습니다. .lan 또는 .corp 같은 다른 접미사를 권장합니다.",
+    "dns_split_windows": "Windows에서는 스플릿 DNS(~domain)를 지원하지 않습니다. 이 터널의 DNS 설정은 무시되고 시스템 DNS가 사용됩니다.",
+    "address_shared": "{tunnel}와(과) Address {address}을(를) 공유합니다",
+    "mtu_missing": "MTU가 설정되지 않았습니다(자동). 큰 전송에서 연결이 멈추면 MTU = 1420 이하로 시도해 보세요.",
+    "mtu_high": "MTU {mtu}이(가) {max}보다 커서 일반적인 1500바이트 경로에서 패킷이 분할될 수 있습니다.",
+    "dns_lan_none": "사설 이름 확인 불가: 원격 네트워크의 이름을 확인하려면 DNS = {gateway}, ~<도메인>을 추가하세요.",
+    "dns_no_reverse": "스플릿 DNS에 역방향 영역이 없어 원격 네트워크의 IP→이름 조회가 시스템 DNS를 사용합니다. {zones}을(를) 추가하면 터널로 조회합니다.",
+    "fix_remove_dns": "DNS 줄 제거",
+    "fix_append_dns": "역방향 영역 추가",
+    "cmp_tilde": "스플릿 DNS 도메인",
+    "cmp_tilde_info": "이 도메인(및 하위 도메인)만 터널의 DNS 서버로 보냅니다. 다른 쿼리는 시스템 DNS를 계속 사용합니다. 같은 줄에 DNS 서버 IP가 최소 하나 필요합니다.",
+    "cmp_gateway": "AllowedIPs에서 유추한 게이트웨이",
+    "cmp_zone": "AllowedIPs에서 유추한 역방향 영역",
+    "cmp_template": "스플릿 DNS 줄",
+    "cmp_template_info": "서버, 스플릿 도메인 하나, 역방향 영역. corp.lan을 사설 도메인으로 바꾸세요.",
+    "hover_global_title": "전역.",
+    "hover_global": "DNS = 1.1.1.1은 연결되어 있는 동안 모든 인터페이스의 시스템 DNS를 대체합니다.",
+    "hover_split_title": "스플릿.",
+    "hover_split": "DNS = 10.0.0.1, ~corp.lan은 corp.lan 쿼리만 터널의 서버로 보내고 시스템 DNS는 그대로 둡니다.",
+    "hover_none_title": "없음.",
+    "hover_none": "DNS 줄이 없으면 시스템 DNS를 건드리지 않으므로 사설 이름은 터널을 통해 확인되지 않습니다.",
+    "hover_nxdomain": "터널의 서버가 모르는 이름은 NXDOMAIN을 반환하며 시스템 DNS로 대체 조회하지 않습니다.",
+    "hover_dig": "dig는 스플릿 DNS를 우회해 서버를 직접 조회합니다. 앱이 보는 결과를 확인하려면 dscacheutil -q host -a name <이름>을 사용하세요.",
+    "hover_match": "스플릿 DNS: {domain} 및 하위 도메인 쿼리는 이 터널의 DNS 서버로 가고, 나머지는 시스템 DNS를 사용합니다."
   }
 }

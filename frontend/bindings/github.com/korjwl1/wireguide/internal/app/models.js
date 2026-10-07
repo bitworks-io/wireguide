@@ -8,6 +8,9 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as config$0 from "../config/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as domain$0 from "../domain/models.js";
 
 /**
@@ -343,6 +346,16 @@ export class TunnelInfo {
              */
             this["last_used_unix"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Warnings carries non-blocking lint findings (currently the
+             * cross-tunnel duplicate-Address warning) from ImportConfig so the UI
+             * can surface them after a successful import.
+             * @member
+             * @type {config$0.Diagnostic[] | undefined}
+             */
+            this["warnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -353,7 +366,11 @@ export class TunnelInfo {
      * @returns {TunnelInfo}
      */
     static createFrom($$source = {}) {
+        const $$createField7_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField7_0($$parsedSource["warnings"]);
+        }
         return new TunnelInfo(/** @type {Partial<TunnelInfo>} */($$parsedSource));
     }
 }
@@ -464,6 +481,14 @@ export class ZipImportResult {
              */
             this["error"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Warnings are non-blocking import findings (e.g. a duplicate Address).
+             * @member
+             * @type {config$0.Diagnostic[] | undefined}
+             */
+            this["warnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -474,7 +499,11 @@ export class ZipImportResult {
      * @returns {ZipImportResult}
      */
     static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField2_0($$parsedSource["warnings"]);
+        }
         return new ZipImportResult(/** @type {Partial<ZipImportResult>} */($$parsedSource));
     }
 }
@@ -483,3 +512,5 @@ export class ZipImportResult {
 const $$createType0 = DNSServer.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = config$0.Diagnostic.createFrom;
+const $$createType4 = $Create.Array($$createType3);

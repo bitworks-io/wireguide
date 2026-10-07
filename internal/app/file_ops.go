@@ -23,6 +23,8 @@ import (
 type ZipImportResult struct {
 	Name  string `json:"name"`
 	Error string `json:"error,omitempty"`
+	// Warnings are non-blocking import findings (e.g. a duplicate Address).
+	Warnings []config.Diagnostic `json:"warnings,omitempty"`
 }
 
 // zipUniqueName returns a tunnel name that doesn't conflict with existing ones.
@@ -99,10 +101,10 @@ func (s *TunnelService) importZipReader(r *zip.Reader) ([]ZipImportResult, error
 		}
 		baseName := strings.TrimSuffix(filepath.Base(f.Name), ".conf")
 		name := s.zipUniqueName(baseName)
-		if _, err := s.ImportConfig(name, string(data)); err != nil {
+		if info, err := s.ImportConfig(name, string(data)); err != nil {
 			results = append(results, ZipImportResult{Name: baseName, Error: err.Error()})
 		} else {
-			results = append(results, ZipImportResult{Name: name})
+			results = append(results, ZipImportResult{Name: name, Warnings: info.Warnings})
 		}
 	}
 	if len(results) == 0 {
@@ -122,10 +124,18 @@ func (s *TunnelService) ImportConfig(name, content string) (*TunnelInfo, error) 
 	if len(cfg.Peers) > 0 {
 		endpoint = cfg.Peers[0].Endpoint
 	}
-	return &TunnelInfo{
+	info := &TunnelInfo{
 		Name:     cfg.Name,
 		Endpoint: endpoint,
-	}, nil
+	}
+	// Non-blocking: surface a duplicate-Address warning against the other
+	// saved tunnels. The import has already succeeded.
+	for _, d := range safeLint(cfg, s.otherTunnelConfigs(cfg.Name)) {
+		if d.Code == "address_shared" {
+			info.Warnings = append(info.Warnings, d)
+		}
+	}
+	return info, nil
 }
 
 // maxReadFileSize is the largest file ReadFile will accept (10 MB).
@@ -228,6 +238,60 @@ func (s *TunnelService) ValidateConfig(content string) ([]string, error) {
 		return nil, nil
 	}
 	return result.ErrorMessages(), nil
+}
+
+// LintConfig returns advisory (non-blocking) editor diagnostics for a raw
+// config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
+// It never affects whether a config is valid. Content that does not parse
+// yields no diagnostics (ValidateConfig reports the parse error).
+func (s *TunnelService) LintConfig(content string) ([]config.Diagnostic, error) {
+	return s.LintConfigFor("", content)
+}
+
+// LintConfigFor is LintConfig for a config being edited under the saved
+// tunnel name `editing` ("" for a new tunnel). That tunnel is excluded from
+// the cross-tunnel duplicate-Address check so an edit never "conflicts" with
+// its own saved copy.
+func (s *TunnelService) LintConfigFor(editing, content string) ([]config.Diagnostic, error) {
+	cfg, err := config.Parse(content)
+	if err != nil {
+		return []config.Diagnostic{}, nil
+	}
+	ds := safeLint(cfg, s.otherTunnelConfigs(editing))
+	if ds == nil {
+		ds = []config.Diagnostic{}
+	}
+	return ds, nil
+}
+
+// safeLint runs config.Lint but never lets a panic escape: linting is advisory
+// and must not be able to kill the GUI or fail an already-saved import.
+func safeLint(cfg *config.WireGuardConfig, others map[string]*config.WireGuardConfig) (ds []config.Diagnostic) {
+	defer func() {
+		if r := recover(); r != nil {
+			ds = nil
+		}
+	}()
+	return config.Lint(cfg, others)
+}
+
+// otherTunnelConfigs loads every saved tunnel except `exclude`. Unreadable
+// tunnels are skipped.
+func (s *TunnelService) otherTunnelConfigs(exclude string) map[string]*config.WireGuardConfig {
+	names, err := s.tunnelStore.List()
+	if err != nil {
+		return nil
+	}
+	others := make(map[string]*config.WireGuardConfig, len(names))
+	for _, n := range names {
+		if n == exclude {
+			continue
+		}
+		if c, err := s.tunnelStore.Load(n); err == nil {
+			others[n] = c
+		}
+	}
+	return others
 }
 
 // GetConfigText returns the serialized form of a stored tunnel's config.

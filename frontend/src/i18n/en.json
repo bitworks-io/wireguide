@@ -83,7 +83,9 @@
     "save": "Save",
     "cancel": "Cancel",
     "name_placeholder": "Tunnel name",
-    "name_required": "Tunnel name is required"
+    "name_required": "Tunnel name is required",
+    "tpl_dns_global": "all queries via tunnel",
+    "tpl_dns_split": "split: only corp.lan via tunnel"
   },
   "settings": {
     "title": "Settings",
@@ -108,7 +110,7 @@
     "kill_switch": "Kill Switch",
     "kill_switch_hint": "Blocks all traffic if VPN drops. Applied automatically on connect.",
     "dns_protection": "DNS Protection",
-    "dns_protection_hint": "Forces DNS through VPN only. Applied automatically on connect.",
+    "dns_protection_hint": "Blocks DNS to any server except the connected tunnels' resolvers. Tunnels using split DNS (~domain) or no DNS keep system DNS and are not affected. Applied automatically on connect.",
     "health_check": "Health Check",
     "health_check_hint": "Monitors handshake age and triggers reconnect if tunnel is dead for 180s. Recommended with PersistentKeepalive.",
     "pin_interface": "Pin Interface",
@@ -177,7 +179,11 @@
     "message": "Connecting may affect traffic routing for the above interfaces. The more specific route will take priority.",
     "proceed": "Connect Anyway",
     "cancel": "Cancel",
-    "and_more": "… and {n} more"
+    "and_more": "… and {n} more",
+    "same_address": "same Address",
+    "address_message": "A connected tunnel already uses the same interface Address. Two tunnels claiming one address can make routing ambiguous. You can disconnect it first, or connect anyway.",
+    "disconnect_and_connect": "Disconnect {names} and Connect",
+    "disconnect_failed": "Disconnect failed: {error}"
   },
   "update": {
     "available": "v{version} available",
@@ -250,5 +256,32 @@
     "saving": "Saving…",
     "saved": "Saved",
     "loading": "Loading…"
+  },
+  "lint": {
+    "dns_global_outside": "{servers} is reached over your normal network, not the tunnel, and will replace your system DNS on every interface while connected (DNS protection will then allow only this server). Add ~domain to scope it, or remove DNS.",
+    "dns_mdns": "~{domain} overlaps with mDNS (.local); lookups may not reach the tunnel's DNS server. Prefer a different suffix such as .lan or .corp.",
+    "dns_split_windows": "Split DNS (~domain) is not supported on Windows; this tunnel's DNS settings are ignored and system DNS is used.",
+    "address_shared": "shares Address {address} with {tunnel}",
+    "mtu_missing": "MTU is not set (auto). If connections stall on large transfers, try MTU = 1420 or lower.",
+    "mtu_high": "MTU {mtu} is above {max} and may fragment packets over typical 1500-byte paths.",
+    "dns_lan_none": "No private-name resolution: add DNS = {gateway}, ~<domain> to resolve names on the remote network.",
+    "dns_no_reverse": "Split DNS has no reverse zone, so IP-to-name lookups for the remote network use system DNS. Add {zones} to resolve them through the tunnel.",
+    "fix_remove_dns": "Remove DNS line",
+    "fix_append_dns": "Add reverse zones",
+    "cmp_tilde": "split-DNS domain",
+    "cmp_tilde_info": "Route only this domain (and its subdomains) to the tunnel's DNS server. All other queries keep using your system DNS. Needs at least one DNS server IP in the same line.",
+    "cmp_gateway": "gateway from AllowedIPs",
+    "cmp_zone": "reverse zone from AllowedIPs",
+    "cmp_template": "split-DNS line",
+    "cmp_template_info": "Server, one split domain and its reverse zone. Replace corp.lan with your private domain.",
+    "hover_global_title": "Global.",
+    "hover_global": "DNS = 1.1.1.1 replaces the system DNS on every interface while connected.",
+    "hover_split_title": "Split.",
+    "hover_split": "DNS = 10.0.0.1, ~corp.lan sends only corp.lan queries to the tunnel's server and leaves system DNS alone.",
+    "hover_none_title": "None.",
+    "hover_none": "No DNS line leaves system DNS untouched, so private names will not resolve through the tunnel.",
+    "hover_nxdomain": "A name that the tunnel's server does not know returns NXDOMAIN; there is no fallback to system DNS.",
+    "hover_dig": "dig bypasses split DNS and queries servers directly; use dscacheutil -q host -a name <name> to test what apps see.",
+    "hover_match": "Split DNS: queries for {domain} and its subdomains go to this tunnel's DNS server; everything else uses system DNS."
   }
 }

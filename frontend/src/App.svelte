@@ -20,6 +20,7 @@
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
+  import { diagText } from './lib/wireguard-lint.js';
 
   // View state
   let currentView = 'tunnels'; // 'tunnels' | 'history' | 'dnsleak' | 'routes' | 'logs'
@@ -253,10 +254,25 @@
     criticalErrors = criticalErrors.filter((_, i) => i !== idx);
   }
 
-  function showToast(msg) {
+  function showToast(msg, ms = 3000) {
     if (toastTimer) clearTimeout(toastTimer);
     toast = msg;
-    toastTimer = setTimeout(() => { toast = ''; toastTimer = null; }, 3000);
+    toastTimer = setTimeout(() => { toast = ''; toastTimer = null; }, ms);
+  }
+
+  // Non-blocking lint warnings (duplicate Address across tunnels) shown after
+  // a successful import or save. Only the cross-tunnel diagnostics are
+  // surfaced here; the rest are visible in the editor itself.
+  function warningText(diagnostics) {
+    return (diagnostics || [])
+      .filter((d) => d.code === 'address_shared')
+      .map((d) => diagText(d, $t))
+      .join('; ');
+  }
+
+  function toastImported(name, info) {
+    const warn = warningText(info && info.warnings);
+    showToast(warn ? `Imported "${name}" — ${warn}` : `Imported "${name}"`, warn ? 8000 : 3000);
   }
 
   // sanitizeImportName maps an arbitrary filename stem to something
@@ -336,8 +352,8 @@
       }
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportConfig(name, content);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast("Import failed: " + errText(e));
@@ -351,8 +367,8 @@
     try {
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName || 'tunnel');
-      await TunnelService.ImportQRFromPath(path, name);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportQRFromPath(path, name);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast('QR import failed: ' + errText(e));
@@ -374,8 +390,8 @@
       }
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'tunnel';
       const name = await uniqueName(baseName);
-      await TunnelService.ImportQRFromBytes(btoa(binary), name);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportQRFromBytes(btoa(binary), name);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast('QR import failed: ' + errText(e));
@@ -394,8 +410,8 @@
         return;
       }
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportConfig(name, content);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast("Import failed: " + errText(e));
@@ -507,6 +523,7 @@
     // wrong target.
     const originalName = editorOriginalName;
     editorErrors = [];
+    let saveWarning = '';
 
     if (!saveName) {
       editorErrors = [$t('editor.name_required')];
@@ -520,7 +537,8 @@
         return;
       }
       if (editorIsNew) {
-        await TunnelService.ImportConfig(saveName, saveContent);
+        const info = await TunnelService.ImportConfig(saveName, saveContent);
+        saveWarning = warningText(info && info.warnings);
       } else {
         const renamed = saveName !== originalName;
         if (renamed) {
@@ -549,6 +567,12 @@
         }
       }
       showEditor = false;
+      if (!editorIsNew) {
+        try {
+          saveWarning = warningText(await TunnelService.LintConfigFor(saveName, saveContent));
+        } catch (_) { /* advisory only */ }
+      }
+      if (saveWarning) showToast(saveWarning, 8000);
       await refreshTunnels(TunnelService);
     } catch (err) {
       editorErrors = [errText(err)];
@@ -616,6 +640,28 @@
   async function handleConflictProceed() {
     showConflictWarning = false;
     await doConnectFinal(pendingConnectName);
+  }
+
+  // Address conflict: disconnect the other tunnel(s) sharing this Address,
+  // then connect. Explicit user choice only; nothing is automatic.
+  async function handleConflictDisconnectProceed(e) {
+    const names = (e.detail && e.detail.names) || [];
+    const target = pendingConnectName;
+    showConflictWarning = false;
+    try {
+      for (const n of names) {
+        try {
+          await TunnelService.DisconnectTunnel(n);
+        } catch (err) {
+          // Already disconnected while the dialog was open: the goal is met.
+          if (!/is not connected/i.test(errText(err))) throw err;
+        }
+      }
+    } catch (err) {
+      showToast($t('conflict.disconnect_failed', { error: errText(err) }));
+      return;
+    }
+    await doConnectFinal(target);
   }
 
   function handleConflictCancel() {
@@ -835,6 +881,7 @@
           errors={editorErrors}
           isNew={editorIsNew}
           nameEditable={true}
+          lintName={editorIsNew ? '' : editorOriginalName}
           on:save={doSave}
           on:cancel={() => showEditor = false} />
       </div>
@@ -849,6 +896,7 @@
     <ConflictWarning
       conflicts={conflictList}
       on:proceed={handleConflictProceed}
+      on:disconnect_proceed={handleConflictDisconnectProceed}
       on:cancel={handleConflictCancel} />
   {/if}
 
@@ -862,7 +910,7 @@
             <div class="zip-result-row">
               <span class="zip-result-icon" class:zip-ok={!r.error} class:zip-err={!!r.error}>{r.error ? '✕' : '✓'}</span>
               <span class="zip-result-name" class:zip-err={!!r.error}>{r.name}</span>
-              {#if r.error}<span class="zip-result-msg">{r.error}</span>{/if}
+              {#if r.error}<span class="zip-result-msg">{r.error}</span>{:else if warningText(r.warnings)}<span class="zip-result-msg">{warningText(r.warnings)}</span>{/if}
             </div>
           {/each}
         </div>
