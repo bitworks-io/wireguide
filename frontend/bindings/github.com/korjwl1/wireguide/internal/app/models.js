@@ -737,6 +737,53 @@ export class TunnelInfo {
 }
 
 /**
+ * URLAction is a validated request parsed from a wireguide:// URL.
+ */
+export class URLAction {
+    /**
+     * Creates a new URLAction instance.
+     * @param {Partial<URLAction>} [$$source = {}] - The source object to create the URLAction.
+     */
+    constructor($$source = {}) {
+        if (!("kind" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["tunnel"] = undefined;
+        }
+        if (!("confirm" in $$source)) {
+            /**
+             * Confirm is true when the user must approve the action in the window
+             * before it runs (the app was not frontmost when the URL arrived).
+             * @member
+             * @type {boolean}
+             */
+            this["confirm"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new URLAction instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {URLAction}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new URLAction(/** @type {Partial<URLAction>} */($$parsedSource));
+    }
+}
+
+/**
  * UpdateState is the frontend-facing snapshot of persisted check state.
  * Exposed so Settings → About can render the "Last checked …" line and
  * the first-check placeholder correctly.

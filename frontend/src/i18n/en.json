@@ -143,7 +143,12 @@
     "section_logging": "Logging",
     "notify_auto": "Notify on automatic tunnel changes",
     "notify_auto_hint": "Show a notification when a tunnel connects or disconnects without you doing it here (Automation rules, the command line, wake from sleep) and when the helper reports a problem.",
-    "update_check_failing": "Update check failing: {n} in a row, last attempt {when}."
+    "update_check_failing": "Update check failing: {n} in a row, last attempt {when}.",
+    "export_diagnostics": "Export diagnostics…",
+    "export_diagnostics_hint": "Saves a zip with logs, redacted tunnel configs, DNS, routes and firewall state for bug reports. Private and preshared keys are never included.",
+    "export_diagnostics_busy": "Exporting…",
+    "export_diagnostics_done": "Saved to {path}",
+    "export_diagnostics_failed": "Export failed"
   },
   "confirm": {
     "delete_title": "Delete Tunnel",
@@ -383,5 +388,14 @@
     "hover_nxdomain": "A name that the tunnel's server does not know returns NXDOMAIN; there is no fallback to system DNS.",
     "hover_dig": "dig bypasses split DNS and queries servers directly; use dscacheutil -q host -a name <name> to test what apps see.",
     "hover_match": "Split DNS: queries for {domain} and its subdomains go to this tunnel's DNS server; everything else uses system DNS."
+  },
+  "url_action": {
+    "connect_title": "Connect from a link?",
+    "disconnect_title": "Disconnect from a link?",
+    "connect_message": "A link or shortcut asked WireGuide to connect \"{name}\".",
+    "disconnect_message": "A link or shortcut asked WireGuide to disconnect \"{name}\".",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "cancel": "Cancel"
   }
 }

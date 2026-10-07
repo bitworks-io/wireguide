@@ -19,6 +19,17 @@
             <string>icons</string>
         <key>LSMinimumSystemVersion</key>
             <string>10.15.0</string>
+        <key>CFBundleURLTypes</key>
+        <array>
+            <dict>
+                <key>CFBundleURLName</key>
+                    <string>WireGuide URL</string>
+                <key>CFBundleURLSchemes</key>
+                <array>
+                    <string>wireguide</string>
+                </array>
+            </dict>
+        </array>
         <key>NSHighResolutionCapable</key>
             <string>true</string>
         <key>NSHumanReadableCopyright</key>

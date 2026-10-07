@@ -19,6 +19,7 @@ export {
     ResolveResult,
     RouteEntry,
     TunnelInfo,
+    URLAction,
     UpdateState,
     VerifyRow,
     ZipImportResult

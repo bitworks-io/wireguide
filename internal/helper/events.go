@@ -288,8 +288,8 @@ func (h *Helper) runOneLatencyProbe(t latencyTask) {
 	h.latencyByTunnel[t.tunnelName] = latency
 	h.latencyMu.Unlock()
 	// Debug, not Info: this fires per connected tunnel every 30s, and
-	// launchd appends StandardOutPath forever with no rotation — at Info
-	// it was 95.7% of a 7.7 MB helper log (33,720 of 35,240 lines over
+	// the helper log was once appended forever with no rotation (it is
+	// now size-rotated, see log_handler.go) — at Info it was 95.7% of a 7.7 MB helper log (33,720 of 35,240 lines over
 	// four months). Nothing is lost by demoting it: the same value is
 	// already broadcast in the status event, rendered in the UI and
 	// readable via `ctl status`. The log level is runtime-mutable, so

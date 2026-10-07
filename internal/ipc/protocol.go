@@ -25,9 +25,12 @@ import (
 // Minor 2 added PingResponse.GUIAttached. With launchd socket activation a
 // successful dial no longer proves the app is running (the dial itself starts
 // the helper), so the CLI needs the helper to say whether a GUI is attached.
+// Minor 3 added the read-only Diag.Snapshot method (pf anchor dump for the
+// diagnostics bundle); a pre-3 helper answers method-not-found and the bundle
+// records the section as unavailable.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 2
+	ProtocolMinor = 3
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -154,6 +157,10 @@ const (
 	// current Automation rules against the current network context and
 	// returns each tunnel's decision WITHOUT connecting/disconnecting.
 	MethodAutomationPreview = "Automation.Preview"
+	// MethodDiagSnapshot is a read-only dump of root-only diagnostics (the
+	// WireGuide pf anchors) for the diagnostics bundle. It takes no
+	// parameters and changes nothing.
+	MethodDiagSnapshot = "Diag.Snapshot"
 	// MethodRequestQuit asks the helper to bring the WHOLE app down —
 	// this is `wireguide ctl stop`. It is deliberately NOT the same as
 	// MethodShutdown: shutting the helper down while the GUI is still

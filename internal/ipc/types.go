@@ -187,3 +187,21 @@ type AutomationTunnelDecision struct {
 	Held     bool   `json:"held,omitempty"`
 	Latched  bool   `json:"latched,omitempty"`
 }
+
+// DiagSnapshotResponse is the result of Diag.Snapshot: root-only state the
+// GUI/CLI cannot read itself. Everything is read-only output of fixed
+// commands; no client-supplied input reaches an exec.
+type DiagSnapshotResponse struct {
+	// Anchors holds one entry per WireGuide pf anchor (macOS); empty on
+	// platforms without pf.
+	Anchors []DiagAnchor `json:"anchors,omitempty"`
+	// Platform is the helper's GOOS.
+	Platform string `json:"platform,omitempty"`
+}
+
+// DiagAnchor is one pf anchor's loaded ruleset.
+type DiagAnchor struct {
+	Name  string `json:"name"`
+	Rules string `json:"rules,omitempty"`
+	Error string `json:"error,omitempty"`
+}

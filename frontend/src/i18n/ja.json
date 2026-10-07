@@ -143,7 +143,12 @@
     "up_to_date": "最新バージョンです。",
     "notify_auto": "自動的なトンネル変更を通知",
     "notify_auto_hint": "アプリ内で操作していないトンネルの接続/切断 (自動化ルール、コマンドライン、スリープ復帰) やヘルパーの問題が発生したときに通知を表示します。",
-    "update_check_failing": "アップデート確認に失敗: 連続 {n} 回、最後の試行 {when}。"
+    "update_check_failing": "アップデート確認に失敗: 連続 {n} 回、最後の試行 {when}。",
+    "export_diagnostics": "診断情報を書き出す…",
+    "export_diagnostics_hint": "バグ報告用に、ログ、秘密情報を伏せたトンネル設定、DNS、ルート、ファイアウォールの状態を zip で保存します。秘密鍵と事前共有鍵は含まれません。",
+    "export_diagnostics_busy": "書き出し中…",
+    "export_diagnostics_done": "{path} に保存しました",
+    "export_diagnostics_failed": "書き出しに失敗しました"
   },
   "confirm": {
     "delete_title": "トンネルを削除",
@@ -383,5 +388,14 @@
     "hover_nxdomain": "トンネルのサーバーが知らない名前は NXDOMAIN を返し、システム DNS へのフォールバックはありません。",
     "hover_dig": "dig はスプリット DNS を回避してサーバーに直接問い合わせます。アプリから見える結果は dscacheutil -q host -a name <名前> で確認してください。",
     "hover_match": "スプリット DNS: {domain} とそのサブドメインのクエリはこのトンネルの DNS サーバーへ、それ以外はシステム DNS を使います。"
+  },
+  "url_action": {
+    "connect_title": "リンクから接続しますか?",
+    "disconnect_title": "リンクから切断しますか?",
+    "connect_message": "リンクまたはショートカットが WireGuide に「{name}」の接続を要求しました。",
+    "disconnect_message": "リンクまたはショートカットが WireGuide に「{name}」の切断を要求しました。",
+    "connect": "接続",
+    "disconnect": "切断",
+    "cancel": "キャンセル"
   }
 }
