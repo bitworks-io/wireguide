@@ -91,6 +91,9 @@ func (h *Helper) handleSSIDChange(oldSSID, newSSID string) {
 // rules is never touched. reevalMu serialises evaluations so the slow
 // connect/disconnect calls from two overlapping triggers can't race.
 func (h *Helper) reevaluateAutomation(reason string) {
+	if !h.guiSeen.Load() { // dormant until a GUI attaches (see Helper.guiSeen)
+		return
+	}
 	h.reevalMu.Lock()
 	defer h.reevalMu.Unlock()
 

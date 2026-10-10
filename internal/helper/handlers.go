@@ -53,7 +53,12 @@ func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) 
 }
 
 func (h *Helper) handlePing(params json.RawMessage) (interface{}, error) {
-	return ipc.PingResponse{Version: ipc.ProtocolVersion, AppVersion: update.CurrentVersion(), PID: os.Getpid()}, nil
+	return ipc.PingResponse{
+		Version:     ipc.ProtocolVersion,
+		AppVersion:  update.CurrentVersion(),
+		PID:         os.Getpid(),
+		GUIAttached: h.server.HasControlConn(),
+	}, nil
 }
 
 func (h *Helper) handleShutdown(params json.RawMessage) (interface{}, error) {
@@ -72,8 +77,9 @@ func (h *Helper) handleShutdown(params json.RawMessage) (interface{}, error) {
 //   - A GUI is attached: broadcast EventQuit and let the GUI terminate
 //     itself. Its normal quit path disconnects tunnels and then stops us.
 //     We must NOT shut down directly here — the GUI's health monitor would
-//     see the helper vanish and respawn it, which on macOS means an admin
-//     password prompt seconds after the user asked everything to stop.
+//     see the helper vanish and bring it back (on macOS the dial itself
+//     re-activates it via launchd), seconds after the user asked everything
+//     to stop.
 //
 //   - No GUI attached (helper running solo): nothing will relay the quit,
 //     so shut ourselves down on the same grace-free path as MethodShutdown.
