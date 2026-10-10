@@ -525,9 +525,11 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 			return fmt.Errorf("reconnect %q cancelled before Connect: %w", name, err)
 		}
 		h.connectMu.Lock()
-		err := h.manager.ConnectWithContext(ctx, cfg)
-		h.connectMu.Unlock()
-		return err
+		defer h.connectMu.Unlock()
+		if !h.stillCached(name) {
+			return nil // disconnected while this retry waited (issue #44)
+		}
+		return h.manager.ConnectWithContext(ctx, cfg)
 	}
 
 	// Legacy path: reconnect all tunnels.
@@ -540,6 +542,14 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 			return fmt.Errorf("reconnect-all cancelled mid-loop: %w", err)
 		}
 		h.connectMu.Lock()
+		// cfgs is a snapshot from before this retry waited on connectMu.
+		// A Disconnect that ran meanwhile dropped the tunnel from
+		// activeCfgs (and may have cancelled ctx); bringing it back from
+		// the stale copy would undo the user's "off" (issue #44).
+		if ctx.Err() != nil || !h.stillCached(cfg.Name) {
+			h.connectMu.Unlock()
+			continue
+		}
 		var err error
 		if h.firewall.IsKillSwitchEnabled() {
 			// The monitor did not suspend the firewall this attempt (nothing
@@ -568,6 +578,14 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 		}
 	}
 	return lastErr
+}
+
+// stillCached reports whether name is still in activeCfgs.
+func (h *Helper) stillCached(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.activeCfgs[name]
+	return ok
 }
 
 // copyActiveCfgs returns a shallow copy of the active configs map.
@@ -717,6 +735,12 @@ func (h *Helper) shutdown() {
 // rules. Called by the reconnect monitor before Disconnect so that old pf rules
 // referencing the previous utun interface name don't block the new connection.
 func (h *Helper) suspendFirewall() error {
+	// Under connectMu, like resumeFirewall and handleSetKillSwitch: a user
+	// turning the kill switch off between the read below and the saved
+	// flag would otherwise be overwritten with "on" and undone by resume
+	// (issue #44). Only the monitor goroutine calls this.
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
 	ksEnabled := h.firewall.IsKillSwitchEnabled()
 	dnsEnabled := h.firewall.IsDNSProtectionEnabled()
 

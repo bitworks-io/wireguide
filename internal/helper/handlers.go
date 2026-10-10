@@ -619,14 +619,6 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, err
 	}
-	if !req.Enabled {
-		// A reconnect in progress suspended the kill switch and will put it
-		// back on resume; the user's "off" must win over that (issue #44).
-		// resumeFirewall reads the flag under connectMu, which we hold.
-		h.mu.Lock()
-		h.fwSavedKillSwitch = false
-		h.mu.Unlock()
-	}
 	if req.Enabled {
 		// Enable should work regardless of tunnel state. If no tunnel is
 		// active the firewall installs only the base "block everything
@@ -643,6 +635,13 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 		if err := h.firewall.DisableKillSwitch(); err != nil {
 			return nil, err
 		}
+		// A reconnect in progress suspended the kill switch and will put
+		// it back on resume; the user's "off" must win over that (issue
+		// #44). suspend/resume read and write the flag under connectMu,
+		// which we hold.
+		h.mu.Lock()
+		h.fwSavedKillSwitch = false
+		h.mu.Unlock()
 	}
 	// The firewall intent is part of what a crash-restore must bring back.
 	h.persistDesiredState()

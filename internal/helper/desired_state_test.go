@@ -568,3 +568,29 @@ func TestKillSwitchOffDuringSuspendIsNotUndoneByResume(t *testing.T) {
 		t.Fatal("resume re-enabled a kill switch the user turned off")
 	}
 }
+
+// A wake retry waiting on connectMu with a snapshot of activeCfgs must not
+// reconnect a tunnel the user disconnected while it waited.
+func TestReconnectFn_SkipsTunnelDisconnectedWhileWaiting(t *testing.T) {
+	h := newPendingTestHelper(t)
+	h.activeCfgs["alpha"] = &domain.WireGuardConfig{Name: "alpha"}
+	_ = h.firewall.EnableKillSwitch("", nil, nil) // route connects through the stub below
+	var connects atomic.Int32
+	prev := connectUnderKillSwitch
+	connectUnderKillSwitch = func(*Helper, *domain.WireGuardConfig) error { connects.Add(1); return nil }
+	t.Cleanup(func() { connectUnderKillSwitch = prev })
+
+	h.connectMu.Lock() // the user's Disconnect holds connectMu
+	done := make(chan error, 1)
+	go func() { done <- h.reconnectFn(context.Background(), "") }()
+	time.Sleep(50 * time.Millisecond) // let the retry take its snapshot and block
+	h.mu.Lock()
+	delete(h.activeCfgs, "alpha") // what handleDisconnect does
+	h.mu.Unlock()
+	h.connectMu.Unlock()
+
+	<-done
+	if n := connects.Load(); n != 0 {
+		t.Fatalf("retry reconnected a disconnected tunnel %d times", n)
+	}
+}
