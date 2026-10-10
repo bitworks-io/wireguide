@@ -246,6 +246,9 @@ func (h *Helper) disconnectAutoManaged(name string) {
 				"interface", iface, "error", err)
 		}
 	}
+	if err := h.reapplyDNSProtection(); err != nil {
+		slog.Warn("DNS protection after automation disconnect failed", "error", err)
+	}
 	h.mu.Lock()
 	delete(h.activeCfgs, name)
 	delete(h.pendingDesired, name)

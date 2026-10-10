@@ -68,13 +68,12 @@ type DarwinFirewall struct {
 	// pfWasEnabled tracks whether pf was already enabled before we started,
 	// so we know whether to turn pf back off on disable/cleanup.
 	pfWasEnabled bool
-	// savedDNSInterface / savedDNSServers cache the most recent
-	// EnableDNSProtection arguments so EnableKillSwitch can re-load
-	// the DNS sub-anchor after rewriting the main anchor — without
-	// this, enabling KS *after* DNS protection silently wipes the
-	// DNS rules and DNS leaks despite dnsProtectionEnabled==true.
-	savedDNSInterface string
-	savedDNSServers   []string
+	// savedDNSAllow caches the most recent (normalized) EnableDNSProtection
+	// set so EnableKillSwitch can re-load the DNS sub-anchor after
+	// rewriting the main anchor — without this, enabling KS *after* DNS
+	// protection silently wipes the DNS rules and DNS leaks despite
+	// dnsProtectionEnabled==true.
+	savedDNSAllow []DNSAllow
 	// killSwitchTunnels is the complete interface -> endpoint permit model.
 	// PF anchor loads replace the prior ruleset, so every add/remove must
 	// render all survivors rather than only the most recently added utun.
@@ -160,10 +159,21 @@ func (f *DarwinFirewall) EnableKillSwitch(interfaceName string, _ []string, endp
 		return fmt.Errorf("invalid interface name %q", interfaceName)
 	}
 
-	// Snapshot pf state so we can restore enabled/disabled on teardown.
-	pfWas := isPfEnabled()
-	if err := persistPfEnabledState(pfWas); err != nil {
-		slog.Warn("failed to persist pf enabled state to disk", "error", err)
+	// Snapshot pf state so we can restore enabled/disabled on teardown —
+	// but only when none of our rules is up yet. Otherwise pf is on
+	// because WE turned it on (DNS protection, or an earlier enable: the
+	// GUI re-sends the kill switch after every connect), and re-taking the
+	// snapshot would record that as the user's state and leave pf enabled
+	// after everything is turned off (issue #48).
+	f.mu.Lock()
+	ownPf := f.killSwitchEnabled || f.dnsProtectionEnabled
+	pfWas := f.pfWasEnabled
+	f.mu.Unlock()
+	if !ownPf {
+		pfWas = isPfEnabled()
+		if err := persistPfEnabledState(pfWas); err != nil {
+			slog.Warn("failed to persist pf enabled state to disk", "error", err)
+		}
 	}
 
 	// Ensure the default pf ruleset is loaded so our anchor is
@@ -215,34 +225,14 @@ func (f *DarwinFirewall) EnableKillSwitch(interfaceName string, _ []string, endp
 func (f *DarwinFirewall) reapplyDNSSubAnchorIfActive() {
 	f.mu.Lock()
 	dnsActive := f.dnsProtectionEnabled
-	dnsIface := f.savedDNSInterface
-	dnsServers := append([]string(nil), f.savedDNSServers...)
+	allow := f.savedDNSAllow
 	f.mu.Unlock()
-	if !dnsActive || dnsIface == "" || len(dnsServers) == 0 {
+	if !dnsActive || len(allow) == 0 {
 		return
 	}
-	if err := loadDNSSubAnchor(dnsIface, dnsServers); err != nil {
+	if err := loadAnchorRules(dnsAnchorName, pfDNSRules(allow)); err != nil {
 		slog.Warn("re-loading DNS sub-anchor failed", "error", err)
 	}
-}
-
-// loadDNSSubAnchor builds the DNS-protection rule set for a given
-// interface + server list and loads it into the sub-anchor. Pulled
-// out of EnableDNSProtection so EnableKillSwitch can re-apply rules
-// after rewriting the main anchor.
-func loadDNSSubAnchor(interfaceName string, dnsServers []string) error {
-	if !validIfaceName.MatchString(interfaceName) {
-		return fmt.Errorf("invalid interface name %q", interfaceName)
-	}
-	var dnsRules strings.Builder
-	for _, dns := range dnsServers {
-		if net.ParseIP(dns) == nil {
-			return fmt.Errorf("invalid DNS server IP %q", dns)
-		}
-		fmt.Fprintf(&dnsRules, "pass out quick on %s proto {tcp, udp} to %s port 53\n", interfaceName, dns)
-	}
-	dnsRules.WriteString("block drop out quick proto {tcp, udp} to any port 53\n")
-	return loadAnchorRules(dnsAnchorName, dnsRules.String())
 }
 
 // AddKillSwitchTunnel folds a newly-connected tunnel's per-iface permit and
@@ -347,8 +337,7 @@ func (f *DarwinFirewall) DisableKillSwitch() error {
 	f.mu.Lock()
 	pfWas := f.pfWasEnabled
 	dnsActive := f.dnsProtectionEnabled
-	dnsIface := f.savedDNSInterface
-	dnsServers := append([]string(nil), f.savedDNSServers...)
+	dnsAllow := f.savedDNSAllow
 	f.mu.Unlock()
 
 	// Flush the anchor rules — main ruleset is untouched.
@@ -362,25 +351,13 @@ func (f *DarwinFirewall) DisableKillSwitch() error {
 	}
 
 	dnsReapplied := false
-	if dnsActive && dnsIface != "" && len(dnsServers) > 0 {
-		var dnsRules strings.Builder
-		valid := true
-		for _, dns := range dnsServers {
-			if net.ParseIP(dns) == nil {
-				valid = false
-				break
-			}
-			fmt.Fprintf(&dnsRules, "pass out quick on %s proto {tcp, udp} to %s port 53\n", dnsIface, dns)
-		}
-		dnsRules.WriteString("block drop out quick proto {tcp, udp} to any port 53\n")
-		if valid {
-			if err := loadAnchorRules(anchorName, dnsRules.String()); err != nil {
-				slog.Warn("re-loading DNS rules after kill switch disable failed",
-					"error", err)
-			} else {
-				dnsReapplied = true
-				slog.Info("DNS protection rules re-loaded after kill switch disable")
-			}
+	if dnsActive && len(dnsAllow) > 0 {
+		if err := loadAnchorRules(anchorName, pfDNSRules(dnsAllow)); err != nil {
+			slog.Warn("re-loading DNS rules after kill switch disable failed",
+				"error", err)
+		} else {
+			dnsReapplied = true
+			slog.Info("DNS protection rules re-loaded after kill switch disable")
 		}
 	}
 
@@ -405,67 +382,69 @@ func (f *DarwinFirewall) DisableKillSwitch() error {
 	return nil
 }
 
-func (f *DarwinFirewall) EnableDNSProtection(interfaceName string, dnsServers []string) error {
-	if len(dnsServers) == 0 {
-		return nil
+func (f *DarwinFirewall) EnableDNSProtection(allow []DNSAllow) error {
+	allow = normalizeDNSAllow(allow, validIfaceName.MatchString)
+	if len(allow) == 0 {
+		return f.DisableDNSProtection()
 	}
-
-	// M1: Validate interface name
-	if !validIfaceName.MatchString(interfaceName) {
-		return fmt.Errorf("invalid interface name %q", interfaceName)
-	}
-
-	var dnsRules strings.Builder
-	for _, dns := range dnsServers {
-		if net.ParseIP(dns) == nil {
-			return fmt.Errorf("invalid DNS server IP %q", dns)
-		}
-		fmt.Fprintf(&dnsRules, "pass out quick on %s proto {tcp, udp} to %s port 53\n", interfaceName, dns)
-	}
-	dnsRules.WriteString("block drop out quick proto {tcp, udp} to any port 53\n")
+	rules := pfDNSRules(allow)
 
 	f.mu.Lock()
 	ksEnabled := f.killSwitchEnabled
+	alreadyOn := f.dnsProtectionEnabled
 	f.mu.Unlock()
 
 	if ksEnabled {
 		// Kill switch is active — its anchor rules already contain
 		// `anchor "com.apple.wireguide/dns"`, so loading into the
 		// sub-anchor works directly.
-		if err := loadAnchorRules(dnsAnchorName, dnsRules.String()); err != nil {
+		if err := loadAnchorRules(dnsAnchorName, rules); err != nil {
 			return fmt.Errorf("loading DNS anchor rules: %w", err)
 		}
 	} else {
 		// No kill switch — load DNS rules into the main anchor.
 		// macOS evaluates the anchor via the com.apple/* wildcard.
-		pfWas := isPfEnabled()
-		if err := persistPfEnabledState(pfWas); err != nil {
-			slog.Warn("failed to persist pf enabled state to disk", "error", err)
-		}
+		if alreadyOn {
+			// A re-apply (tunnel set changed): swap the rules, keep the pf
+			// snapshot. Taking it again would record OUR pf-enabled state
+			// as the user's, and disable would then leave pf on forever.
+			// pf is still (re-)enabled: a failed reload in DisableKillSwitch
+			// turns it off while DNS protection stays on.
+			if err := loadAnchorRules(anchorName, rules); err != nil {
+				return fmt.Errorf("loading DNS rules into anchor: %w", err)
+			}
+			if err := enablePf(); err != nil {
+				slog.Warn("pfctl -e failed while re-applying DNS protection", "error", err)
+			}
+		} else {
+			pfWas := isPfEnabled()
+			if err := persistPfEnabledState(pfWas); err != nil {
+				slog.Warn("failed to persist pf enabled state to disk", "error", err)
+			}
 
-		if err := loadDefaultPfRuleset(); err != nil {
-			slog.Warn("loading /etc/pf.conf failed; anchor may not be evaluated", "error", err)
-		}
+			if err := loadDefaultPfRuleset(); err != nil {
+				slog.Warn("loading /etc/pf.conf failed; anchor may not be evaluated", "error", err)
+			}
 
-		if err := loadAnchorRules(anchorName, dnsRules.String()); err != nil {
-			return fmt.Errorf("loading DNS rules into anchor: %w", err)
-		}
+			if err := loadAnchorRules(anchorName, rules); err != nil {
+				return fmt.Errorf("loading DNS rules into anchor: %w", err)
+			}
 
-		if err := enablePf(); err != nil {
-			slog.Warn("pfctl -e failed while enabling DNS protection", "error", err)
-		}
+			if err := enablePf(); err != nil {
+				slog.Warn("pfctl -e failed while enabling DNS protection", "error", err)
+			}
 
-		f.mu.Lock()
-		f.pfWasEnabled = pfWas
-		f.mu.Unlock()
+			f.mu.Lock()
+			f.pfWasEnabled = pfWas
+			f.mu.Unlock()
+		}
 	}
 
 	f.mu.Lock()
 	f.dnsProtectionEnabled = true
-	f.savedDNSInterface = interfaceName
-	f.savedDNSServers = append([]string(nil), dnsServers...)
+	f.savedDNSAllow = allow
 	f.mu.Unlock()
-	slog.Info("DNS protection enabled", "interface", interfaceName, "dns_servers", dnsServers)
+	slog.Info("DNS protection enabled", "allow", allow)
 	return nil
 }
 
@@ -474,7 +453,15 @@ func (f *DarwinFirewall) DisableDNSProtection() error {
 	f.mu.Lock()
 	ksEnabled := f.killSwitchEnabled
 	pfWas := f.pfWasEnabled
+	dnsOn := f.dnsProtectionEnabled
 	f.mu.Unlock()
+
+	if !dnsOn {
+		// Nothing of ours to remove. Without this, the no-kill-switch branch
+		// below ran `pfctl -d` on a pf the user had enabled themselves
+		// (pfWasEnabled is false when we never took the snapshot).
+		return nil
+	}
 
 	if ksEnabled {
 		// Kill switch is active — DNS rules are in the sub-anchor, just flush it.
@@ -498,8 +485,7 @@ func (f *DarwinFirewall) DisableDNSProtection() error {
 
 	f.mu.Lock()
 	f.dnsProtectionEnabled = false
-	f.savedDNSInterface = ""
-	f.savedDNSServers = nil
+	f.savedDNSAllow = nil
 	f.mu.Unlock()
 	slog.Info("DNS protection disabled")
 	return nil
@@ -549,8 +535,7 @@ func (f *DarwinFirewall) Cleanup() error {
 	// only partial.
 	f.mu.Lock()
 	if flushErr == nil {
-		f.savedDNSInterface = ""
-		f.savedDNSServers = nil
+		f.savedDNSAllow = nil
 	}
 	f.dnsProtectionEnabled = false
 	f.killSwitchEnabled = false

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -391,27 +390,16 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 // already-enabled kill switch never learned its endpoints (issue #12).
 // Best-effort: logs and continues on error, exactly like manual connect.
 func (h *Helper) applyPostConnectFirewall(cfg *domain.WireGuardConfig) {
-	// Windows-only: auto-enable DNS protection on full-tunnel.
-	//
-	// Why Windows-specific: Windows' resolver does "smart multi-homed
-	// name resolution" which queries the DNS servers on EVERY active
-	// interface in parallel, leaking VPN-tunnel DNS queries to the
-	// ISP's DNS at the same time. Even with a kill switch this is a
-	// silent privacy leak. WFP DNS-port blocking is the documented
-	// fix (see wireguard-windows netquirk.md).
-	//
-	// macOS and Linux don't have this leak — their resolvers honour
-	// the tunnel-interface DNS exclusively when the route table sends
-	// the query out the tunnel. Auto-enabling there would override
-	// the user's explicit Settings.DNSProtection=false choice (the
-	// v0.2.0 behaviour), so we leave non-Windows platforms alone.
-	if runtime.GOOS == "windows" && cfg.IsFullTunnel() && len(cfg.Interface.DNS) > 0 {
-		status := h.manager.Status()
-		if status != nil && status.InterfaceName != "" {
-			if err := h.firewall.EnableDNSProtection(status.InterfaceName, cfg.Interface.DNS); err != nil {
-				slog.Warn("auto-DNS protection failed (full-tunnel)", "error", err)
-			}
-		}
+	// DNS protection covers every connected tunnel, this one included
+	// (issue #48); on Windows a full tunnel also turns it on by itself,
+	// overriding an earlier explicit "off" as it always did.
+	if cfg.IsFullTunnel() {
+		h.mu.Lock()
+		h.dnsAutoOff = false
+		h.mu.Unlock()
+	}
+	if err := h.reapplyDNSProtection(); err != nil {
+		slog.Warn("DNS protection after connect failed", "tunnel", cfg.Name, "error", err)
 	}
 
 	// If the kill switch is already enabled (user toggled it on before
@@ -591,6 +579,11 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 				"interface", iface, "error", err)
 		}
 	}
+	// DNS rules named the torn-down interfaces; rebuild them for what is
+	// still up (issue #48). Best-effort, like the kill-switch cleanup.
+	if err := h.reapplyDNSProtection(); err != nil {
+		slog.Warn("DNS protection after disconnect failed", "error", err)
+	}
 	h.maybeArmShutdownAfterTeardown("tunnel disconnected, no GUI attached")
 	return ipc.Empty{}, nil
 }
@@ -659,31 +652,20 @@ func (h *Helper) handleSetDNSProtection(params json.RawMessage) (interface{}, er
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, err
 	}
-	if req.Enabled {
-		// Accept the toggle even with no active tunnel — the GUI persists
-		// the preference and re-sends SetDNSProtection(true) via
-		// applyFirewallSettings() after every successful connect. Without
-		// a tunnel we have no interface to scope the "allow port 53"
-		// permit to, so we just succeed silently and let the next connect
-		// install the pf rules with the right interface + DNS list.
-		if !h.manager.IsConnected() || len(req.DNSServers) == 0 {
-			return ipc.Empty{}, nil
-		}
-		status := h.manager.Status()
-		// DNS protection uses a single tunnel's interface name for the pf
-		// rule. This is intentional: the pf rule blocks port 53 globally
-		// and only allows it through the tunnel interface. With multiple
-		// tunnels, using the first connected tunnel's interface is
-		// sufficient because the DNS protection rule is a global "block
-		// port 53 except on <tunnel_iface>" anchor — any tunnel interface
-		// will work as the exception.
-		if err := h.firewall.EnableDNSProtection(status.InterfaceName, req.DNSServers); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := h.firewall.DisableDNSProtection(); err != nil {
-			return nil, err
-		}
+	// The helper derives the allowed servers from every connected tunnel
+	// itself; req.DNSServers (one tunnel's list, from older GUI/CLI builds)
+	// is ignored (issue #48). With no tunnel up the setting is recorded and
+	// the next connect installs the rules.
+	h.mu.Lock()
+	prev, prevAutoOff := h.dnsProtectionWanted, h.dnsAutoOff
+	h.dnsProtectionWanted = req.Enabled
+	h.dnsAutoOff = !req.Enabled
+	h.mu.Unlock()
+	if err := h.reapplyDNSProtection(); err != nil {
+		h.mu.Lock()
+		h.dnsProtectionWanted, h.dnsAutoOff = prev, prevAutoOff
+		h.mu.Unlock()
+		return nil, err
 	}
 	h.persistDesiredState()
 	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{DNSProtection: &req.Enabled})

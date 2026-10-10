@@ -221,26 +221,11 @@ func (s *TunnelService) SetKillSwitch(enabled bool) error {
 	return s.call(ipc.MethodSetKillSwitch, ipc.KillSwitchRequest{Enabled: enabled}, nil)
 }
 
-// SetDNSProtection asks the helper to lock DNS to the active tunnel's servers.
-// When enabling, we look up the active tunnel's DNS list from local storage
-// and pass it along (the helper never touches user-space storage).
+// SetDNSProtection asks the helper to lock DNS to the connected tunnels'
+// servers. The helper works out the servers for every connected tunnel
+// itself (issue #48).
 func (s *TunnelService) SetDNSProtection(enabled bool) error {
-	var dnsServers []string
-	if enabled {
-		var active ipc.StringResponse
-		if err := s.call(ipc.MethodActiveName, nil, &active); err != nil {
-			return fmt.Errorf("cannot verify tunnel state: %w", err)
-		}
-		if active.Value != "" {
-			if cfg, err := s.tunnelStore.Load(active.Value); err == nil {
-				dnsServers = cfg.Interface.DNS
-			}
-		}
-	}
-	return s.call(ipc.MethodSetDNSProtection, ipc.DNSProtectionRequest{
-		Enabled:    enabled,
-		DNSServers: dnsServers,
-	}, nil)
+	return s.call(ipc.MethodSetDNSProtection, ipc.DNSProtectionRequest{Enabled: enabled}, nil)
 }
 
 // --- Auto-update ---

@@ -31,7 +31,9 @@ type KillSwitchRequest struct {
 
 // DNSProtectionRequest is the parameter for Firewall.SetDNSProtection.
 type DNSProtectionRequest struct {
-	Enabled    bool     `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// DNSServers is ignored: the helper derives the servers from every
+	// connected tunnel (issue #48). Kept so older clients still decode.
 	DNSServers []string `json:"dns_servers,omitempty"`
 }
 

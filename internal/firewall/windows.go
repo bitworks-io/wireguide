@@ -860,10 +860,20 @@ func (f *WindowsFirewall) DisableKillSwitch() error {
 // When called without a prior EnableKillSwitch we still open the session
 // (DNS protection can be enabled independently to protect against ISP DNS
 // hijacking even on a split-tunnel setup).
-func (f *WindowsFirewall) EnableDNSProtection(interfaceName string, dnsServers []string) error {
+//
+// WFP permits each server by remote address on any interface, so the
+// tunnel interfaces in allow are not used here — only the union of their
+// servers, which the system resolver is also given (issue #48).
+func (f *WindowsFirewall) EnableDNSProtection(allow []DNSAllow) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.enableDNSProtectionLocked(dnsServers)
+	servers := dnsAllowServers(normalizeDNSAllow(allow, func(string) bool { return true }))
+	if len(servers) == 0 {
+		// No tunnel with DNS servers is up: remove the rules rather than
+		// leave the previous set (or a block-only set) in place.
+		return f.disableDNSProtectionLocked()
+	}
+	return f.enableDNSProtectionLocked(servers)
 }
 
 // enableDNSProtectionLocked is the body of EnableDNSProtection. Caller
@@ -1081,7 +1091,12 @@ func (f *WindowsFirewall) blockAllDNS() ([]uint64, error) {
 func (f *WindowsFirewall) DisableDNSProtection() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.disableDNSProtectionLocked()
+}
 
+// disableDNSProtectionLocked is the body of DisableDNSProtection. Caller
+// MUST hold f.mu.
+func (f *WindowsFirewall) disableDNSProtectionLocked() error {
 	f.dnsProtectionEnabled = false
 	f.dnsServers = nil
 

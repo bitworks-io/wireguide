@@ -153,9 +153,20 @@ type Helper struct {
 
 	// Firewall state saved during reconnect suspend/resume cycle.
 	// These track what was active before suspend so resume can restore it.
-	fwSavedKillSwitch    bool
-	fwSavedDNSProtection bool
-	fwSavedDNSServers    []string // DNS servers to re-enable on resume
+	fwSavedKillSwitch bool
+
+	// dnsProtectionWanted is the user's DNS-protection setting as last sent
+	// by the GUI/CLI (or carried over by a crash restore). The rules
+	// themselves are derived from it plus every connected tunnel by
+	// reapplyDNSProtection (issue #48). Guarded by mu.
+	dnsProtectionWanted bool
+	// dnsAutoOff records an explicit "off" from the user while a Windows
+	// full tunnel had DNS protection on automatically: it stays off until
+	// the next full-tunnel connect, as before issue #48. Guarded by mu.
+	dnsAutoOff bool
+	// dnsMu serializes reapplyDNSProtection so each call renders a fresh
+	// snapshot and the last one to run reflects the latest tunnel set.
+	dnsMu sync.Mutex
 
 	// shutdownTimer is a singleton grace-window timer. When the control
 	// connection drops we Reset it; when the GUI reconnects we Stop it. This
@@ -504,6 +515,14 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired boo
 // timeouts. This still lets monitor.Stop() exit quickly in the common
 // case where cancellation lands before Connect starts.
 func (h *Helper) reconnectFn(ctx context.Context, name string) error {
+	// DNS rules must follow whatever is up afterwards, on every path —
+	// including attempts the monitor didn't suspend/resume around (nothing
+	// was up, or the suspend itself failed) (issue #48).
+	defer func() {
+		if dnsErr := h.reapplyDNSProtection(); dnsErr != nil {
+			slog.Warn("reconnect: DNS protection rebuild failed", "error", dnsErr)
+		}
+	}()
 	h.mu.Lock()
 	cfgs := h.copyActiveCfgs()
 	h.mu.Unlock()
@@ -746,15 +765,9 @@ func (h *Helper) suspendFirewall() error {
 
 	h.mu.Lock()
 	h.fwSavedKillSwitch = ksEnabled
-	h.fwSavedDNSProtection = dnsEnabled
-	// DNS servers are stored from any active config's Interface.DNS
-	for _, cfg := range h.activeCfgs {
-		if len(cfg.Interface.DNS) > 0 {
-			h.fwSavedDNSServers = cfg.Interface.DNS
-			break
-		}
-	}
 	h.mu.Unlock()
+	// DNS protection needs no saved copy: resume re-derives the rules from
+	// the setting and the reconnected tunnels (issue #48).
 
 	if !ksEnabled && !dnsEnabled {
 		slog.Debug("suspendFirewall: no firewall rules active, nothing to suspend")
@@ -767,7 +780,11 @@ func (h *Helper) suspendFirewall() error {
 	// Disable DNS protection first (it may be a sub-anchor of the kill switch).
 	dnsDisabled := false
 	if dnsEnabled {
-		if err := h.firewall.DisableDNSProtection(); err != nil {
+		// Under dnsMu so it can't interleave with a reapply.
+		h.dnsMu.Lock()
+		err := h.firewall.DisableDNSProtection()
+		h.dnsMu.Unlock()
+		if err != nil {
 			slog.Warn("suspendFirewall: failed to disable DNS protection", "error", err)
 		} else {
 			dnsDisabled = true
@@ -782,18 +799,9 @@ func (h *Helper) suspendFirewall() error {
 			// resumeFirewall isn't called against a state that
 			// already half-resumed.
 			if dnsDisabled {
-				h.mu.Lock()
-				dnsServers := h.fwSavedDNSServers
-				h.mu.Unlock()
-				ifaceName := ""
-				if status := h.manager.Status(); status != nil {
-					ifaceName = status.InterfaceName
-				}
-				if ifaceName != "" && len(dnsServers) > 0 {
-					if rollbackErr := h.firewall.EnableDNSProtection(ifaceName, dnsServers); rollbackErr != nil {
-						slog.Error("suspendFirewall: DNS protection rollback ALSO failed",
-							"error", rollbackErr)
-					}
+				if rollbackErr := h.reapplyDNSProtection(); rollbackErr != nil {
+					slog.Error("suspendFirewall: DNS protection rollback ALSO failed",
+						"error", rollbackErr)
 				}
 			}
 			return fmt.Errorf("suspendFirewall: disable kill switch: %w", err)
@@ -814,28 +822,11 @@ func (h *Helper) resumeFirewall() error {
 	defer h.connectMu.Unlock()
 	h.mu.Lock()
 	restoreKS := h.fwSavedKillSwitch
-	restoreDNS := h.fwSavedDNSProtection
-	savedDNSServers := h.fwSavedDNSServers
 	// Clear saved state so a second resume is a no-op.
 	h.fwSavedKillSwitch = false
-	h.fwSavedDNSProtection = false
-	h.fwSavedDNSServers = nil
 	h.mu.Unlock()
 
-	if !restoreKS && !restoreDNS {
-		slog.Debug("resumeFirewall: no firewall rules to restore")
-		return nil
-	}
-
-	status := h.manager.Status()
-	ifaceName := ""
-	if status != nil {
-		ifaceName = status.InterfaceName
-	}
-
-	slog.Info("resuming firewall rules after reconnect",
-		"kill_switch", restoreKS, "dns_protection", restoreDNS,
-		"new_interface", ifaceName)
+	slog.Info("resuming firewall rules after reconnect", "kill_switch", restoreKS)
 
 	if restoreKS {
 		// Rebuild from every active tunnel, not just the first one: with
@@ -849,17 +840,12 @@ func (h *Helper) resumeFirewall() error {
 		}
 	}
 
-	if restoreDNS {
-		if ifaceName == "" {
-			slog.Warn("resumeFirewall: no interface name available, cannot re-enable DNS protection")
-		} else if len(savedDNSServers) == 0 {
-			slog.Warn("resumeFirewall: no DNS servers saved, cannot re-enable DNS protection")
-		} else {
-			if err := h.firewall.EnableDNSProtection(ifaceName, savedDNSServers); err != nil {
-				slog.Error("resumeFirewall: failed to re-enable DNS protection", "error", err)
-				return fmt.Errorf("resumeFirewall: enable DNS protection: %w", err)
-			}
-		}
+	// Rebuild DNS protection for every reconnected tunnel. The old code
+	// re-enabled it for one interface with servers taken from whichever
+	// activeCfgs entry map iteration returned first — a random pairing.
+	if err := h.reapplyDNSProtection(); err != nil {
+		slog.Error("resumeFirewall: failed to re-enable DNS protection", "error", err)
+		return fmt.Errorf("resumeFirewall: enable DNS protection: %w", err)
 	}
 
 	return nil

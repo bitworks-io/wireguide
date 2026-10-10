@@ -47,7 +47,8 @@ import (
 //     memory (the GUI re-sends them after its own connects), so without
 //     this a restored tunnel would come back unprotected. Restore puts the
 //     kill switch back BEFORE reconnecting, so a restore that fails keeps
-//     the blockade the user had instead of leaking.
+//     the blockade the user had instead of leaking; DNS protection is
+//     rebuilt for each tunnel as it reconnects.
 //   - Automation rules win: restore runs under reevalMu and skips a tunnel
 //     whose rule says "off" on the current network, and a rule-driven
 //     disconnect withdraws a pending entry.
@@ -205,19 +206,20 @@ func (h *Helper) persistDesiredState() {
 	var st desiredStateJSON
 	if h.firewall != nil {
 		st.KillSwitch = h.firewall.IsKillSwitchEnabled()
-		st.DNSProtection = h.firewall.IsDNSProtectionEnabled()
 	}
 	h.mu.Lock()
+	// The setting, not whether rules are installed right now: with no
+	// tunnel up, or mid-reconnect, there may be none (issue #48).
+	st.DNSProtection = h.dnsProtectionWanted
 	for name := range h.activeCfgs {
 		st.Tunnels = append(st.Tunnels, name)
 	}
 	for name := range h.pendingDesired {
 		st.Tunnels = append(st.Tunnels, name)
 	}
-	// A reconnect suspends the firewall and remembers what was on; record
+	// A reconnect suspends the kill switch and remembers it was on; record
 	// that, not the momentary "off" (issue #44).
 	st.KillSwitch = st.KillSwitch || h.fwSavedKillSwitch
-	st.DNSProtection = st.DNSProtection || h.fwSavedDNSProtection
 	h.mu.Unlock()
 	h.desiredMu.Lock()
 	defer h.desiredMu.Unlock()
@@ -323,8 +325,7 @@ func (h *Helper) connectPendingDesired(ctx context.Context, cfg *domain.WireGuar
 // restoreConnect connects one restored or pending tunnel. It runs the same
 // firewall follow-up a manual/automation connect gets — a headless restore
 // must not skip DNS protection / kill-switch permits (parity with issue #12)
-// — then puts DNS protection back if it was on, and tells the GUI the same
-// way automation does so it refreshes and re-applies its firewall settings.
+// — and tells the GUI the same way automation does so it refreshes.
 // A package var so tests can exercise restore without a real tunnel.
 // Caller MUST hold h.connectMu.
 var restoreConnect = func(h *Helper, cfg *domain.WireGuardConfig) error {
@@ -332,29 +333,8 @@ var restoreConnect = func(h *Helper, cfg *domain.WireGuardConfig) error {
 		return err
 	}
 	h.applyPostConnectFirewall(cfg)
-	if loadDesiredIntent(h.dataDir).DNSProtection && !h.firewall.IsDNSProtectionEnabled() {
-		h.restoreDNSProtection(cfg)
-	}
 	h.server.Broadcast(ipc.EventAutoConnect, ipc.AutoConnectPayload{TunnelName: cfg.Name})
 	return nil
-}
-
-// restoreDNSProtection re-enables DNS protection on cfg's interface with its
-// DNS servers, mirroring what the GUI's SetDNSProtection(true) does after a
-// manual connect. Best-effort: a failure is logged, the tunnel stays up.
-func (h *Helper) restoreDNSProtection(cfg *domain.WireGuardConfig) {
-	if len(cfg.Interface.DNS) == 0 {
-		return
-	}
-	for _, st := range h.manager.AllStatuses() {
-		if st == nil || st.TunnelName != cfg.Name || st.InterfaceName == "" {
-			continue
-		}
-		if err := h.firewall.EnableDNSProtection(st.InterfaceName, cfg.Interface.DNS); err != nil {
-			slog.Warn("desired-state: restore DNS protection failed", "tunnel", cfg.Name, "error", err)
-		}
-		return
-	}
 }
 
 // restoreRuleSaysOff reports whether an Automation rule wants name OFF on the
@@ -455,6 +435,14 @@ func (h *Helper) restoreDesiredTunnels() {
 	}
 	h.connectMu.Lock()
 	defer h.connectMu.Unlock()
+
+	// DNS protection was on before the crash: applyPostConnectFirewall
+	// installs it for each tunnel restored below (issue #48).
+	if intent.DNSProtection {
+		h.mu.Lock()
+		h.dnsProtectionWanted = true
+		h.mu.Unlock()
+	}
 
 	// Kill switch first: the user had the blockade up, and the crash
 	// recovery above removed it. doConnectHeld handles connecting under it.

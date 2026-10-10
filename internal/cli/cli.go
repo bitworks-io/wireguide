@@ -813,18 +813,8 @@ func cmdSet(args []string) int {
 			fmt.Fprintln(os.Stderr, "set:", err)
 			return 1
 		}
-		// When enabling, the helper needs the active tunnel's DNS servers.
-		var servers []string
-		if v {
-			if name := activeTunnelName(); name != "" {
-				if store, e := tunnelStore(); e == nil {
-					if cfg, e := store.Load(name); e == nil {
-						servers = cfg.Interface.DNS
-					}
-				}
-			}
-		}
-		liveRC = applyIPC(ipc.MethodSetDNSProtection, ipc.DNSProtectionRequest{Enabled: v, DNSServers: servers})
+		// The helper derives the servers from every connected tunnel (#48).
+		liveRC = applyIPC(ipc.MethodSetDNSProtection, ipc.DNSProtectionRequest{Enabled: v})
 	case "healthcheck", "health-check", "health_check":
 		v, ok := parseOnOff(value)
 		if !ok {

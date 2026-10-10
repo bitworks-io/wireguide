@@ -60,8 +60,14 @@ type FirewallManager interface {
 	// called Enable).
 	DisableEndpointProtection(tunnelInterfaceName string) error
 
-	// EnableDNSProtection blocks DNS (port 53) except to specified servers via WG tunnel.
-	EnableDNSProtection(interfaceName string, dnsServers []string) error
+	// EnableDNSProtection blocks DNS (port 53) except to each entry's
+	// servers through that entry's tunnel interface, replacing whatever DNS
+	// rules were installed before. Non-IP entries (search domains) are
+	// skipped. When nothing valid remains — no tunnel with DNS servers is
+	// up — the DNS rules are removed instead, the same state as
+	// DisableDNSProtection: blocking every resolver with no tunnel to
+	// route around it would just break name resolution.
+	EnableDNSProtection(allow []DNSAllow) error
 
 	// DisableDNSProtection removes DNS protection rules.
 	DisableDNSProtection() error

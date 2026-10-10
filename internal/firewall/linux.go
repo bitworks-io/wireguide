@@ -238,67 +238,36 @@ func (f *LinuxFirewall) DisableKillSwitch() error {
 	return nil
 }
 
-func (f *LinuxFirewall) EnableDNSProtection(interfaceName string, dnsServers []string) error {
+func (f *LinuxFirewall) EnableDNSProtection(allow []DNSAllow) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if len(dnsServers) == 0 {
+	allow = normalizeDNSAllow(allow, validIfaceName.MatchString)
+	if len(allow) == 0 {
+		f.disableDNSProtectionLocked()
 		return nil
 	}
-
-	// Validate interface name before interpolating into nft rules.
-	if !validIfaceName.MatchString(interfaceName) {
-		return fmt.Errorf("invalid interface name %q", interfaceName)
-	}
-
-	// H12: Detect IPv4 vs IPv6 for each DNS server
-	var dnsAllowed []string
-	for _, dns := range dnsServers {
-		if net.ParseIP(dns) == nil {
-			slog.Warn("skipping invalid DNS IP in nft rules", "dns", dns)
-			continue
-		}
-		addrKw := "ip"
-		if strings.Contains(dns, ":") {
-			addrKw = "ip6"
-		}
-		dnsAllowed = append(dnsAllowed,
-			fmt.Sprintf("%s daddr %s tcp dport 53 oif %s accept", addrKw, dns, interfaceName))
-		dnsAllowed = append(dnsAllowed,
-			fmt.Sprintf("%s daddr %s udp dport 53 oif %s accept", addrKw, dns, interfaceName))
-	}
-
-	rules := fmt.Sprintf(`
-table inet %s_dns {
-  chain dns_output {
-    type filter hook output priority -1; policy accept;
-    # Allow DNS to loopback (systemd-resolved stub at 127.0.0.53, local
-    # Pi-hole at 127.0.0.1, etc). Without this, systems using
-    # systemd-resolved would have ALL DNS blocked.
-    oif lo tcp dport 53 accept
-    oif lo udp dport 53 accept
-    %s
-    tcp dport 53 drop
-    udp dport 53 drop
-  }
-}
-`, nftTable, strings.Join(dnsAllowed, "\n    "))
-
-	if err := nftApply(rules); err != nil {
+	if err := nftApply(nftDNSRules(nftTable, allow)); err != nil {
 		return err
 	}
 	f.dnsProtectionEnabled = true
 	return nil
 }
 
+func (f *LinuxFirewall) disableDNSProtectionLocked() {
+	if out, err := nftDeleteDNSTable(); err != nil {
+		// "No such file or directory" in the output: already gone.
+		if !isNftNotFound(fmt.Errorf("%v: %s", err, out)) {
+			slog.Warn("nft delete dns table failed", "error", err, "output", strings.TrimSpace(string(out)))
+		}
+	}
+	f.dnsProtectionEnabled = false
+}
+
 func (f *LinuxFirewall) DisableDNSProtection() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// LOW: Log errors from nft delete
-	if out, err := nftDeleteDNSTable(); err != nil {
-		slog.Warn("nft delete dns table failed", "error", err, "output", strings.TrimSpace(string(out)))
-	}
-	f.dnsProtectionEnabled = false
+	f.disableDNSProtectionLocked()
 	return nil
 }
 

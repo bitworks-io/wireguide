@@ -126,11 +126,12 @@ func restoreBootTimeStub(t *testing.T, fn func() (time.Time, error)) {
 // calls the desired-state paths make; anything else panics on the nil embed.
 type pendingTestFirewall struct {
 	firewall.FirewallManager
-	mu          sync.Mutex
-	killSwitch  bool
-	dns         bool
-	ksIfaces    []string // interface passed to each EnableKillSwitch
-	dnsIfaceSet string
+	mu         sync.Mutex
+	killSwitch bool
+	dns        bool
+	ksIfaces   []string // interface passed to each EnableKillSwitch
+	dnsAllow   []firewall.DNSAllow
+	dnsEnables int
 }
 
 func (f *pendingTestFirewall) IsKillSwitchEnabled() bool {
@@ -150,6 +151,23 @@ func (f *pendingTestFirewall) EnableKillSwitch(iface string, _ []string, _ []str
 	defer f.mu.Unlock()
 	f.killSwitch = true
 	f.ksIfaces = append(f.ksIfaces, iface)
+	return nil
+}
+
+func (f *pendingTestFirewall) EnableDNSProtection(allow []firewall.DNSAllow) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dnsAllow = allow
+	f.dns = len(allow) > 0
+	f.dnsEnables++
+	return nil
+}
+
+func (f *pendingTestFirewall) DisableDNSProtection() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dns = false
+	f.dnsAllow = nil
 	return nil
 }
 
@@ -357,13 +375,14 @@ func stubRuleSaysOff(t *testing.T, off ...string) {
 	t.Cleanup(func() { restoreRuleSaysOff = prev })
 }
 
-// While a reconnect has the firewall suspended, a write must record what the
-// user had on, not the momentary "off".
+// While a reconnect has the kill switch suspended (and DNS rules may be
+// absent), a write must record what the user has on, not the momentary
+// "off".
 func TestPersistDesiredState_RecordsFirewallIntentDuringSuspend(t *testing.T) {
 	h := newPendingTestHelper(t)
 	h.activeCfgs["alpha"] = &domain.WireGuardConfig{Name: "alpha"}
 	h.fwSavedKillSwitch = true
-	h.fwSavedDNSProtection = true
+	h.dnsProtectionWanted = true
 	h.persistDesiredState()
 
 	got := loadDesiredIntent(h.dataDir)
