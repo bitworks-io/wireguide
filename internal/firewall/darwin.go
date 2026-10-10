@@ -200,10 +200,19 @@ func (f *DarwinFirewall) EnableKillSwitch(interfaceName string, _ []string, endp
 	}
 	rules, err := buildKillSwitchRulesForTunnels(tunnels)
 	if err != nil {
+		if !ownPf {
+			removePfStateFile() // nothing of ours is loaded
+		}
 		return err
 	}
 
 	if err := loadAnchorRules(anchorName, rules); err != nil {
+		if !ownPf {
+			// A first enable that loaded nothing must not leave the
+			// crash-recovery file behind: the next start would "recover"
+			// by flushing anchors and turning off a pf the user enabled.
+			removePfStateFile()
+		}
 		return fmt.Errorf("loading kill switch rules into anchor: %w", err)
 	}
 
@@ -460,6 +469,7 @@ func (f *DarwinFirewall) EnableDNSProtection(allow []DNSAllow) error {
 			}
 
 			if err := loadAnchorRules(anchorName, rules); err != nil {
+				removePfStateFile() // first enable loaded nothing; see EnableKillSwitch
 				return fmt.Errorf("loading DNS rules into anchor: %w", err)
 			}
 
