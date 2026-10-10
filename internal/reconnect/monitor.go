@@ -625,6 +625,19 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 			} else {
 				firewallWasSuspended = true
 			}
+			// The suspend can wait on the helper's connect lock for as long
+			// as a GUI Connect/Disconnect holds it. If the user cancelled
+			// this retry meanwhile (and maybe reconnected by hand), tearing
+			// the tunnel down below would undo that (issue #44).
+			if ctx.Err() != nil || m.cancelInvalidRetry(tunnelName, entry) {
+				slog.Info("reconnection cancelled during firewall suspend", "attempt", attempt)
+				if firewallWasSuspended && m.fwResumeFn != nil {
+					if err := m.fwResumeFn(); err != nil {
+						slog.Warn("failed to resume firewall after cancel", "error", err)
+					}
+				}
+				return
+			}
 		}
 
 		// Disconnect the specific tunnel (or first tunnel for legacy path).

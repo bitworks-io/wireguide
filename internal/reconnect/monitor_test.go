@@ -1097,3 +1097,37 @@ func TestSleepWake_DisconnectsEveryTunnel(t *testing.T) {
 		t.Fatalf("disconnected %d tunnels before reconnect, want 2", n)
 	}
 }
+
+// A retry cancelled while its firewall suspend was blocked (the helper's
+// connect lock was busy) must not go on to tear the tunnel down.
+func TestRetryCancelledDuringSuspendDoesNotDisconnect(t *testing.T) {
+	reconnectFn := func(_ context.Context, _ string) error { return nil }
+	mon, mgr, _ := newTestMonitor(testConfig(), reconnectFn)
+	mgr.setConnected(true, "alpha")
+	var disconnects, resumes atomic.Int32
+	mgr.disconnectFn = func() error { disconnects.Add(1); return nil }
+	inSuspend := make(chan struct{})
+	release := make(chan struct{})
+	mon.SetFirewallCallbacks(func() error {
+		close(inSuspend)
+		<-release // blocked on the helper's connect lock
+		return nil
+	}, func() error { resumes.Add(1); return nil })
+
+	mon.Start()
+	defer mon.Stop()
+	mon.triggerReconnectTunnel("alpha")
+
+	select {
+	case <-inSuspend:
+	case <-time.After(3 * time.Second):
+		t.Fatal("retry never reached the firewall suspend")
+	}
+	mon.CancelRetryFor("alpha") // the user's Disconnect
+	close(release)
+
+	waitFor(t, 2*time.Second, "firewall resumed after cancel", func() bool { return resumes.Load() == 1 })
+	if n := disconnects.Load(); n != 0 {
+		t.Fatalf("cancelled retry tore the tunnel down %d times", n)
+	}
+}

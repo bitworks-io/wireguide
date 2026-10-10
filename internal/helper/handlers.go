@@ -632,16 +632,21 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 			return nil, err
 		}
 	} else {
-		if err := h.firewall.DisableKillSwitch(); err != nil {
-			return nil, err
-		}
+		err := h.firewall.DisableKillSwitch()
 		// A reconnect in progress suspended the kill switch and will put
 		// it back on resume; the user's "off" must win over that (issue
 		// #44). suspend/resume read and write the flag under connectMu,
-		// which we hold.
-		h.mu.Lock()
-		h.fwSavedKillSwitch = false
-		h.mu.Unlock()
+		// which we hold. Keyed on the resulting state, not the error:
+		// Windows can report a failed rebuild of other filters after the
+		// kill switch itself is already gone.
+		if !h.firewall.IsKillSwitchEnabled() {
+			h.mu.Lock()
+			h.fwSavedKillSwitch = false
+			h.mu.Unlock()
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	// The firewall intent is part of what a crash-restore must bring back.
 	h.persistDesiredState()
