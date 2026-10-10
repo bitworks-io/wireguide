@@ -11,6 +11,7 @@ import (
 
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/firewall"
+	"github.com/korjwl1/wireguide/internal/network"
 )
 
 // reconcileTunnel is one CONNECTED tunnel as seen by the reconcile logic.
@@ -21,20 +22,53 @@ type reconcileTunnel struct {
 	Cfg   *domain.WireGuardConfig
 }
 
-// serverRoutedViaTunnel reports whether ip falls inside any peer AllowedIPs.
-func serverRoutedViaTunnel(cfg *domain.WireGuardConfig, ip net.IP) bool {
+// serverRoutedViaTunnel reports whether traffic to ip leaves through the
+// tunnel. locals (nil = none) is the snapshot of local physical addresses
+// (network.LocalPhysicalAddrs, only meaningful on macOS). Two LAN effects
+// are modelled:
+//   - AddRoutes skips an AllowedIPs range that overlaps the local network
+//     (network.LocalNetworkOverlapIn), so such a range routes nothing;
+//   - the connected LAN route is more specific than a broader range (0/0,
+//     the /1 pair, a supernet), so the tunnel only wins when the most
+//     specific non-skipped range containing ip is strictly longer than every
+//     same-family local on-link subnet containing ip.
+func serverRoutedViaTunnel(cfg *domain.WireGuardConfig, ip net.IP, locals []*net.IPNet) bool {
+	best := -1
 	for _, peer := range cfg.Peers {
 		for _, a := range peer.AllowedIPs {
 			_, cidr, err := net.ParseCIDR(strings.TrimSpace(a))
-			if err != nil {
+			if err != nil || !cidr.Contains(ip) {
 				continue
 			}
-			if cidr.Contains(ip) {
-				return true
+			if _, skipped := network.LocalNetworkOverlapIn(cidr.String(), locals); skipped {
+				continue
+			}
+			if ones, _ := cidr.Mask.Size(); ones > best {
+				best = ones
 			}
 		}
 	}
-	return false
+	if best < 0 {
+		return false
+	}
+	ipBits := net.IPv6len * 8
+	if ip.To4() != nil {
+		ipBits = net.IPv4len * 8
+	}
+	for _, l := range locals {
+		if l == nil || l.IP == nil || l.Mask == nil {
+			continue
+		}
+		lones, lbits := l.Mask.Size()
+		if lbits != ipBits {
+			continue
+		}
+		lan := &net.IPNet{IP: l.IP.Mask(l.Mask), Mask: l.Mask}
+		if lan.Contains(ip) && best <= lones {
+			return false
+		}
+	}
+	return true
 }
 
 // desiredDNSPermits computes the complete DNS permit set the firewall should
@@ -54,7 +88,11 @@ func serverRoutedViaTunnel(cfg *domain.WireGuardConfig, ip net.IP) bool {
 //     physical network, e.g. a split tunnel using 1.1.1.1;
 //   - the servers of split-DNS / unprotected tunnels that sit inside their
 //     own AllowedIPs, pinned, so another tunnel's block never breaks them.
-func desiredDNSPermits(tunnels []reconcileTunnel, goos string, dnsWanted bool) []firewall.DNSPermit {
+//
+// locals (nil = none) is the local physical address snapshot; servers the
+// LAN reaches instead of the tunnel (see serverRoutedViaTunnel) count as
+// off-tunnel.
+func desiredDNSPermits(tunnels []reconcileTunnel, goos string, dnsWanted bool, locals []*net.IPNet) []firewall.DNSPermit {
 	type entry struct {
 		t         reconcileTunnel
 		servers   []string
@@ -96,7 +134,7 @@ func desiredDNSPermits(tunnels []reconcileTunnel, goos string, dnsWanted bool) [
 			if ip == nil {
 				continue
 			}
-			inside := serverRoutedViaTunnel(e.t.Cfg, ip)
+			inside := serverRoutedViaTunnel(e.t.Cfg, ip, locals)
 			// Pin only when the server is actually routed through the
 			// tunnel. A default route in the OTHER address family (e.g. ::/0
 			// with an IPv4 resolver) does not route this server via the
@@ -116,6 +154,16 @@ func desiredDNSPermits(tunnels []reconcileTunnel, goos string, dnsWanted bool) [
 		return out[i].Server < out[j].Server
 	})
 	return out
+}
+
+// localAddrsFor returns the local physical address snapshot used to model
+// LAN-overlap route skipping. Only macOS skips such ranges. Enumerated once
+// per reconcile.
+func localAddrsFor(goos string) []*net.IPNet {
+	if goos != "darwin" {
+		return nil
+	}
+	return network.LocalPhysicalAddrs()
 }
 
 // reconcileDirtyKey marks a failed reconcile; see reconcileFirewallErrLocked.
@@ -274,7 +322,7 @@ func permitsEqual(a, b []firewall.DNSPermit) bool {
 func (h *Helper) applyDNSLocked(reason string, snap connSnapshot) error {
 	dnsWanted, _ := h.wantedState()
 	tunnels := snap.tunnels()
-	desired := desiredDNSPermits(tunnels, runtime.GOOS, dnsWanted)
+	desired := desiredDNSPermits(tunnels, runtime.GOOS, dnsWanted, localAddrsFor(runtime.GOOS))
 
 	// Nothing to do when the same set is already applied and the firewall
 	// agrees it is (not) active.

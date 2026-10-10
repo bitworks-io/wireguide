@@ -22,6 +22,7 @@ package helper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -30,6 +31,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -199,12 +201,49 @@ type Helper struct {
 	// report, so evaluation treats the SSID as unknown rather than acting
 	// on the old network's name. Guarded by wifiMu.
 	ssidStampGW string
+	// ssidFromGUI is set once the GUI has reported an SSID (macOS). The
+	// stamp and its staleness guard apply only then: on Linux/Windows the
+	// helper reads the SSID itself, so it is always fresh. Guarded by wifiMu.
+	ssidFromGUI bool
+	// guiAttachedFn, when set, replaces the server's control-connection
+	// check in guiAttached (tests only).
+	guiAttachedFn func() bool
+
+	// connectedFn, when set, replaces manager.ActiveTunnels() in the legacy
+	// reconnect path (tests only).
+	connectedFn func() []string
 
 	// reevalMu serialises Automation re-evaluations. The three triggers
 	// (SSID change, network change, poll) can fire concurrently; the
 	// lock ensures only one evaluation drives connect/disconnect at a
 	// time so they don't race on the same tunnel.
 	reevalMu sync.Mutex
+
+	// reevalTrigger, when set, replaces reevaluateAutomation for the
+	// rules-change watcher and the preview drift check (tests only).
+	reevalTrigger func(reason string)
+	// rulesWatchInterval overrides rulesWatchDefaultInterval; rulesStat
+	// replaces os.Stat of config.json (tests only).
+	rulesWatchInterval time.Duration
+	rulesStat          func(path string) (mtimeNano, size int64, err error)
+	// previewDriftMu guards previewDriftLast (rate limit for the preview's
+	// self-heal); previewDriftNow overrides time.Now (tests only).
+	previewDriftMu   sync.Mutex
+	previewDriftLast time.Time
+	previewDriftNow  func() time.Time
+
+	// settle tracks how long the network fingerprint has been stable so
+	// negated rules can wait out roam blips; settleTimer re-triggers a
+	// held evaluation when the window elapses. Both guarded by settleMu.
+	settleMu    sync.Mutex
+	settle      *wifi.SettleTracker
+	settleTimer *time.Timer
+
+	// manualOverride latches an explicit user connect/disconnect per tunnel
+	// (with the network identity it was made on) so automation doesn't undo
+	// it until the network settles on a different identity. Guarded by
+	// wifiMu.
+	manualOverride map[string]manualLatch
 
 	// userTunnelStore reads .conf files from the user's home dir
 	// (derived from the uid passed at launch). Needed so wifi rules
@@ -263,6 +302,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		activeCfgs:      make(map[string]*domain.WireGuardConfig),
 		latencyByTunnel: make(map[string]float64),
 		autoConnectedBy: make(map[string]string),
+		manualOverride:  make(map[string]manualLatch),
 		logLevel:        new(slog.LevelVar), // defaults to Info
 		done:            make(chan struct{}),
 		cleanupDone:     make(chan struct{}),
@@ -309,6 +349,7 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 	// Reconnect monitor — uses cached config
 	h.monitor = reconnect.NewMonitor(manager, h.reconnectFn, h.onReconnectState, reconnect.DefaultConfig())
 	h.monitor.SetFirewallCallbacks(h.suspendFirewall, h.resumeFirewall)
+	h.monitor.SetLegacyTeardown(h.legacyTeardown)
 	h.monitor.Start()
 
 	// Register RPC handlers
@@ -414,22 +455,27 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		default:
 		}
 		// Use the helper's known SSID (reported by the GUI on macOS 14+,
-		// polled elsewhere) rather than a direct read. Skip only when the
-		// network is entirely unknown — acting on an unknown SSID would
-		// let none_match rules disconnect a freshly crash-recovered
-		// tunnel before we know what network we're on. Subnet-only rules
-		// still get their first evaluation from the network-change / poll
-		// trigger below.
+		// polled elsewhere) rather than a direct read. With an unknown
+		// SSID, skip unless a tunnel has a negated rule: negated rules
+		// hold on unknown input (and a blank SSID on Ethernet/tethering is
+		// a known value), but a none_match rule would act on the unknown
+		// network and could disconnect a freshly crash-recovered tunnel.
+		// Subnet-only rules still get their first evaluation from the
+		// network-change / poll trigger below.
 		ssid := ""
 		if h.wifiMon != nil {
 			ssid = h.wifiMon.LastSSID()
 		}
-		if ssid == "" {
+		if ssid == "" && !h.anyNegatedRules() {
 			return
 		}
 		slog.Info("startup rule re-evaluation", "ssid", ssid)
 		h.reevaluateAutomation("startup")
 	})
+
+	// Rules-change trigger: nothing else re-evaluates when the user saves
+	// new Automation rules, so the settle tracker would never see them.
+	h.goSafe("automationRulesWatch", h.rulesWatchLoop)
 
 	// Hybrid subnet-rule trigger. Subnet-based Automation conditions must
 	// re-evaluate when the physical network changes even if the SSID
@@ -552,23 +598,224 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("reconnect %q cancelled before Connect: %w", name, err)
 		}
-		return connectLocked(cfg)
+		return alreadyConnectedIsOK(connectLocked(cfg))
 	}
 
-	// Legacy path: reconnect all tunnels.
+	// Legacy path: restore the cached tunnels that are down. Tunnels that
+	// automation governs are left to it (it is re-evaluated afterwards), as
+	// are tunnels the user disconnected on purpose; tunnels that are still
+	// connected are simply skipped.
 	if len(cfgs) == 0 {
-		return fmt.Errorf("no cached config for reconnect")
+		return reconnect.ErrNothingToReconnect
 	}
+	deferToAutomation := false
+	defer func() {
+		if !deferToAutomation {
+			return
+		}
+		// Asynchronously and WITHOUT connectMu: lock order is
+		// reevalMu -> connectMu, never the reverse.
+		h.goSafe("reconnectReevaluate", func() {
+			select {
+			case <-h.done:
+				return
+			default:
+			}
+			h.reevaluateAutomation("reconnect")
+		})
+	}()
+
+	if err := waitForDefaultRoute(ctx, gatewayWaitBudget); err != nil {
+		return fmt.Errorf("reconnect-all cancelled waiting for a default route: %w", err)
+	}
+
+	connected := make(map[string]bool)
+	for _, n := range h.connectedTunnels() {
+		connected[n] = true
+	}
+	ruleTunnels := h.automationRuleTunnels()
+	names := make([]string, 0, len(cfgs))
+	for n := range cfgs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	var netCtx *wifi.NetworkContext
 	var lastErr error
-	for _, cfg := range cfgs {
+	attempted := 0
+	for _, n := range names {
+		cfg := cfgs[n]
+		latch, latched := h.manualLatchFor(n)
+		if connected[n] {
+			// A connected tunnel that automation or the user owns was left
+			// alone by legacyTeardown; the network may have changed under
+			// it, so make sure automation re-evaluates.
+			if latched || ruleTunnels[n] {
+				deferToAutomation = true
+			}
+			continue
+		}
+		if latched && latch.disconnected {
+			slog.Info("legacy reconnect: skipping tunnel the user disconnected", "tunnel", n)
+			continue
+		}
+		if ruleTunnels[n] && !latched {
+			// Defer only when automation will actually decide this tunnel
+			// (connect/disconnect, or held until the network settles). If
+			// its rules don't apply here (unmanaged) automation does
+			// nothing, so the legacy path must restore it.
+			if netCtx == nil {
+				c := h.currentNetworkContext()
+				netCtx = &c
+			}
+			state, info := wifi.EvaluateDetailed(h.automationRules(n), *netCtx)
+			if state != wifi.StateUnmanaged || info.Held {
+				slog.Info("legacy reconnect: leaving tunnel to automation", "tunnel", n)
+				deferToAutomation = true
+				continue
+			}
+		}
+		if cidr, addr, overlaps := overlapsLocalNetwork(cfg); overlaps {
+			slog.Info("legacy reconnect: skipping tunnel whose AllowedIPs overlap the local network",
+				"tunnel", n, "cidr", cidr, "local_address", addr.String())
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("reconnect-all cancelled mid-loop: %w", err)
 		}
-		if err := connectLocked(cfg); err != nil {
+		attempted++
+		if err := alreadyConnectedIsOK(connectLocked(cfg)); err != nil {
 			lastErr = err
 		}
 	}
+	if lastErr == nil && attempted == 0 && !deferToAutomation {
+		allConnected := true
+		for _, n := range names {
+			if !connected[n] {
+				allConnected = false
+			}
+		}
+		if !allConnected {
+			// Everything still down was skipped on purpose.
+			return reconnect.ErrNothingToReconnect
+		}
+	}
 	return lastErr
+}
+
+// legacyTeardown is the reconnect monitor's teardown for the legacy
+// wake/interface-change path. Instead of dropping an arbitrary tunnel it
+// tears down only the connected tunnels that no one else owns, so
+// reconnectFn("") can rebuild them on the new network. Tunnels governed by
+// automation rules or held by a manual latch are left untouched: automation
+// decides them (it is re-evaluated after the legacy attempt), and bouncing
+// them would only cause an outage on every network blip.
+func (h *Helper) legacyTeardown() error {
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
+	return h.legacyTeardownWith(h.connectedTunnels(), h.manager.DisconnectTunnel)
+}
+
+// connectedTunnels lists the currently connected tunnels (test seam:
+// connectedFn overrides the manager).
+func (h *Helper) connectedTunnels() []string {
+	if h.connectedFn != nil {
+		return h.connectedFn()
+	}
+	return h.manager.ActiveTunnels()
+}
+
+// legacyTeardownWith implements legacyTeardown over an explicit set of
+// connected tunnels. Caller MUST hold h.connectMu.
+func (h *Helper) legacyTeardownWith(active []string, disconnect func(string) error) error {
+	ruleTunnels := h.automationRuleTunnels()
+	for _, n := range active {
+		if _, latched := h.manualLatchFor(n); latched || ruleTunnels[n] {
+			slog.Info("legacy reconnect: leaving connected tunnel untouched (owned by automation or manual choice)",
+				"tunnel", n, "latched", latched)
+			continue
+		}
+		if err := disconnect(n); err != nil {
+			var te *tunnel.TunnelError
+			if errors.As(err, &te) && te.Kind == tunnel.ErrNotConnected {
+				continue
+			}
+			return fmt.Errorf("legacy reconnect teardown of %q: %w", n, err)
+		}
+	}
+	return nil
+}
+
+// guiAttached reports whether a GUI control connection is attached. Safe on
+// a helper without a server (tests).
+func (h *Helper) guiAttached() bool {
+	if h.guiAttachedFn != nil {
+		return h.guiAttachedFn()
+	}
+	return h.server != nil && h.server.HasControlConn()
+}
+
+// alreadyConnectedIsOK maps tunnel.ErrAlreadyConnected to success: the
+// reconnect's goal (the tunnel is up) already holds, so it must not count
+// as a failed attempt that backs off and retries.
+func alreadyConnectedIsOK(err error) error {
+	var te *tunnel.TunnelError
+	if errors.As(err, &te) && te.Kind == tunnel.ErrAlreadyConnected {
+		return nil
+	}
+	return err
+}
+
+// anyNegatedRules reports whether any tunnel has a negated automation rule.
+func (h *Helper) anyNegatedRules() bool {
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return false
+	}
+	settings.EnsureAutomation()
+	if settings.Automation == nil {
+		return false
+	}
+	for _, rules := range settings.Automation.PerTunnel {
+		if wifi.HasNegated(rules) {
+			return true
+		}
+	}
+	return false
+}
+
+// automationRules returns tunnel name's automation rules (nil when settings
+// can't be read).
+func (h *Helper) automationRules(name string) []wifi.Rule {
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return nil
+	}
+	settings.EnsureAutomation()
+	if settings.Automation == nil {
+		return nil
+	}
+	return settings.Automation.PerTunnel[name]
+}
+
+// automationRuleTunnels returns the set of tunnels that have automation
+// rules (empty when settings can't be read).
+func (h *Helper) automationRuleTunnels() map[string]bool {
+	out := map[string]bool{}
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return out
+	}
+	settings.EnsureAutomation()
+	if settings.Automation == nil {
+		return out
+	}
+	for name, rules := range settings.Automation.PerTunnel {
+		if len(rules) > 0 {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // copyActiveCfgs returns a shallow copy of the active configs map.
@@ -720,6 +967,7 @@ func (h *Helper) cleanup() {
 		if h.wifiMon != nil {
 			h.wifiMon.Stop()
 		}
+		h.stopSettleTimer()
 		network.UnsubscribeNetworkChange("automation")
 		h.monitor.Stop()
 		// Tear down tunnels BEFORE removing kill-switch / pf rules.

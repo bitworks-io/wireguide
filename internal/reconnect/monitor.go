@@ -3,6 +3,7 @@ package reconnect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -50,6 +51,12 @@ type State struct {
 	MaxAttempts  int    `json:"max_attempts"`
 	NextRetry    string `json:"next_retry"`
 }
+
+// ErrNothingToReconnect is returned by a ReconnectFunc when there is no
+// tunnel left that it should restore (nothing cached, or every candidate
+// is owned by automation or was disconnected on purpose). The legacy
+// all-tunnels retry ends instead of backing off forever.
+var ErrNothingToReconnect = errors.New("nothing to reconnect")
 
 // ReconnectFunc is called to perform the actual reconnection of a specific
 // tunnel identified by name. The ctx is the same ctx the monitor created for
@@ -101,6 +108,7 @@ type Monitor struct {
 	cfg             Config
 	manager         TunnelManager
 	reconnectFn     ReconnectFunc
+	legacyTeardown  func() error
 	statusFn        StatusChangedFunc
 	fwSuspendFn     FirewallSuspendFunc
 	fwResumeFn      FirewallResumeFunc
@@ -147,6 +155,17 @@ func (m *Monitor) SetFirewallCallbacks(suspend FirewallSuspendFunc, resume Firew
 	defer m.mu.Unlock()
 	m.fwSuspendFn = suspend
 	m.fwResumeFn = resume
+}
+
+// SetLegacyTeardown installs the teardown used by the legacy all-tunnels
+// path (tunnelName == "") INSTEAD of manager.Disconnect(). It lets the owner
+// decide which tunnels may be torn down (e.g. leave automation-owned tunnels
+// alone). A nil error, or ErrNotConnected, counts as success. Must be called
+// before Start().
+func (m *Monitor) SetLegacyTeardown(fn func() error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.legacyTeardown = fn
 }
 
 // SetHealthCheck enables or disables the periodic handshake age check.
@@ -587,7 +606,30 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		if tunnelName != "" {
 			disconnectErr = m.manager.DisconnectTunnel(tunnelName)
 		} else {
-			disconnectErr = m.manager.Disconnect()
+			m.mu.Lock()
+			teardown := m.legacyTeardown
+			m.mu.Unlock()
+			if teardown != nil {
+				// First attempt only: the hook bounces every plain connected
+				// tunnel, so repeating it on later attempts would keep
+				// dropping tunnels that were already rebuilt while another
+				// one stays unreachable. Later attempts let reconnectFn("")
+				// restore just the tunnels that are still down.
+				if attempt == 1 {
+					disconnectErr = teardown()
+				}
+			} else {
+				disconnectErr = m.manager.Disconnect()
+			}
+		}
+		// ErrNotConnected only means there is nothing to tear down: on the
+		// legacy path everything is already down, and on the per-tunnel path
+		// an earlier attempt's failed connect removed the tunnel. Fall
+		// through to the reconnect step (the helper decides from its cached
+		// configs whether anything is left to restore); treating it as a
+		// teardown failure would back off forever without ever reconnecting.
+		if disconnectErr != nil && isNotConnected(disconnectErr) {
+			disconnectErr = nil
 		}
 		if disconnectErr != nil {
 			slog.Warn("pre-reconnect disconnect failed; will retry after backoff",
@@ -615,6 +657,19 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		// Attempt reconnection — pass tunnel name so only the specific
 		// tunnel is reconnected when doing per-tunnel health recovery.
 		if err := m.reconnectFn(ctx, tunnelName); err != nil {
+			if errors.Is(err, ErrNothingToReconnect) {
+				// Nothing left to restore: end this retry rather than
+				// cycling (and suspending the firewall) forever.
+				slog.Info("reconnect retry ended: nothing to reconnect", "tunnel", tunnelName, "attempt", attempt)
+				resumeFirewall("nothing to reconnect")
+				m.notifyStatus(State{Reconnecting: false})
+				m.mu.Lock()
+				if cur, ok := m.retries[tunnelName]; ok && cur == entry {
+					delete(m.retries, tunnelName)
+				}
+				m.mu.Unlock()
+				return
+			}
 			slog.Warn("reconnection failed", "attempt", attempt, "tunnel", tunnelName, "error", err)
 			// Re-enable firewall after failed attempt so the system stays
 			// protected between retries.
@@ -680,6 +735,13 @@ func (m *Monitor) triggerLoop() {
 			}
 		}
 	}
+}
+
+// isNotConnected reports whether err is the tunnel manager's "nothing is
+// connected" error.
+func isNotConnected(err error) bool {
+	var te *tunnel.TunnelError
+	return errors.As(err, &te) && te.Kind == tunnel.ErrNotConnected
 }
 
 func (m *Monitor) notifyStatus(state State) {
