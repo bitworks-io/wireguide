@@ -406,7 +406,11 @@ func (h *Helper) restoreDesiredTunnels() {
 	if !h.restoreOnStart {
 		slog.Info("desired-state: fresh helper start (not a crash respawn); clearing",
 			"tunnels", names)
-		clearDesiredState(h.dataDir)
+		// Rewrite from what is actually up rather than delete: a GUI
+		// Connect may already have landed and written its own entry.
+		h.connectMu.Lock()
+		h.persistDesiredState()
+		h.connectMu.Unlock()
 		return
 	}
 

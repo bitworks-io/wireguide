@@ -518,3 +518,53 @@ func TestRestoreDesiredTunnels_FreshStartClearsInsteadOfRestoring(t *testing.T) 
 	}
 	assertDesiredState(t, h)
 }
+
+// A wake retry tore alpha down and keeps trying to bring it back from the
+// cache. The user's Disconnect must stick: success, and alpha leaves the
+// cache and the file, so neither the retry nor a crash-restore revives it.
+func TestHandleDisconnect_TunnelAlreadyDownDuringRetry(t *testing.T) {
+	h := newPendingTestHelper(t, "alpha")
+	h.activeCfgs["alpha"] = &domain.WireGuardConfig{Name: "alpha"}
+	h.persistDesiredState()
+
+	params, _ := json.Marshal(ipc.DisconnectRequest{TunnelName: "alpha"})
+	if _, err := h.handleDisconnect(params); err != nil {
+		t.Fatalf("disconnect of a cached, already-down tunnel should succeed: %v", err)
+	}
+	if h.activeCfgs["alpha"] != nil {
+		t.Fatal("alpha must leave the cache")
+	}
+	assertDesiredState(t, h)
+
+	// A tunnel the helper knows nothing about is still an error.
+	params, _ = json.Marshal(ipc.DisconnectRequest{TunnelName: "ghost"})
+	if _, err := h.handleDisconnect(params); err == nil {
+		t.Fatal("disconnect of an unknown tunnel should still fail")
+	}
+}
+
+// Kill switch turned off while a reconnect has it suspended: resume must
+// not put it back, and the file must not record it as on.
+func TestKillSwitchOffDuringSuspendIsNotUndoneByResume(t *testing.T) {
+	h := newPendingTestHelper(t)
+	_ = h.firewall.EnableKillSwitch("", nil, nil)
+	if err := h.suspendFirewall(); err != nil {
+		t.Fatal(err)
+	}
+
+	params, _ := json.Marshal(ipc.KillSwitchRequest{Enabled: false})
+	if _, err := h.handleSetKillSwitch(params); err != nil {
+		t.Fatal(err)
+	}
+	h.activeCfgs["alpha"] = &domain.WireGuardConfig{Name: "alpha"}
+	h.persistDesiredState()
+	if loadDesiredIntent(h.dataDir).KillSwitch {
+		t.Fatal("file records the kill switch as on after the user turned it off")
+	}
+	if err := h.resumeFirewall(); err != nil {
+		t.Fatal(err)
+	}
+	if h.firewall.IsKillSwitchEnabled() {
+		t.Fatal("resume re-enabled a kill switch the user turned off")
+	}
+}

@@ -2,6 +2,7 @@ package helper
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/tunnel"
 	"github.com/korjwl1/wireguide/internal/update"
 	"github.com/korjwl1/wireguide/internal/wifi"
 )
@@ -497,11 +499,28 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 
 	if tunnelName != "" {
 		if err := h.manager.DisconnectTunnel(tunnelName); err != nil {
-			return nil, err
+			// A wake retry may already have torn the tunnel down and still
+			// be trying to bring it back from activeCfgs. The user's "off"
+			// stands: drop the cached config below so the retry can't
+			// reconnect it (issue #44). Anything else is a real failure.
+			h.mu.Lock()
+			_, cached := h.activeCfgs[tunnelName]
+			h.mu.Unlock()
+			var te *tunnel.TunnelError
+			if !cached || !errors.As(err, &te) || te.Kind != tunnel.ErrNotConnected {
+				return nil, err
+			}
+			slog.Info("disconnect: tunnel already down (retry pending); dropping it", "tunnel", tunnelName)
 		}
 		h.mu.Lock()
 		delete(h.activeCfgs, tunnelName)
+		nothingLeft := len(h.activeCfgs) == 0 && len(h.pendingDesired) == 0
 		h.mu.Unlock()
+		if nothingLeft && h.monitor != nil {
+			// The all-tunnels retry has nothing left to bring back; stop it
+			// instead of letting it back off forever on an empty cache.
+			h.monitor.CancelRetry()
+		}
 		h.wifiMu.Lock()
 		delete(h.autoConnectedBy, tunnelName)
 		h.wifiMu.Unlock()
@@ -537,6 +556,20 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 			delete(h.latencyByTunnel, name)
 			h.latencyMu.Unlock()
 		}
+		// Cached tunnels that aren't up — a wake retry tore them down and
+		// is trying to bring them back — are part of "disconnect all" too;
+		// left in activeCfgs, the next wake trigger would reconnect them.
+		stillUp := make(map[string]bool)
+		for _, name := range h.manager.ActiveTunnels() {
+			stillUp[name] = true
+		}
+		h.mu.Lock()
+		for name := range h.activeCfgs {
+			if !stillUp[name] {
+				delete(h.activeCfgs, name)
+			}
+		}
+		h.mu.Unlock()
 		if firstErr != nil {
 			// Record the tunnels that did go down; the failed ones are
 			// still in activeCfgs and stay listed.
@@ -585,6 +618,14 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 	var req ipc.KillSwitchRequest
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, err
+	}
+	if !req.Enabled {
+		// A reconnect in progress suspended the kill switch and will put it
+		// back on resume; the user's "off" must win over that (issue #44).
+		// resumeFirewall reads the flag under connectMu, which we hold.
+		h.mu.Lock()
+		h.fwSavedKillSwitch = false
+		h.mu.Unlock()
 	}
 	if req.Enabled {
 		// Enable should work regardless of tunnel state. If no tunnel is

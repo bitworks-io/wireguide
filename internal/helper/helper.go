@@ -227,7 +227,7 @@ type Helper struct {
 // ownerSID: spawning user's SID (Windows only, "" on Unix) — scopes the
 // pipe ACL and per-connection peer checks to that user (issue #20).
 // dataDir: persistent data dir for crash recovery state.
-func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired bool) error {
+func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired bool) (runErr error) {
 	// wireguard-go allocates sizeable per-Device transient buffer pools. With
 	// the runtime default GOGC=100, repeated connect/disconnect on a long-lived
 	// helper retained hundreds of MiB of reclaimable heap before GC caught up
@@ -475,6 +475,11 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired boo
 			slog.Error("helper Run panic",
 				"panic", fmt.Sprintf("%v", r),
 				"stack", string(debug.Stack()))
+			// Exit non-zero: the LaunchDaemon restarts only on an
+			// unsuccessful exit, and the restarted helper restores the
+			// tunnels this one had (issue #44). Returning nil made main
+			// exit 0, so a panic looked like a clean Quit.
+			runErr = fmt.Errorf("helper panic: %v", r)
 		}
 	}()
 
@@ -778,6 +783,11 @@ func (h *Helper) suspendFirewall() error {
 // reconnect suspend. It reads the NEW interface name and endpoints from the
 // tunnel manager so the pf rules match the newly created utun interface.
 func (h *Helper) resumeFirewall() error {
+	// The kill-switch half is read and acted on under connectMu, so a user
+	// turning the kill switch off mid-reconnect (handleSetKillSwitch clears
+	// the flag under connectMu) can't be undone here (issue #44).
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
 	h.mu.Lock()
 	restoreKS := h.fwSavedKillSwitch
 	restoreDNS := h.fwSavedDNSProtection
@@ -808,12 +818,8 @@ func (h *Helper) resumeFirewall() error {
 		// several tunnels up, a single-interface EnableKillSwitch left the
 		// others fenced out after every wake. With none up (reconnect
 		// failed) this installs the base blockade, keeping the kill switch
-		// on instead of silently dropping it. The rebuild reads manager
-		// state, so hold connectMu like every other caller.
-		h.connectMu.Lock()
-		err := h.enableKillSwitchForActiveTunnels()
-		h.connectMu.Unlock()
-		if err != nil {
+		// on instead of silently dropping it. connectMu is held (above).
+		if err := h.enableKillSwitchForActiveTunnels(); err != nil {
 			slog.Error("resumeFirewall: failed to re-enable kill switch", "error", err)
 			return fmt.Errorf("resumeFirewall: enable kill switch: %w", err)
 		}
