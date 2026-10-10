@@ -62,6 +62,13 @@ const savedPfStateFile = "/Library/Application Support/wireguide/pf-was-enabled"
 // under the com.apple/ path is automatically evaluated. DNS protection
 // rules live in a sub-anchor `com.apple/wireguide/dns`.
 type DarwinFirewall struct {
+	// opMu serializes the mutating operations end to end. Each one reads
+	// state under mu, shells out to pfctl without it, then writes state
+	// back; two interleaved (e.g. a DNS re-apply loading the main anchor
+	// while the kill switch is being enabled) overwrote each other's rules
+	// and pf snapshot (issue #48). Linux and Windows hold their mu for the
+	// whole operation. Lock order: opMu before mu.
+	opMu                 sync.Mutex
 	mu                   sync.Mutex
 	killSwitchEnabled    bool
 	dnsProtectionEnabled bool
@@ -151,6 +158,9 @@ func buildKillSwitchRulesForTunnels(tunnels map[string][]string) (string, error)
 }
 
 func (f *DarwinFirewall) EnableKillSwitch(interfaceName string, _ []string, endpoints []string) error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	// Empty interfaceName is a valid input — the user toggled the kill
 	// switch on without an active tunnel. We install the base block-all
 	// set only; once a tunnel connects, AddKillSwitchTunnel folds its
@@ -171,9 +181,11 @@ func (f *DarwinFirewall) EnableKillSwitch(interfaceName string, _ []string, endp
 	f.mu.Unlock()
 	if !ownPf {
 		pfWas = isPfEnabled()
-		if err := persistPfEnabledState(pfWas); err != nil {
-			slog.Warn("failed to persist pf enabled state to disk", "error", err)
-		}
+	}
+	// Always (re-)write the crash-recovery file; with ownPf it may have
+	// been removed by a failed reload while our rules stayed loaded.
+	if err := persistPfEnabledState(pfWas); err != nil {
+		slog.Warn("failed to persist pf enabled state to disk", "error", err)
 	}
 
 	// Ensure the default pf ruleset is loaded so our anchor is
@@ -241,6 +253,9 @@ func (f *DarwinFirewall) reapplyDNSSubAnchorIfActive() {
 // No-op when the kill switch isn't enabled (handleConnect should gate
 // on IsKillSwitchEnabled before calling, but be defensive).
 func (f *DarwinFirewall) AddKillSwitchTunnel(interfaceName string, _ []string, endpoints []string) error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	if interfaceName == "" {
 		return fmt.Errorf("AddKillSwitchTunnel: empty interface name")
 	}
@@ -276,6 +291,9 @@ func (f *DarwinFirewall) AddKillSwitchTunnel(interfaceName string, _ []string, e
 // RemoveKillSwitchTunnel rebuilds the anchor without the disconnected
 // tunnel's permits while preserving every other active utun.
 func (f *DarwinFirewall) RemoveKillSwitchTunnel(interfaceName string) error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	f.mu.Lock()
 	if !f.killSwitchEnabled {
 		f.mu.Unlock()
@@ -334,6 +352,9 @@ func (f *DarwinFirewall) EnableEndpointProtection(string, []string) error { retu
 func (f *DarwinFirewall) DisableEndpointProtection(string) error { return nil }
 
 func (f *DarwinFirewall) DisableKillSwitch() error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	f.mu.Lock()
 	pfWas := f.pfWasEnabled
 	dnsActive := f.dnsProtectionEnabled
@@ -383,9 +404,12 @@ func (f *DarwinFirewall) DisableKillSwitch() error {
 }
 
 func (f *DarwinFirewall) EnableDNSProtection(allow []DNSAllow) error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	allow = normalizeDNSAllow(allow, validIfaceName.MatchString)
 	if len(allow) == 0 {
-		return f.DisableDNSProtection()
+		return f.disableDNSProtection()
 	}
 	rules := pfDNSRules(allow)
 
@@ -410,6 +434,15 @@ func (f *DarwinFirewall) EnableDNSProtection(allow []DNSAllow) error {
 			// as the user's, and disable would then leave pf on forever.
 			// pf is still (re-)enabled: a failed reload in DisableKillSwitch
 			// turns it off while DNS protection stays on.
+			// Re-write the crash-recovery file from the kept snapshot: a
+			// failed reload in DisableKillSwitch removes it while our rules
+			// stay, and without it crash recovery wouldn't flush them.
+			f.mu.Lock()
+			pfWas := f.pfWasEnabled
+			f.mu.Unlock()
+			if err := persistPfEnabledState(pfWas); err != nil {
+				slog.Warn("failed to persist pf enabled state to disk", "error", err)
+			}
 			if err := loadAnchorRules(anchorName, rules); err != nil {
 				return fmt.Errorf("loading DNS rules into anchor: %w", err)
 			}
@@ -449,6 +482,13 @@ func (f *DarwinFirewall) EnableDNSProtection(allow []DNSAllow) error {
 }
 
 func (f *DarwinFirewall) DisableDNSProtection() error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+	return f.disableDNSProtection()
+}
+
+// disableDNSProtection is DisableDNSProtection's body. Caller MUST hold opMu.
+func (f *DarwinFirewall) disableDNSProtection() error {
 	// Snapshot state under lock.
 	f.mu.Lock()
 	ksEnabled := f.killSwitchEnabled
@@ -503,6 +543,9 @@ func (f *DarwinFirewall) IsDNSProtectionEnabled() bool {
 }
 
 func (f *DarwinFirewall) Cleanup() error {
+	f.opMu.Lock()
+	defer f.opMu.Unlock()
+
 	// Snapshot what was active under the lock, but do NOT zero the cached
 	// DNS interface/servers yet — if flushAllAnchors fails, a follow-up
 	// resumeFirewall would need that info to re-apply DNS protection.

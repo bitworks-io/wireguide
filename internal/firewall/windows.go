@@ -1106,9 +1106,9 @@ func (f *WindowsFirewall) disableDNSProtectionLocked() error {
 	// it left the port-53 block filters installed — so a user who then
 	// switched to a non-whitelisted resolver silently lost all DNS.
 	if len(f.dnsFilterIDs) == 0 {
-		// Nothing tracked. If no kill switch is holding the session
-		// open, close it so we don't leak an idle dynamic session.
-		if !f.killSwitchEnabled {
+		// Nothing tracked. Close the session only if nothing else lives
+		// in it, so we don't leak an idle dynamic session.
+		if f.sessionIdleLocked() {
 			f.closeSession()
 		}
 		return nil
@@ -1139,12 +1139,22 @@ func (f *WindowsFirewall) disableDNSProtectionLocked() error {
 	committed = true
 	f.dnsFilterIDs = nil
 
-	// If the kill switch isn't holding the session, close it now that the
-	// DNS filters are gone.
-	if !f.killSwitchEnabled {
+	// Close the session now that the DNS filters are gone — but only if
+	// nothing else lives in it.
+	if f.sessionIdleLocked() {
 		f.closeSession()
 	}
 	return nil
+}
+
+// sessionIdleLocked reports whether the dynamic session holds nothing:
+// no kill switch, no endpoint (routing-loop) protection, no DNS filters.
+// Closing it cascades every filter, and endpoint protection shares it —
+// checking only the kill switch here dropped loop protection whenever DNS
+// protection was turned off or re-applied empty (issue #48). Caller MUST
+// hold f.mu.
+func (f *WindowsFirewall) sessionIdleLocked() bool {
+	return !f.killSwitchEnabled && len(f.endpointProtectionFilterIDs) == 0 && len(f.dnsFilterIDs) == 0
 }
 
 func (f *WindowsFirewall) IsKillSwitchEnabled() bool {

@@ -84,6 +84,13 @@ func (h *Helper) dnsProtectionNeeded() bool {
 func (h *Helper) reapplyDNSProtection() error {
 	h.dnsMu.Lock()
 	defer h.dnsMu.Unlock()
+	select {
+	case <-h.done:
+		// Shutdown began: cleanup tears the firewall down, and a connect
+		// finishing late must not put DNS rules back after it.
+		return nil
+	default:
+	}
 	if !h.dnsProtectionNeeded() {
 		if h.firewall.IsDNSProtectionEnabled() {
 			return h.firewall.DisableDNSProtection()
