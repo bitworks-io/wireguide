@@ -84,10 +84,31 @@ export class Condition {
         }
         if (/** @type {any} */(false)) {
             /**
+             * Negate inverts an ssid/subnet/network/medium condition ("is not"). A negated
+             * rule matches only when its input is KNOWN and different; when the input
+             * is unknown (blank SSID during a roam, unsettled network) Evaluate holds
+             * instead of falling through. Not valid on none_match.
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["negate"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * @member
              * @type {string | undefined}
              */
             this["ssid"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * SSIDs extends an ssid condition to a set: it matches any of
+             * {SSID} ∪ SSIDs (case-insensitive). Writers use SSID for a single
+             * network and SSIDs (SSID empty) for several.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["ssids"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**
@@ -117,6 +138,15 @@ export class Condition {
              */
             this["label"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Medium is the connection type for a medium condition: wifi, wired
+             * or tethered.
+             * @member
+             * @type {string | undefined}
+             */
+            this["medium"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -127,7 +157,11 @@ export class Condition {
      * @returns {Condition}
      */
     static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("ssids" in $$parsedSource) {
+            $$parsedSource["ssids"] = $$createField3_0($$parsedSource["ssids"]);
+        }
         return new Condition(/** @type {Partial<Condition>} */($$parsedSource));
     }
 }
@@ -165,7 +199,7 @@ export class Rule {
      * @returns {Rule}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType3;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("when" in $$parsedSource) {
             $$parsedSource["when"] = $$createField0_0($$parsedSource["when"]);
@@ -212,7 +246,7 @@ export class Rules {
      * @returns {Rules}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType4;
+        const $$createField0_0 = $$createType3;
         const $$createField1_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("trusted_ssids" in $$parsedSource) {
@@ -293,7 +327,7 @@ export class TunnelSSIDs {
      * @returns {TunnelSSIDs}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType4;
+        const $$createField0_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("auto_connect_ssids" in $$parsedSource) {
             $$parsedSource["auto_connect_ssids"] = $$createField0_0($$parsedSource["auto_connect_ssids"]);
@@ -306,7 +340,7 @@ export class TunnelSSIDs {
 const $$createType0 = Rule.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Map($Create.Any, $$createType1);
-const $$createType3 = Condition.createFrom;
-const $$createType4 = $Create.Array($Create.Any);
+const $$createType3 = $Create.Array($Create.Any);
+const $$createType4 = Condition.createFrom;
 const $$createType5 = TunnelSSIDs.createFrom;
 const $$createType6 = $Create.Map($Create.Any, $$createType5);

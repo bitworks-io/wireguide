@@ -21,24 +21,26 @@ import * as update$0 from "../../../../korjwl1/wireguide/internal/update/models.
 
 function configure() {
     Object.freeze(Object.assign($Create.Events, {
-        "files-dropped": $$createType0,
-        "helper": $$createType1,
-        "log": $$createType2,
-        "reconnect": $$createType3,
-        "settings_changed": $$createType4,
-        "status": $$createType5,
-        "update-available": $$createType6,
-        "update_progress": $$createType0,
+        "automation_event": $$createType0,
+        "files-dropped": $$createType1,
+        "helper": $$createType2,
+        "log": $$createType3,
+        "reconnect": $$createType4,
+        "settings_changed": $$createType5,
+        "status": $$createType6,
+        "update-available": $$createType7,
+        "update_progress": $$createType1,
     }));
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Map($Create.Any, $Create.Any);
-const $$createType1 = gui$0.HelperEvent.createFrom;
-const $$createType2 = ipc$0.LogEntry.createFrom;
-const $$createType3 = gui$0.ReconnectEvent.createFrom;
-const $$createType4 = ipc$0.SettingsChangedPayload.createFrom;
-const $$createType5 = domain$0.ConnectionStatus.createFrom;
-const $$createType6 = update$0.UpdateInfo.createFrom;
+const $$createType0 = ipc$0.AutomationEventPayload.createFrom;
+const $$createType1 = $Create.Map($Create.Any, $Create.Any);
+const $$createType2 = gui$0.HelperEvent.createFrom;
+const $$createType3 = ipc$0.LogEntry.createFrom;
+const $$createType4 = gui$0.ReconnectEvent.createFrom;
+const $$createType5 = ipc$0.SettingsChangedPayload.createFrom;
+const $$createType6 = domain$0.ConnectionStatus.createFrom;
+const $$createType7 = update$0.UpdateInfo.createFrom;
 
 configure();

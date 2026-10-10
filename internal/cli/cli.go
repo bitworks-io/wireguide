@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -71,8 +72,14 @@ func Run(args []string) int {
 		return cmdDNSLeak(rest)
 	case "routes":
 		return cmdRoutes(rest)
+	case "verify":
+		return cmdVerify(rest)
+	case "reset-dns":
+		return cmdResetDNS(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
+	case "diag":
+		return cmdDiag(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", cmd)
 		usage(os.Stderr)
@@ -103,6 +110,12 @@ Automation (per-tunnel connect/disconnect rules):
                                           append a rule; <cond> is one of:
                                             ssid:<wifi-name>   subnet:<CIDR>
                                             mac:<gateway-MAC>  else
+                                            'ssid:<a>|<b>'     any of several Wi-Fi names
+                                            medium:<wifi|wired|tethered>  connection type
+                                          or negated: not-ssid:<name> not-subnet:<CIDR>
+                                            not-mac:<MAC> 'not-ssid:<a>|<b>' not-medium:<m>
+                                            (matches only when the value is known and
+                                            different; unknown holds, see README)
   wireguide ctl automation rm <name> <n>  remove rule number <n> (from 'rules')
 
 Settings & diagnostics:
@@ -111,8 +124,16 @@ Settings & diagnostics:
   wireguide ctl set healthcheck <on|off>      handshake monitor + auto-reconnect
   wireguide ctl set pin-interface <on|off>    bind sockets to the upstream interface
   wireguide ctl set loglevel <debug|info|warn|error>
+  wireguide ctl reset-dns [--force]            remove WireGuide's firewall rules and split-DNS entries and
+                                               restore DNS (refuses while a tunnel is up; --force
+                                               disconnects tunnels first)
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
+  wireguide ctl diag bundle [--out path]       write a diagnostics zip (logs, redacted configs,
+                                               DNS/route/pf state); private keys are never included
+  wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]
+                                               check handshake, routes, split-DNS resolvers and
+                                               optionally ping / resolve a host (exit 1 on any red)
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]
@@ -122,6 +143,10 @@ Coding agents:
 Examples:
   wireguide ctl automation add work disconnect mac:b0:38:6c:54:8b:ab
   wireguide ctl automation add work connect else
+  wireguide ctl automation add vpn disconnect ssid:HomeWiFi
+  wireguide ctl automation add vpn connect not-ssid:HomeWiFi
+  wireguide ctl automation add vpn disconnect 'ssid:HomeWiFi|HomeWiFi-5G'
+  wireguide ctl automation add vpn connect not-medium:wired
 
 WireGuide must be running for connect/disconnect/status — start it with
 'wireguide ctl start' (or by opening the app). Nothing else starts it for you.
@@ -129,30 +154,92 @@ list, import, rename, delete and automation edits work against local files.
 `)
 }
 
-// dialHelper connects to the running helper's IPC socket. The CLI does not
-// spawn/elevate a helper itself — it attaches to the one the app started, so
-// a plain `ctl` invocation never triggers an admin prompt. Use `ctl start`
-// to bring the app up.
+// dialHelper connects to the running helper's IPC socket and requires that
+// the app is actually running. The CLI does not spawn/elevate a helper
+// itself — it attaches to the one the app started.
+//
+// On macOS the helper socket is owned by launchd, so a successful dial no
+// longer proves the app is running: the dial itself starts the helper. The
+// helper therefore reports whether a GUI is attached (PingResponse.GUIAttached)
+// and a helper without one is treated as "app not running" — the CLI never
+// acts through, or reports on, a helper nobody opened. (The probe may have
+// started that helper; it exits on its own after a short idle grace.)
 //
 // The client is TRANSIENT: the helper must not mistake a CLI command for a
 // GUI attaching and detaching. Without that, every `ctl` invocation would
 // re-arm the helper's 10s "GUI disconnected" shutdown window — a status
 // query would cut the helper's life short. See ipc.Request.Transient.
 func dialHelper() (*ipc.Client, error) {
-	addr := ipc.DefaultSocketPath()
-	c, err := ipc.NewTransientClient(addr)
+	c, ping, err := dialHelperRaw()
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach the WireGuide helper (is the app running?): %w", err)
+		return nil, err
 	}
-	// Confirm it's actually alive, not just a stale socket.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	var ping ipc.PingResponse
-	if err := c.CallWithContext(ctx, ipc.MethodPing, nil, &ping); err != nil {
+	// A helper with no GUI but a tunnel still up (the GUI crashed; tunnels
+	// outlive the app, wg-quick style) is live state the CLI must act on:
+	// delete/rename/set/disconnect all guard against exactly that tunnel.
+	// This is the same exception cmdStatus and cmdStop make.
+	if !appRunning(ping) && activeTunnelCount(c) <= 0 {
 		c.Close()
-		return nil, fmt.Errorf("the WireGuide helper is not responding (is the app running?): %w", err)
+		return nil, errAppNotRunning
 	}
 	return c, nil
+}
+
+// dialHelperStrict is dialHelper without the live-tunnel exception: it
+// succeeds only when a GUI is attached. cmdStart uses it, because a headless
+// helper holding a tunnel is not "the app is running".
+func dialHelperStrict() (*ipc.Client, error) {
+	c, ping, err := dialHelperRaw()
+	if err != nil {
+		return nil, err
+	}
+	if !appRunning(ping) {
+		c.Close()
+		return nil, errAppNotRunning
+	}
+	return c, nil
+}
+
+var errAppNotRunning = fmt.Errorf("WireGuide is not running (open the app, or run 'wireguide ctl start')")
+
+// appRunning interprets a ping: a helper that predates GUIAttached (protocol
+// minor < 2) cannot say, so it is assumed to have its app, as before.
+func appRunning(p ipc.PingResponse) bool {
+	return !p.GUIKnown() || p.GUIAttached
+}
+
+// helperSocketPath is a seam so tests can point the CLI at a private socket
+// (DefaultSocketPath is fixed on macOS).
+var helperSocketPath = ipc.DefaultSocketPath
+
+// dialHelperRaw connects and pings without judging whether a GUI is attached.
+func dialHelperRaw() (*ipc.Client, ipc.PingResponse, error) {
+	var ping ipc.PingResponse
+	addr := helperSocketPath()
+	// With launchd socket activation the connect succeeds immediately and
+	// the helper answers once it has started, so the dial's own initial
+	// ping gets the same budget as the explicit one below.
+	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout())
+	defer cancel()
+	c, err := ipc.NewTransientClientContext(ctx, addr)
+	if err != nil {
+		return nil, ping, fmt.Errorf("cannot reach the WireGuide helper (is the app running?): %w", err)
+	}
+	// Confirm it's actually alive, not just a stale socket.
+	if err := c.CallWithContext(ctx, ipc.MethodPing, nil, &ping); err != nil {
+		c.Close()
+		return nil, ping, fmt.Errorf("the WireGuide helper is not responding (is the app running?): %w", err)
+	}
+	return c, ping, nil
+}
+
+// pingTimeout is how long the CLI waits for a helper to answer. On macOS the
+// dial may be what starts the helper (launchd ThrottleInterval + startup).
+func pingTimeout() time.Duration {
+	if runtime.GOOS == "darwin" {
+		return 15 * time.Second
+	}
+	return 2 * time.Second
 }
 
 func tunnelStore() (*storage.TunnelStore, error) {
@@ -173,7 +260,7 @@ func tunnelStore() (*storage.TunnelStore, error) {
 func cmdStatus(args []string) int {
 	jsonOut := hasFlag(args, "--json")
 
-	c, err := dialHelper()
+	c, ping, err := dialHelperRaw()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -183,6 +270,13 @@ func cmdStatus(args []string) int {
 	var active ipc.ActiveTunnelsResponse
 	if err := c.Call(ipc.MethodActiveTunnels, nil, &active); err != nil {
 		fmt.Fprintln(os.Stderr, "status:", err)
+		return 1
+	}
+	// No app attached: report "not running" like every other command — unless
+	// a tunnel is still up. The helper deliberately keeps tunnels alive after
+	// the app quits (wg-quick semantics), and hiding one would be wrong.
+	if !appRunning(ping) && len(active.Names) == 0 {
+		fmt.Fprintln(os.Stderr, errAppNotRunning)
 		return 1
 	}
 	if len(active.Names) == 0 {
@@ -205,15 +299,42 @@ func cmdStatus(args []string) int {
 	if jsonOut {
 		return printJSON(rows)
 	}
+	dns := tunnelDNSModes(rows)
 	for _, r := range rows {
-		hs := r.LastHandshake
-		if hs == "" {
-			hs = "—"
-		}
-		fmt.Printf("● %s  %s  rx=%s tx=%s  handshake=%s\n",
-			r.TunnelName, r.Duration, humanBytes(r.RxBytes), humanBytes(r.TxBytes), hs)
+		fmt.Println(formatStatusRow(r, dns[r.TunnelName]))
 	}
 	return 0
+}
+
+// formatStatusRow renders one `ctl status` line. dns is the DNSMode
+// StatusString ("" when the config could not be read).
+func formatStatusRow(r domain.ConnectionStatus, dns string) string {
+	hs := r.LastHandshake
+	if hs == "" {
+		hs = "—"
+	}
+	line := fmt.Sprintf("● %s  %s  rx=%s tx=%s  handshake=%s",
+		r.TunnelName, r.Duration, humanBytes(r.RxBytes), humanBytes(r.TxBytes), hs)
+	if dns != "" {
+		line += "  dns=" + dns
+	}
+	return line
+}
+
+// tunnelDNSModes maps each row's tunnel to its intended DNS mode, read from
+// the stored config (no IPC). Unreadable configs are simply absent.
+func tunnelDNSModes(rows []domain.ConnectionStatus) map[string]string {
+	out := make(map[string]string, len(rows))
+	store, err := tunnelStore()
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		if cfg, err := store.Load(r.TunnelName); err == nil && cfg != nil {
+			out[r.TunnelName] = diag.DNSModeOf(cfg.Interface.DNS).StatusString()
+		}
+	}
+	return out
 }
 
 // tunnelListEntry is the --json shape for `ctl list`; domain.ConnectionStatus
@@ -323,7 +444,13 @@ func cmdConnect(args []string) int {
 	// Connect can take a while (handshake, route setup).
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if err := c.CallWithContext(ctx, ipc.MethodConnect, ipc.ConnectRequest{Config: cfg}, nil); err != nil {
+	// Carry the tunnel's health-check override like the GUI does.
+	req := ipc.ConnectRequest{Config: cfg}
+	if meta, merr := store.LoadMeta(name); merr == nil && meta != nil &&
+		(meta.HealthCheck == storage.HealthCheckOn || meta.HealthCheck == storage.HealthCheckOff) {
+		req.HealthCheck = meta.HealthCheck
+	}
+	if err := c.CallWithContext(ctx, ipc.MethodConnect, req, nil); err != nil {
 		fmt.Fprintln(os.Stderr, "connect:", err)
 		return 1
 	}
@@ -435,6 +562,19 @@ func automationPreview() int {
 		gwMAC = "(unknown)"
 	}
 	fmt.Printf("network context: ssid=%s  gateway-mac=%s  physical-ips=%v\n", ssid, gwMAC, resp.PhysicalIPs)
+	iface := resp.PrimaryIface
+	if iface == "" {
+		iface = "(unknown)"
+	}
+	settle := "settled"
+	if !resp.Settled {
+		settle = fmt.Sprintf("settling, %ds left (negated rules hold)", resp.SettleRemainingSec)
+	}
+	medium := resp.Medium
+	if medium == "" {
+		medium = "(unknown)"
+	}
+	fmt.Printf("                 primary=%s wifi=%v medium=%s online=%v  %s\n", iface, resp.PrimaryIsWiFi, medium, resp.Online, settle)
 	if len(resp.Tunnels) == 0 {
 		fmt.Println("no tunnels have automation rules")
 		return 0
@@ -444,8 +584,15 @@ func automationPreview() int {
 		if tdec.Active {
 			state = "up"
 		}
-		fmt.Printf("  %-28s rules=%d  currently=%s  decision=%s\n",
-			tdec.Name, tdec.RuleCount, state, tdec.Decision)
+		note := ""
+		switch {
+		case tdec.Latched:
+			note = "  (manual override: automation paused until the network changes)"
+		case tdec.Held:
+			note = "  (a negated rule can't be decided yet; leaving the tunnel alone)"
+		}
+		fmt.Printf("  %-28s rules=%d  currently=%s  decision=%s%s\n",
+			tdec.Name, tdec.RuleCount, state, tdec.Decision, note)
 	}
 	return 0
 }
@@ -483,13 +630,28 @@ func loadSettingsWithAutomation() (*storage.SettingsStore, *storage.Settings, er
 }
 
 func formatCondition(c wifi.Condition) string {
+	op := "="
+	if c.Negate {
+		op = "!="
+	}
 	switch c.Type {
 	case wifi.CondSSID:
-		return "ssid=" + c.SSID
+		if set := wifi.SSIDSet(c); len(c.SSIDs) > 0 && len(set) > 1 {
+			in := " in "
+			if c.Negate {
+				in = " not in "
+			}
+			return "ssid" + in + "{" + strings.Join(set, ", ") + "}"
+		} else if len(c.SSIDs) > 0 && len(set) == 1 {
+			return "ssid" + op + set[0]
+		}
+		return "ssid" + op + c.SSID
+	case wifi.CondMedium:
+		return "medium" + op + c.Medium
 	case wifi.CondSubnet:
-		return "subnet=" + c.Subnet
+		return "subnet" + op + c.Subnet
 	case wifi.CondNetwork:
-		return "network(mac)=" + c.GatewayMAC
+		return "network(mac)" + op + c.GatewayMAC
 	case wifi.CondNoneMatch:
 		return "otherwise"
 	}
@@ -520,23 +682,60 @@ func automationRules(args []string) int {
 }
 
 // parseCondition turns "ssid:home" / "subnet:10.0.0.0/24" / "mac:.." /
-// "else" into a wifi.Condition. Returns an error for malformed values.
+// "medium:wired" / "else" into a wifi.Condition. "ssid:A|B" matches any of
+// several SSIDs (one name is stored as ssid, several as ssids). A "not-"
+// prefix on ssid/subnet/mac/medium ("not-ssid:home") negates it: it
+// matches only when the value is known and different (a blank SSID
+// mid-roam holds instead of matching). "not-else" is rejected. Returns an
+// error for malformed values.
 func parseCondition(spec string) (wifi.Condition, error) {
+	spec = strings.TrimSpace(spec)
 	if spec == "else" || spec == "otherwise" || spec == "none" {
 		return wifi.Condition{Type: wifi.CondNoneMatch}, nil
 	}
-	kind, val, ok := strings.Cut(spec, ":")
-	if !ok || val == "" {
-		return wifi.Condition{}, fmt.Errorf("condition %q must be ssid:<name>, subnet:<CIDR>, mac:<MAC> or else", spec)
+	if spec == "not-else" || spec == "not-otherwise" || spec == "not-none" {
+		return wifi.Condition{}, fmt.Errorf("'else' cannot be negated")
 	}
+	kind, val, ok := strings.Cut(spec, ":")
+	if !ok || strings.TrimSpace(val) == "" {
+		return wifi.Condition{}, fmt.Errorf("condition %q must be ssid:<name>[|<name>...], subnet:<CIDR>, mac:<MAC>, medium:<wifi|wired|tethered> or else (prefix not- to negate)", spec)
+	}
+	negate := false
+	if rest, found := strings.CutPrefix(kind, "not-"); found {
+		negate = true
+		kind = rest
+	}
+	val = strings.TrimSpace(val)
 	switch kind {
 	case "ssid":
-		return wifi.Condition{Type: wifi.CondSSID, SSID: val}, nil
+		parts := strings.Split(val, "|")
+		names := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				return wifi.Condition{}, fmt.Errorf("ssid list %q has an empty name", val)
+			}
+			names = append(names, p)
+		}
+		if len(names) == 1 {
+			return wifi.Condition{Type: wifi.CondSSID, Negate: negate, SSID: names[0]}, nil
+		}
+		return wifi.Condition{Type: wifi.CondSSID, Negate: negate, SSIDs: names}, nil
+	case "medium":
+		m := strings.ToLower(val)
+		if strings.Contains(m, "|") {
+			return wifi.Condition{}, fmt.Errorf("medium takes one value (wifi, wired or tethered), got %q", val)
+		}
+		c := wifi.Condition{Type: wifi.CondMedium, Negate: negate, Medium: m}
+		if err := c.Validate(); err != nil {
+			return wifi.Condition{}, fmt.Errorf("medium %q must be wifi, wired or tethered", val)
+		}
+		return c, nil
 	case "subnet":
-		if _, _, err := net.ParseCIDR(strings.TrimSpace(val)); err != nil {
+		if _, _, err := net.ParseCIDR(val); err != nil {
 			return wifi.Condition{}, fmt.Errorf("subnet %q is not a valid CIDR (e.g. 192.168.0.0/24)", val)
 		}
-		return wifi.Condition{Type: wifi.CondSubnet, Subnet: val}, nil
+		return wifi.Condition{Type: wifi.CondSubnet, Negate: negate, Subnet: val}, nil
 	case "mac":
 		hex := strings.Map(func(r rune) rune {
 			if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
@@ -547,9 +746,9 @@ func parseCondition(spec string) (wifi.Condition, error) {
 		if len(hex) != 12 {
 			return wifi.Condition{}, fmt.Errorf("mac %q is not a valid MAC address", val)
 		}
-		return wifi.Condition{Type: wifi.CondNetwork, GatewayMAC: strings.ToLower(val)}, nil
+		return wifi.Condition{Type: wifi.CondNetwork, Negate: negate, GatewayMAC: strings.ToLower(val)}, nil
 	default:
-		return wifi.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/else)", kind)
+		return wifi.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/medium/else, or not-ssid/not-subnet/not-mac/not-medium)", kind)
 	}
 }
 
@@ -887,18 +1086,33 @@ func activeTunnelName() string {
 	return resp.Value
 }
 
+// activeTunnelNames returns every connected tunnel, not only the first.
+func activeTunnelNames() []string {
+	c, err := dialHelper()
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	var resp ipc.ActiveTunnelsResponse
+	if c.Call(ipc.MethodActiveTunnels, nil, &resp) != nil {
+		return nil
+	}
+	return resp.Names
+}
+
 // --- diagnostics ---
 
 func cmdDNSLeak(_ []string) int {
 	// Compare against the active tunnel's DNS servers when there is one.
-	var expected []string
-	if name := activeTunnelName(); name != "" {
-		if store, err := tunnelStore(); err == nil {
+	var perTunnel [][]string
+	if store, err := tunnelStore(); err == nil {
+		for _, name := range activeTunnelNames() {
 			if cfg, err := store.Load(name); err == nil {
-				expected = cfg.Interface.DNS
+				perTunnel = append(perTunnel, cfg.Interface.DNS)
 			}
 		}
 	}
+	expected := diag.ExpectedDNSForTunnels(perTunnel)
 	res := diag.RunDNSLeakTest(expected)
 	if res == nil {
 		fmt.Fprintln(os.Stderr, "dnsleak: no result")
@@ -910,6 +1124,8 @@ func cmdDNSLeak(_ []string) int {
 	}
 	if res.Leaked {
 		fmt.Println("LEAK: DNS queries are resolving outside the tunnel")
+	} else if res.SplitMode {
+		fmt.Println("OK: split DNS - only the configured domains use the tunnel resolver")
 	} else {
 		fmt.Println("OK: DNS is pinned to the tunnel")
 	}
@@ -950,4 +1166,106 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// flagValue returns the value following flag in args ("" when absent).
+func flagValue(args []string, flag string) string {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+		if v, ok := strings.CutPrefix(a, flag+"="); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// formatVerifyRows renders verify rows as aligned text; the exit code is 1
+// when any row is red.
+func formatVerifyRows(rows []diag.VerifyRow) (string, int) {
+	var b strings.Builder
+	code := 0
+	for _, r := range rows {
+		mark := map[string]string{diag.StatusGreen: "OK  ", diag.StatusAmber: "WARN", diag.StatusRed: "FAIL"}[r.Status]
+		if r.Status == diag.StatusRed {
+			code = 1
+		}
+		fmt.Fprintf(&b, "%s %-9s %s\n", mark, r.Check, r.Detail)
+		if r.Hint != "" && r.Status != diag.StatusGreen {
+			fmt.Fprintf(&b, "     %-9s hint: %s\n", "", r.Hint)
+		}
+	}
+	return b.String(), code
+}
+
+func cmdVerify(args []string) int {
+	jsonOut := hasFlag(args, "--json")
+	resolveName := flagValue(args, "--resolve")
+	pingHost := flagValue(args, "--ping")
+	var name string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "--resolve" || a == "--ping":
+			i++
+		case strings.HasPrefix(a, "-"):
+		default:
+			if name == "" {
+				name = a
+			}
+		}
+	}
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "usage: wireguide ctl verify <name> [--json] [--resolve <host>] [--ping <host>]")
+		return 2
+	}
+	store, err := tunnelStore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "verify:", err)
+		return 1
+	}
+	cfg, err := store.Load(name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verify: tunnel %q: %v\n", name, err)
+		return 1
+	}
+	c, err := dialHelper()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer c.Close()
+	var st domain.ConnectionStatus
+	if err := c.Call(ipc.MethodStatus, nil, &st); err != nil {
+		fmt.Fprintln(os.Stderr, "verify:", err)
+		return 1
+	}
+	in := diag.VerifyInput{Tunnel: name, DNS: cfg.Interface.DNS, PingHost: pingHost, ResolveName: resolveName}
+	for _, p := range cfg.Peers {
+		in.AllowedIPs = append(in.AllowedIPs, p.AllowedIPs...)
+	}
+	rows := st.Tunnels
+	if len(rows) == 0 {
+		rows = []domain.ConnectionStatus{st}
+	}
+	for _, r := range rows {
+		if r.TunnelName == name && r.State == domain.StateConnected {
+			in.Connected, in.Interface, in.LastHandshake = true, r.InterfaceName, r.LastHandshake
+		}
+	}
+	res := diag.Verify(context.Background(), in)
+	if jsonOut {
+		if code := printJSON(res); code != 0 {
+			return code
+		}
+		for _, r := range res {
+			if r.Status == diag.StatusRed {
+				return 1
+			}
+		}
+		return 0
+	}
+	text, code := formatVerifyRows(res)
+	fmt.Print(text)
+	return code
 }

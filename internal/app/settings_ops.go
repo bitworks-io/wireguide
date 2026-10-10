@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -190,18 +191,82 @@ func (s *TunnelService) SaveAutomationRules(tunnel string, rules []wifi.Rule) er
 			return fmt.Errorf("automation: rule %d: %w", i+1, err)
 		}
 	}
-	return s.settingsStore.Update(func(st *storage.Settings) error {
+	var before, snapshot *wifi.Automation
+	err := s.settingsStore.Update(func(st *storage.Settings) error {
 		st.EnsureAutomation()
+		// Deep copy via JSON so snapshots are independent of st. The
+		// pre-change image is what makes a mistaken removal recoverable.
+		before = cloneAutomation(st.Automation)
 		if len(rules) == 0 {
 			delete(st.Automation.PerTunnel, tunnel)
-			return nil
+		} else {
+			if st.Automation.PerTunnel == nil {
+				st.Automation.PerTunnel = map[string][]wifi.Rule{}
+			}
+			st.Automation.PerTunnel[tunnel] = rules
 		}
-		if st.Automation.PerTunnel == nil {
-			st.Automation.PerTunnel = map[string][]wifi.Rule{}
-		}
-		st.Automation.PerTunnel[tunnel] = rules
+		snapshot = cloneAutomation(st.Automation)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// Safety net only: a failed backup must never fail the save.
+	if snapshot != nil {
+		if bErr := storage.SnapshotAutomation(s.settingsStore.Dir(), before, snapshot, time.Now()); bErr != nil {
+			slog.Warn("automation backup failed", "error", bErr)
+		}
+	}
+	return nil
+}
+
+func cloneAutomation(a *wifi.Automation) *wifi.Automation {
+	data, err := json.Marshal(a)
+	if err != nil {
+		return nil
+	}
+	var cp wifi.Automation
+	if json.Unmarshal(data, &cp) != nil {
+		return nil
+	}
+	return &cp
+}
+
+// ListAutomationBackups lists the saved automation snapshots, newest
+// first, counting the rules each holds for tunnel.
+func (s *TunnelService) ListAutomationBackups(tunnel string) []storage.AutomationBackupInfo {
+	return storage.ListAutomationBackups(s.settingsStore.Dir(), tunnel)
+}
+
+// RestoreAutomationBackup replaces tunnel's rules with the ones in the
+// named snapshot. It goes through SaveAutomationRules, so every rule is
+// validated again and the restore is itself snapshotted (and undoable).
+func (s *TunnelService) RestoreAutomationBackup(name, tunnel string) error {
+	if tunnel == "" {
+		return fmt.Errorf("automation: empty tunnel name")
+	}
+	rules, err := storage.ReadAutomationBackupRules(s.settingsStore.Dir(), name, tunnel)
+	if err != nil {
+		return err
+	}
+	return s.SaveAutomationRules(tunnel, rules)
+}
+
+// AutomationBackupRules returns the rules one tunnel had in the named
+// snapshot (validated; no path traversal) without changing anything, so the
+// GUI can register the write it is about to make as its own.
+func (s *TunnelService) AutomationBackupRules(name, tunnel string) ([]wifi.Rule, error) {
+	if tunnel == "" {
+		return nil, fmt.Errorf("automation: empty tunnel name")
+	}
+	return storage.ReadAutomationBackupRules(s.settingsStore.Dir(), name, tunnel)
+}
+
+// GetLocationAuthorization reports the GUI process's Location Services
+// status: authorized / denied / restricted / not_determined / unknown.
+// Read-only; it never prompts, and the root helper never calls it.
+func (s *TunnelService) GetLocationAuthorization() string {
+	return wifi.LocationAuthorization()
 }
 
 // SetLogLevel updates both the GUI's and the helper's slog level
@@ -312,6 +377,14 @@ type UpdateState struct {
 	DismissedVersions []string `json:"dismissed_versions"`
 	IsDevBuild        bool     `json:"is_dev_build"`
 	AutoEnabled       bool     `json:"auto_enabled"`
+	// LastErrorUnix / ConsecutiveErrors come from update.json: the time of
+	// the most recent failed check and how many failed in a row since the
+	// last success (0 = healthy). RepoURL is the project the About links
+	// and update checks target (a build-time constant: fork builds point
+	// at their own repo).
+	LastErrorUnix     int64  `json:"last_error_unix"`
+	ConsecutiveErrors int    `json:"consecutive_errors"`
+	RepoURL           string `json:"repo_url"`
 }
 
 // GetUpdateState returns persisted state for the About tab UI.
@@ -320,6 +393,7 @@ func (s *TunnelService) GetUpdateState() UpdateState {
 		CurrentVersion: update.CurrentVersion(),
 		IsDevBuild:     update.IsDevBuild(),
 		AutoEnabled:    true,
+		RepoURL:        repoURL(),
 	}
 	if s.settingsStore != nil {
 		if cfg, _ := s.settingsStore.Load(); cfg != nil {
@@ -331,8 +405,17 @@ func (s *TunnelService) GetUpdateState() UpdateState {
 		out.LastCheckUnix = st.LastCheckUnix
 		out.LastSeenVersion = st.LastSeenVersion
 		out.DismissedVersions = st.DismissedVersions
+		out.LastErrorUnix = st.LastErrorUnix
+		out.ConsecutiveErrors = st.ConsecutiveErrors
 	}
 	return out
+}
+
+// repoURL derives the repository root from the update package's
+// build-time release URL so the About links can't drift from the repo
+// updates are fetched from.
+func repoURL() string {
+	return strings.TrimSuffix(update.ReleasesURL(), "/releases/latest")
 }
 
 // DismissUpdate persists a version dismissal so the in-app banner stays
@@ -358,7 +441,10 @@ func (s *TunnelService) RunUpdate(info *update.UpdateInfo) error {
 		return fmt.Errorf("no update available")
 	}
 
-	if runtime.GOOS == "darwin" && update.IsBrewInstall() {
+	// The Homebrew path installs upstream's cask, so it is only valid when
+	// this build's update channel IS upstream. A fork build uses the release
+	// page of the repo its checker reads from.
+	if runtime.GOOS == "darwin" && update.UsesUpstreamRelease() && update.IsBrewInstall() {
 		brewBin := update.BrewPath()
 
 		// `brew update` is pure-network (git fetch on tap repos); 90 s is
@@ -427,10 +513,16 @@ func (s *TunnelService) RunUpdate(info *update.UpdateInfo) error {
 	}
 
 	slog.Info("update: opening GitHub Releases page (non-brew install)")
-	if s.app != nil {
-		return s.app.Browser.OpenURL("https://github.com/korjwl1/wireguide/releases/latest")
+	// info round-trips through the frontend: only open its URL when it is a
+	// release page of our own repo, else fall back to the canonical one.
+	releaseURL := update.ReleasesURL()
+	if update.IsValidReleaseURL(info.ReleaseURL) {
+		releaseURL = info.ReleaseURL
 	}
-	return exec.Command("open", "https://github.com/korjwl1/wireguide/releases/latest").Run()
+	if s.app != nil {
+		return s.app.Browser.OpenURL(releaseURL)
+	}
+	return exec.Command("open", releaseURL).Run()
 }
 
 // emitUpdateProgress tells the frontend which phase RunUpdate is in

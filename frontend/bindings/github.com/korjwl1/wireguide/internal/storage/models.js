@@ -14,6 +14,61 @@ import * as wifi$0 from "../wifi/models.js";
 import * as time$0 from "../../../../../time/models.js";
 
 /**
+ * AutomationBackupInfo describes one snapshot for the GUI list.
+ */
+export class AutomationBackupInfo {
+    /**
+     * Creates a new AutomationBackupInfo instance.
+     * @param {Partial<AutomationBackupInfo>} [$$source = {}] - The source object to create the AutomationBackupInfo.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("time" in $$source)) {
+            /**
+             * RFC3339 (UTC)
+             * @member
+             * @type {string}
+             */
+            this["time"] = "";
+        }
+        if (!("rule_count" in $$source)) {
+            /**
+             * rules for the requested tunnel
+             * @member
+             * @type {number}
+             */
+            this["rule_count"] = 0;
+        }
+        if (!("total_rules" in $$source)) {
+            /**
+             * rules across all tunnels
+             * @member
+             * @type {number}
+             */
+            this["total_rules"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationBackupInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationBackupInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationBackupInfo(/** @type {Partial<AutomationBackupInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * Session is one VPN session record. EndTime is a pointer so a still-active
  * session (no end yet) can be distinguished from a completed session that
  * happens to have ended at time.Time{} — the previous flat-struct design
@@ -82,6 +137,24 @@ export class Session {
              * @type {string | undefined}
              */
             this["disconnect_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * StartReason says what brought the session up ("user", "automation",
+             * "wake", "network_change", "health_check", "reconnect"); empty when
+             * unknown (older helper, older record). SSID is the Wi-Fi network the
+             * GUI saw when the session started ("" when unknown / not on Wi-Fi).
+             * @member
+             * @type {string | undefined}
+             */
+            this["start_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
         }
 
         Object.assign(this, $$source);
@@ -185,6 +258,16 @@ export class Settings {
              */
             this["compact_list"] = false;
         }
+        if (!("notify_auto_changes" in $$source)) {
+            /**
+             * NotifyAutoChanges: show a native notification when a tunnel
+             * connects/disconnects without a user action in the GUI (automation,
+             * wake, CLI) and on critical helper errors. Defaults to on.
+             * @member
+             * @type {boolean}
+             */
+            this["notify_auto_changes"] = false;
+        }
         if (!("list_sort" in $$source)) {
             /**
              * ListSort controls tunnel-list ordering: "name_asc" (default),
@@ -256,14 +339,14 @@ export class Settings {
      * @returns {Settings}
      */
     static createFrom($$source = {}) {
-        const $$createField14_0 = $$createType0;
-        const $$createField15_0 = $$createType2;
+        const $$createField15_0 = $$createType0;
+        const $$createField16_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("wifi_rules" in $$parsedSource) {
-            $$parsedSource["wifi_rules"] = $$createField14_0($$parsedSource["wifi_rules"]);
+            $$parsedSource["wifi_rules"] = $$createField15_0($$parsedSource["wifi_rules"]);
         }
         if ("automation" in $$parsedSource) {
-            $$parsedSource["automation"] = $$createField15_0($$parsedSource["automation"]);
+            $$parsedSource["automation"] = $$createField16_0($$parsedSource["automation"]);
         }
         return new Settings(/** @type {Partial<Settings>} */($$parsedSource));
     }

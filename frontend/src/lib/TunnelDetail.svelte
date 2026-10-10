@@ -3,9 +3,15 @@
   import Icon from './Icon.svelte';
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
-  import { createEventDispatcher, tick, onDestroy } from 'svelte';
+  import { createEventDispatcher, tick, onDestroy, onMount } from 'svelte';
+  import { Events } from '@wailsio/runtime';
+  import { protectionState, skippedRouteRows, skippedRoutesLabel, connectPreview } from './dnsTruth.js';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
+  import HealthCheckOverride from './HealthCheckOverride.svelte';
+  import VerifyPanel from './VerifyPanel.svelte';
+  import { automationPreview } from '../stores/automation.js';
+  import { verdictFor, verdictText, verdictTone } from './automationLine.js';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -17,6 +23,25 @@
   let detail = null;
   let loading = false;
   let error = '';
+
+  // Whether the user turned DNS protection on (Settings). Combined with the
+  // helper's live per-tunnel dns_protected flag it decides the hero chip:
+  // "protected" vs "intended, not applied".
+  let dnsWanted = false;
+  // AllowedIPs ranges the macOS connect path will not route (LAN overlap),
+  // for the pre-connect preview. Computed by the backend with the same rule
+  // the connect uses; [] on other platforms.
+  let lanOverlaps = [];
+  let splitSupported = true;
+  let settingsUnsub = null;
+  onMount(() => {
+    TunnelService.GetSettings().then((s) => { dnsWanted = !!s?.dns_protection; }).catch(() => {});
+    settingsUnsub = Events.On('settings_changed', (event) => {
+      const p = event?.data || {};
+      if (p.dns_protection != null) dnsWanted = !!p.dns_protection;
+    });
+  });
+  onDestroy(() => { if (settingsUnsub) settingsUnsub(); });
 
   // Track the last name we issued loadDetail for. The
   // selectedTunnel store emits a fresh object reference on every
@@ -52,6 +77,7 @@
     latencyTargetValue = $selectedTunnel.latency_probe_target || '';
     latencyTargetSaved = latencyTargetValue;
     latencyTargetError = '';
+    lanOverlaps = [];
     loadDetail($selectedTunnel.name);
   }
 
@@ -152,19 +178,50 @@
   // once — which froze this on the first tunnel's endpoint forever.
   function autoLatencyTarget(det, sel) {
     if (!det) return { label: sel?.endpoint || '—', fallback: true };
-    for (const peer of det.Peers || []) {
-      for (const allowed of peer.AllowedIPs || []) {
+    for (const peer of det.peers || []) {
+      for (const allowed of peer.allowed_ips || []) {
         if (allowed.endsWith('/32')) return { label: allowed.slice(0, -3), fallback: false };
         if (allowed.endsWith('/128')) return { label: allowed.slice(0, -4), fallback: false };
       }
     }
-    const fullTunnel = (det.Peers || []).some(peer =>
-      (peer.AllowedIPs || []).some(ip => ip === '0.0.0.0/0' || ip === '::/0')
+    const fullTunnel = (det.peers || []).some(peer =>
+      (peer.allowed_ips || []).some(ip => ip === '0.0.0.0/0' || ip === '::/0')
     );
     if (fullTunnel) return { label: '8.8.8.8', fallback: false };
     return { label: sel?.endpoint || '—', fallback: true };
   }
 
+  // Splits an [Interface] DNS= list into servers, search domains and
+  // "~domain" split-DNS (routing-only) domains, for the info rows below.
+  function parseDnsEntries(list) {
+    const out = { servers: [], search: [], match: [] };
+    for (const raw of list || []) {
+      const tok = String(raw).trim();
+      if (!tok) continue;
+      if (tok.startsWith('~')) out.match.push(tok.slice(1));
+      else if (tok.includes(':') || /^[0-9.]+$/.test(tok)) out.servers.push(tok);
+      else out.search.push(tok);
+    }
+    return out;
+  }
+
+  $: dnsInfo = parseDnsEntries(detail?.interface?.dns);
+  // Intended DNS behaviour from the config (not read back from the OS). It
+  // comes from the backend classifier (diag.DNSModeOf) so the hero chip, the
+  // list row, `ctl status` and the tray tooltip always agree.
+  $: dnsChipMode = $selectedTunnel?.dns_mode || '';
+  $: dnsDomains = $selectedTunnel?.dns_domains || [];
+  // Live truth from the helper (read once connected): is this tunnel's DNS
+  // actually pinned by the firewall, and which AllowedIPs were skipped.
+  $: protState = isConnected ? protectionState(status, dnsWanted) : '';
+  $: skippedRows = isConnected
+    ? skippedRouteRows(status).filter((r) => r.tunnel === $selectedTunnel?.name)
+    : [];
+  $: preview = connectPreview(detail, lanOverlaps, splitSupported);
+  // Why automation is / isn't acting on this tunnel (same one-liner as the
+  // Automation editor strip and the list row).
+  $: autoVerdict = verdictFor($automationPreview, $selectedTunnel?.name);
+  $: autoLine = autoVerdict ? verdictText($t, autoVerdict) : '';
   $: autoLatency = autoLatencyTarget(detail, $selectedTunnel);
   $: latencyTargetDisplay = latencyTargetSaved
     ? latencyTargetSaved
@@ -235,6 +292,17 @@
     try {
       detail = await TunnelService.GetTunnelDetail(name);
       error = '';
+      try {
+        splitSupported = (await TunnelService.SplitDNSSupported()) !== false;
+      } catch (_) {
+        splitSupported = true;
+      }
+      try {
+        const overlaps = (await TunnelService.GetLANOverlaps(name)) || [];
+        if (name === lastLoadedName) lanOverlaps = overlaps;
+      } catch (_) {
+        lanOverlaps = [];
+      }
     } catch (e) {
       detail = null;
       // Surface the failure rather than silently leaving the panel
@@ -381,7 +449,7 @@
 <div class="detail-panel">
   {#if !$selectedTunnel}
     <div class="no-selection">
-      <p>{$t('tunnel.no_tunnels')}</p>
+      <p>{$t($tunnels.length > 0 ? 'tunnel.no_selection' : 'tunnel.no_tunnels')}</p>
     </div>
   {:else}
     <!-- HERO STATUS CARD: big visual, gradient bg by state, large icon -->
@@ -446,6 +514,33 @@
             <span class="hero-endpoint">{$selectedTunnel.endpoint}</span>
           {/if}
         </div>
+        {#if dnsChipMode}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-{dnsChipMode}" title={$t('tunnel.dns_chip_' + dnsChipMode + '_hint')}>
+              {$t('tunnel.dns_chip_' + dnsChipMode, { domains: dnsDomains.join(', ') })}
+            </span>
+          </div>
+        {/if}
+        {#if protState}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-prot-{protState}"
+              title={$t(protState === 'protected' ? 'tunnel.dns_protected_hint' : 'tunnel.dns_intended_hint')}>
+              {$t(protState === 'protected' ? 'tunnel.dns_protected' : 'tunnel.dns_intended')}
+            </span>
+          </div>
+        {/if}
+        {#if skippedRows.length > 0}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-skipped" title={$t('tunnel.routes_skipped_hint')}>
+              {skippedRoutesLabel($t, skippedRows.length)}
+            </span>
+          </div>
+        {/if}
+        {#if autoLine}
+          <div class="hero-dns-line">
+            <span class="dns-chip auto-chip auto-chip-{verdictTone(autoVerdict)}" title={autoLine}>{autoLine}</span>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -468,6 +563,18 @@
         </button>
       {/if}
     </div>
+
+    <!-- PRE-CONNECT PREVIEW: what connecting will change, from the config -->
+    {#if !isConnected && !isConnecting && preview.length > 0}
+      <details class="connect-preview">
+        <summary>{$t('tunnel.preview_title')}</summary>
+        <ul>
+          {#each preview as p}
+            <li>{$t(p.key, p.params)}</li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
 
     <!-- STATS HERO: big numbers, colored icons, 3-up grid -->
     {#if isConnected && status.state === 'connected'}
@@ -552,25 +659,48 @@
         {/if}
         {#if detail}
           <div class="info-card detail-info-card">
-            {#each detail.Peers || [] as peer}
+            {#each detail.peers || [] as peer}
               <div class="info-row">
                 <span class="info-label">{$t('tunnel.allowed_ips')}</span>
-                <span class="info-value">{(peer.AllowedIPs || []).join(', ') || '—'}</span>
+                <span class="info-value">{(peer.allowed_ips || []).join(', ') || '—'}</span>
               </div>
               <div class="info-row">
                 <span class="info-label">{$t('tunnel.public_key')}</span>
-                <span class="info-value mono">{peer.PublicKey?.substring(0, 20)}…</span>
+                <span class="info-value mono">{peer.public_key?.substring(0, 20)}…</span>
               </div>
             {/each}
-            {#if detail.Interface?.DNS?.length}
+            {#if dnsInfo.servers.length}
               <div class="info-row">
-                <span class="info-label">DNS</span>
-                <span class="info-value">{detail.Interface.DNS.join(', ')}</span>
+                <span class="info-label">{$t('tunnel.dns_servers')}</span>
+                <span class="info-value">{dnsInfo.servers.join(', ')}</span>
+              </div>
+            {/if}
+            {#if dnsInfo.search.length}
+              <div class="info-row">
+                <span class="info-label">{$t('tunnel.dns_search')}</span>
+                <span class="info-value">{dnsInfo.search.join(', ')}</span>
+              </div>
+            {/if}
+            {#if dnsInfo.match.length}
+              <div class="info-row">
+                <span class="info-label">{$t('tunnel.dns_split')}</span>
+                <span class="info-value">{dnsInfo.match.join(', ')}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label"></span>
+                <span class="info-value dns-split-note">{$t('tunnel.dns_split_note')}</span>
               </div>
             {/if}
           </div>
         {/if}
       </div>
+    {/if}
+
+    <!-- VERIFY: manual post-connect checks -->
+    {#if isConnected && status.state === 'connected'}
+      {#key $selectedTunnel.name}
+        <VerifyPanel {TunnelService} tunnelName={$selectedTunnel.name} resolveHint={dnsDomains[0] ? 'nas.' + dnsDomains[0] : ''} />
+      {/key}
     {/if}
 
     <!-- NOTES -->
@@ -595,6 +725,7 @@
 
     {#key $selectedTunnel.name}
       <PingHealthSettings {TunnelService} tunnelName={$selectedTunnel.name} />
+      <HealthCheckOverride {TunnelService} tunnelName={$selectedTunnel.name} />
     {/key}
 
     <!-- SECONDARY ACTIONS: 4-up icon button grid -->
@@ -850,6 +981,45 @@
   .hero-card.hero-connecting .hero-state-text { color: var(--yellow); }
   .hero-card.hero-warning .hero-state-text { color: var(--orange, #FF9500); }
   .hero-sep { color: var(--text-muted); opacity: 0.6; }
+  .hero-dns-line { margin-top: 6px; min-width: 0; }
+  .dns-chip {
+    display: inline-block;
+    max-width: 100%;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 0.5px solid var(--border);
+    background: var(--bg-card);
+    font: 500 11px/16px var(--font-sans);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: top;
+  }
+  .dns-chip-split { color: var(--blue, var(--accent)); }
+  .dns-chip-prot-protected { color: var(--green); }
+  .dns-chip-prot-intended { color: var(--orange, #FF9500); }
+  .dns-chip-skipped { color: var(--orange, #FF9500); }
+  .connect-preview {
+    margin: -6px 0 14px;
+    padding: 8px 12px;
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    font: 400 12px/17px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .connect-preview summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .connect-preview ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+  }
+  .connect-preview li { margin: 2px 0; }
+  .auto-chip-warn { color: var(--orange, #FF9500); }
   .hero-endpoint {
     color: var(--text-secondary);
     font-family: var(--font-mono);
@@ -1029,6 +1199,11 @@
     border-radius: 12px;
     overflow: hidden;
   }
+  .dns-split-note {
+    color: var(--text-muted);
+    font-size: 0.85em;
+  }
+
   .detail-info-card {
     border: 0;
     background: transparent;

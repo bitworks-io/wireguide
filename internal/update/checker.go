@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	githubRepo     = "korjwl1/wireguide"
+	githubRepo     = "bitworks-io/wireguide"
 	apiEndpoint    = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
-	currentVersion = "0.5.2"
+	currentVersion = "0.5.2-bitworks.5"
 
 	// minAssetSize is the minimum acceptable size for a release asset.
 	// A macOS .dmg/.zip containing WireGuide.app is always well over 1 MB;
@@ -58,6 +58,27 @@ var expectedPublicKey = ""
 
 // CurrentVersion returns the hardcoded app version string.
 func CurrentVersion() string { return currentVersion }
+
+// upstreamRepo is the original project whose Homebrew tap and releases this
+// fork does NOT publish to.
+const upstreamRepo = "korjwl1/wireguide"
+
+// ReleasesURL is the release page of the repo update checks read from. Every
+// "go download the update" action must use it so the apply path can never
+// point at a different project than the checker.
+func ReleasesURL() string { return "https://github.com/" + githubRepo + "/releases/latest" }
+
+// IsValidReleaseURL reports whether u is an https release page inside the
+// repo update checks read from. UpdateInfo round-trips through the frontend,
+// so its URL is validated before being opened.
+func IsValidReleaseURL(u string) bool {
+	return strings.HasPrefix(u, "https://github.com/"+githubRepo+"/")
+}
+
+// UsesUpstreamRelease reports whether this build's update channel is the
+// upstream project. Only then may the Homebrew path (which installs
+// upstream's cask) be used to apply an update.
+func UsesUpstreamRelease() bool { return githubRepo == upstreamRepo }
 
 // IsDevBuild reports whether this binary was built from an in-progress
 // development version. Mirrors wireguard-windows'
@@ -702,6 +723,23 @@ func fetchSmall(url string, client *http.Client) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
+// splitForkVersion splits "X.Y.Z[-bitworks.N][+meta]" into the base version
+// and N. ok is false when there is no -bitworks.N suffix (n is then 0).
+func splitForkVersion(v string) (base string, n int, ok bool) {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	i := strings.Index(v, "-bitworks.")
+	if i < 0 {
+		return v, 0, false
+	}
+	n, err := strconv.Atoi(v[i+len("-bitworks."):])
+	if err != nil {
+		return v[:i], 0, false
+	}
+	return v[:i], n, true
+}
+
 // isNewerVersion compares two semver strings (without "v" prefix).
 // Returns true if latest is newer than current.
 //
@@ -718,6 +756,13 @@ func fetchSmall(url string, client *http.Client) ([]byte, error) {
 // extra complexity would only matter if it did. If we ever do, switch
 // to golang.org/x/mod/semver instead of hand-rolling it.
 func isNewerVersion(latest, current string) bool {
+	// Same base version: a fork "-bitworks.N" revision decides. A plain
+	// upstream release never supersedes a fork build of the same base.
+	lb, ln, lok := splitForkVersion(latest)
+	cb, cn, cok := splitForkVersion(current)
+	if lb == cb && lb != "" && (lok || cok) {
+		return lok && (!cok || ln > cn)
+	}
 	stripSuffix := func(v string) string {
 		// Drop semver build metadata first (`+sha.5114`), then any
 		// pre-release tail (`-dev2`, `-rc1`). The order matters because

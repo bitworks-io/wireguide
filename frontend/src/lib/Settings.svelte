@@ -6,8 +6,12 @@
   import { connectionStatus, tunnels } from '../stores/tunnels.js';
   import { compactList } from '../stores/ui.js';
   import Icon from './Icon.svelte';
+  import { errText } from './errors.js';
+  import { firewallDnsLine } from './dnsTruth.js';
 
   export let TunnelService;
+  // Tab to open on (the helper banners deep-link to 'advanced').
+  export let initialTab = 'general';
   export let onClose = () => {};
   export let updateInfo = null;
   export let onInstall = null;
@@ -20,6 +24,24 @@
   // could leave About showing "up to date" for days after a release).
   let updateState = null;
   let aboutChecking = false;
+
+  // Diagnostics export (native save dialog on the Go side). The result is
+  // shown inline — a toast would render underneath this modal.
+  let exportBusy = false;
+  let exportResult = '';
+  async function exportDiagnostics() {
+    if (exportBusy) return;
+    exportBusy = true;
+    exportResult = '';
+    try {
+      const path = await TunnelService.ExportDiagnostics();
+      if (path) exportResult = $t('settings.export_diagnostics_done', { path });
+    } catch (e) {
+      exportResult = $t('settings.export_diagnostics_failed') + ': ' + errText(e);
+    } finally {
+      exportBusy = false;
+    }
+  }
   let aboutCheckResult = '';
   // nowTick drives formatLastChecked re-evaluation. Without this, opening
   // Settings and leaving it on the About tab for 10 minutes would still
@@ -70,7 +92,7 @@
       // timestamp flipping to "just now" is the silent feedback that
       // the click actually did something.
     } catch (e) {
-      aboutCheckResult = ($t('update.check_failed') || 'Check failed') + ': ' + (e?.message || e);
+      aboutCheckResult = ($t('update.check_failed') || 'Check failed') + ': ' + errText(e);
     } finally {
       aboutChecking = false;
     }
@@ -122,13 +144,23 @@
     } catch (e) {
       // Inline, next to the button that failed — the toast alone renders
       // under this modal.
-      aboutCheckResult = ($t('update.install_failed') || 'Update failed') + ': ' + (e?.message || e);
+      aboutCheckResult = ($t('update.install_failed') || 'Update failed') + ': ' + errText(e);
     } finally {
       aboutUpdating = false;
     }
   }
 
-  let activeTab = 'general';
+  // About links come from the backend's build-time repo (fork builds point
+  // at their own repository), not a hard-coded upstream URL.
+  function repoLink(path) {
+    const base = (updateState?.repo_url || 'https://github.com/bitworks-io/wireguide').replace(/\/+$/, '');
+    return base + path;
+  }
+  function formatErrorTime(unix) {
+    return unix ? new Date(unix * 1000).toLocaleString() : '—';
+  }
+
+  let activeTab = initialTab;
   let settings = {
     language: getLanguage(),
     theme: 'system',
@@ -141,6 +173,7 @@
     tray_icon_style: 'color',
     auto_update_check: true,
     compact_list: false,
+    notify_auto_changes: true,
   };
   let loaded = false;
   let appVersion = '';
@@ -159,6 +192,7 @@
         settings.log_level = s.log_level || 'info';
         settings.tray_icon_style = s.tray_icon_style || 'color';
         settings.compact_list = s.compact_list ?? false;
+        settings.notify_auto_changes = s.notify_auto_changes ?? true;
         // Legacy settings.json predates this field — *bool null on
         // the Go side becomes undefined here; default to true to match
         // Settings.AutoUpdateCheckEnabled() semantics.
@@ -201,6 +235,7 @@
         log_level: settings.log_level,
         auto_update_check: settings.auto_update_check,
         compact_list: settings.compact_list,
+        notify_auto_changes: settings.notify_auto_changes,
         // List-ordering prefs are owned by the tunnel-list header, not
         // this screen — carry them from the fresh fetch so saving any
         // Settings toggle doesn't wipe them back to defaults.
@@ -280,7 +315,7 @@
     TunnelService.SetKillSwitch(settings.kill_switch).catch((err) => {
       console.error('SetKillSwitch failed:', err);
       settings.kill_switch = !settings.kill_switch;
-    });
+    }).finally(() => scheduleFirewallRefresh(400));
     scheduleSave();
   }
 
@@ -292,7 +327,7 @@
     TunnelService.SetDNSProtection(settings.dns_protection).catch((err) => {
       console.error('SetDNSProtection failed:', err);
       settings.dns_protection = !settings.dns_protection;
-    });
+    }).finally(() => scheduleFirewallRefresh(400));
     scheduleSave();
   }
 
@@ -314,6 +349,89 @@
     scheduleSave();
   }
 
+  // ---- Live firewall truth, helper card, repair and reset (Advanced) ----
+  // Firewall.Status reads pf on macOS, so it is fetched when the Advanced tab
+  // is shown and after something that changes it, never on a timer.
+  let fwStatus = { available: false };
+  let fwTimer = null;
+  async function refreshFirewall() {
+    try { fwStatus = (await TunnelService.GetFirewallStatus()) || { available: false }; }
+    catch (_) { fwStatus = { available: false }; }
+  }
+  function scheduleFirewallRefresh(ms = 500) {
+    if (fwTimer) clearTimeout(fwTimer);
+    fwTimer = setTimeout(() => { fwTimer = null; refreshFirewall(); }, ms);
+  }
+  $: connectedNames = $connectionStatus?.active_tunnels || [];
+  $: dnsLine = firewallDnsLine($t, fwStatus, settings.dns_protection, connectedNames.length > 0);
+  $: activeKey = connectedNames.join('|');
+  $: if (activeTab === 'advanced') {
+    activeKey; // re-read when the tunnel set changes
+    scheduleFirewallRefresh(150);
+    refreshHelperInfo();
+  }
+
+  let helperInfo = { available: false };
+  async function refreshHelperInfo() {
+    try { helperInfo = (await TunnelService.GetHelperInfo()) || { available: false }; }
+    catch (_) { helperInfo = { available: false }; }
+  }
+  function helperModeLabel(mode) {
+    return mode ? $t('settings.helper_mode_' + mode.replace(/-/g, '_')) : '—';
+  }
+  function helperStarted(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+
+  // Repair helper: the only action on this screen that prompts for a password.
+  let repairStage = ''; // '' | 'confirm' | 'running'
+  let repairError = '';
+  let repairDone = false;
+  function askRepair() {
+    repairError = '';
+    repairDone = false;
+    repairStage = 'confirm';
+  }
+  async function doRepair() {
+    repairStage = 'running';
+    repairError = '';
+    try {
+      await TunnelService.RepairHelper();
+      repairDone = true;
+      await refreshHelperInfo();
+      scheduleFirewallRefresh(300);
+    } catch (e) {
+      repairError = errText(e);
+    }
+    repairStage = '';
+  }
+
+  // Reset DNS & firewall to system defaults.
+  let resetStage = ''; // '' | 'confirm' | 'running' | 'done'
+  let resetResult = null;
+  let resetError = '';
+  function askReset() {
+    resetError = '';
+    resetResult = null;
+    resetStage = 'confirm';
+  }
+  async function doReset() {
+    const force = connectedNames.length > 0;
+    resetStage = 'running';
+    resetError = '';
+    try {
+      resetResult = await TunnelService.ResetDNS(force);
+      resetStage = 'done';
+    } catch (e) {
+      resetError = errText(e);
+      resetStage = '';
+    }
+    scheduleFirewallRefresh(300);
+  }
+  $: resetFailed = (resetResult?.steps || []).some((st) => !st.ok);
+
   // Reflect settings applied by another client (the CLI) live, so the
   // toggle doesn't sit stale while the helper actually changed state.
   let settingsChangedUnsub = null;
@@ -325,11 +443,13 @@
     if (p.pin_interface != null) settings.pin_interface = p.pin_interface;
     if (p.log_level != null) settings.log_level = p.log_level;
     settings = settings; // trigger reactivity
+    if (activeTab === 'advanced') scheduleFirewallRefresh(400);
   }
 
   onDestroy(() => {
     window.removeEventListener('keydown', onKeyDown);
     if (settingsChangedUnsub) settingsChangedUnsub();
+    if (fwTimer) clearTimeout(fwTimer);
     if (saveTimer) {
       clearTimeout(saveTimer);
       save();
@@ -445,6 +565,16 @@
                   <span class="toggle-track"></span>
                 </label>
               </div>
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <label class="setting-label" for="notify-auto">{$t('settings.notify_auto')}</label>
+                  <p class="setting-desc">{$t('settings.notify_auto_hint')}</p>
+                </div>
+                <label class="toggle">
+                  <input id="notify-auto" type="checkbox" bind:checked={settings.notify_auto_changes} on:change={scheduleSave} />
+                  <span class="toggle-track"></span>
+                </label>
+              </div>
             </div>
           </div>
 
@@ -484,6 +614,9 @@
                 <div class="setting-info">
                   <label class="setting-label" for="dns-protection">{$t('settings.dns_protection')}</label>
                   <p class="setting-desc">{$t('settings.dns_protection_hint')}</p>
+                  {#if dnsLine}
+                    <p class="setting-live setting-live-{dnsLine.tone}">{dnsLine.text}</p>
+                  {/if}
                 </div>
                 <label class="toggle">
                   <input id="dns-protection" type="checkbox"
@@ -537,6 +670,101 @@
                   <option value="error">{$t('settings.log_level_error')}</option>
                 </select>
               </div>
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <span class="setting-label">{$t('settings.export_diagnostics')}</span>
+                  <p class="setting-desc">{$t('settings.export_diagnostics_hint')}</p>
+                  {#if exportResult}<p class="setting-desc" role="status">{exportResult}</p>{/if}
+                </div>
+                <button type="button" class="check-btn" on:click={exportDiagnostics} disabled={exportBusy}>
+                  {exportBusy ? $t('settings.export_diagnostics_busy') : $t('settings.export_diagnostics')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h4 class="section-title">{$t('settings.section_helper')}</h4>
+            <div class="settings-card">
+              {#if helperInfo.available}
+                <div class="setting-row"><span class="setting-label">{$t('settings.helper_version')}</span><span class="info-val">{helperInfo.app_version || '—'}</span></div>
+                {#if helperInfo.start_mode}
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_mode')}</span><span class="info-val">{helperModeLabel(helperInfo.start_mode)}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_socket')}</span><span class="info-val mono">{helperInfo.socket_path || '—'}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_pid')}</span><span class="info-val">{helperInfo.pid || '—'}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_started')}</span><span class="info-val">{helperStarted(helperInfo.started_at)}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_reason')}</span><span class="info-val">{$t('settings.helper_reason_' + helperInfo.start_mode.replace(/-/g, '_'))}</span></div>
+                {:else}
+                  <div class="setting-row"><p class="setting-desc">{$t('settings.helper_old')}</p></div>
+                {/if}
+              {:else}
+                <div class="setting-row"><p class="setting-desc">{$t('settings.helper_unavailable')}</p></div>
+              {/if}
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <p class="setting-desc">{$t('settings.helper_repair_hint')}</p>
+                  {#if repairStage === 'confirm'}
+                    <p class="setting-live">{connectedNames.length > 0 ? $t('settings.helper_repair_connected') : $t('settings.helper_repair_confirm')}</p>
+                  {/if}
+                  {#if repairDone}<p class="setting-live setting-live-ok">{$t('settings.helper_repair_done')}</p>{/if}
+                  {#if repairError}<p class="setting-live setting-live-error">{repairError}</p>{/if}
+                </div>
+                {#if repairStage === 'confirm'}
+                  <div class="action-pair">
+                    <button class="warn-btn warn-proceed" disabled={connectedNames.length > 0} on:click={doRepair}>{$t('settings.helper_repair_go')}</button>
+                    <button class="warn-btn warn-cancel" on:click={() => repairStage = ''}>{$t('settings.reset_cancel')}</button>
+                  </div>
+                {:else}
+                  <button class="action-btn" disabled={repairStage === 'running'} on:click={askRepair}>
+                    {repairStage === 'running' ? $t('settings.helper_repairing') : $t('settings.helper_repair')}
+                  </button>
+                {/if}
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h4 class="section-title">{$t('settings.section_reset')}</h4>
+            <div class="settings-card">
+              <div class="setting-row setting-row--toggle">
+                <div class="setting-info">
+                  <span class="setting-label">{$t('settings.reset_title')}</span>
+                  <p class="setting-desc">{$t('settings.reset_desc')}</p>
+                  {#if resetStage === 'confirm'}
+                    <p class="setting-live">{connectedNames.length > 0 ? $t('settings.reset_confirm_connected') : $t('settings.reset_confirm')}</p>
+                  {/if}
+                  {#if resetError}<p class="setting-live setting-live-error">{resetError}</p>{/if}
+                  {#if resetStage === 'done' && resetResult}
+                    {#if resetResult.refused}
+                      <p class="setting-live setting-live-error">{$t('settings.reset_refused')}</p>
+                    {:else}
+                      <p class="setting-live" class:setting-live-ok={!resetFailed} class:setting-live-error={resetFailed}>
+                        {resetFailed ? $t('settings.reset_failed') : $t('settings.reset_done')}
+                      </p>
+                      <ul class="reset-steps">
+                        {#each resetResult.steps || [] as st}
+                          <li class:step-bad={!st.ok}>
+                            <span class="step-mark">{st.ok ? '✓' : '✗'}</span>
+                            <span>{$t('settings.reset_step_' + st.name)}{#if st.detail} — {st.detail}{/if}</span>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  {/if}
+                </div>
+                {#if resetStage === 'confirm'}
+                  <div class="action-pair">
+                    <button class="warn-btn warn-proceed" on:click={doReset}>
+                      {connectedNames.length > 0 ? $t('settings.reset_go_force') : $t('settings.reset_go')}
+                    </button>
+                    <button class="warn-btn warn-cancel" on:click={() => resetStage = ''}>{$t('settings.reset_cancel')}</button>
+                  </div>
+                {:else}
+                  <button class="action-btn" disabled={resetStage === 'running'} on:click={askReset}>
+                    {resetStage === 'running' ? $t('settings.reset_running') : $t('settings.reset_button')}
+                  </button>
+                {/if}
+              </div>
             </div>
           </div>
 
@@ -567,6 +795,9 @@
                   </button>
                   <span class="check-meta">{formatLastChecked(updateState?.last_check_unix, nowTick)}</span>
                 </div>
+                {#if updateState?.consecutive_errors > 0}
+                  <div class="check-result">{$t('settings.update_check_failing', { n: updateState.consecutive_errors, when: formatErrorTime(updateState.last_error_unix) })}</div>
+                {/if}
                 {#if updateState?.is_dev_build}
                   <!-- Explains why "Never checked" sticks even on a healthy install:
                        dev builds intentionally skip the auto-check loop so local
@@ -598,10 +829,10 @@
             {/if}
 
             <div class="about-links">
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide')}>GitHub</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/releases')}>{$t('settings.about_releases')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/issues')}>{$t('settings.about_issues')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/blob/main/LICENSE')}>{$t('settings.about_license')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink(''))}>GitHub</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/releases'))}>{$t('settings.about_releases')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/issues'))}>{$t('settings.about_issues')}</button>
+              <button class="link-btn" on:click={() => TunnelService.OpenURL(repoLink('/blob/main/LICENSE'))}>{$t('settings.about_license')}</button>
             </div>
 
             <p class="about-credits-line">{$t('settings.about_credits')}</p>
@@ -1164,4 +1395,47 @@
       transition: filter 120ms cubic-bezier(0.2, 0, 0.1, 1);
     }
   }
+  /* Live DNS-protection line, helper card, repair/reset actions. */
+  .setting-live {
+    margin: 4px 0 0;
+    font: 400 11px/15px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-secondary);
+    word-break: break-word;
+  }
+  .setting-live-ok { color: var(--green); }
+  .setting-live-muted { color: var(--text-muted); }
+  .setting-live-error { color: var(--red, #FF3B30); }
+  .info-val {
+    font: 400 12px/18px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-secondary);
+    text-align: right;
+    min-width: 0;
+    word-break: break-all;
+  }
+  .info-val.mono { font-family: var(--font-mono); font-size: 11px; }
+  .action-btn {
+    flex-shrink: 0;
+    height: 26px;
+    padding: 0 12px;
+    border: 0.5px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font: 500 12px/14px var(--font-sans);
+    cursor: pointer;
+  }
+  .action-btn:hover:not(:disabled) { background: var(--bg-hover); }
+  .action-btn:disabled { opacity: 0.5; cursor: progress; }
+  .action-pair { display: flex; gap: 8px; flex-shrink: 0; }
+  .warn-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .reset-steps { list-style: none; margin: 6px 0 0; padding: 0; }
+  .reset-steps li {
+    display: flex;
+    gap: 6px;
+    font: 400 11px/16px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .reset-steps .step-mark { color: var(--green); flex-shrink: 0; }
+  .reset-steps li.step-bad .step-mark,
+  .reset-steps li.step-bad { color: var(--red, #FF3B30); }
 </style>

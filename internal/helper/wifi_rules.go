@@ -1,12 +1,17 @@
 package helper
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 	"github.com/korjwl1/wireguide/internal/wifi"
@@ -49,27 +54,12 @@ func (h *Helper) loadUserSettings() (*storage.Settings, error) {
 // than misfiring on the old network's name, while subnet/MAC rules keep
 // working off fresh data. An empty stamp (no report yet, or gateway
 // unknown at report time) never invalidates.
+//
+// The context also carries the default-route interface, whether that is
+// Wi-Fi, whether a default route exists, and whether the network
+// fingerprint has settled (see automation_state.go).
 func (h *Helper) currentNetworkContext() wifi.NetworkContext {
-	ssid := ""
-	if h.wifiMon != nil {
-		ssid = h.wifiMon.LastSSID()
-	}
-	gw := wifi.GatewayMAC()
-	if ssid != "" && gw != "" {
-		h.wifiMu.Lock()
-		stamp := h.ssidStampGW
-		h.wifiMu.Unlock()
-		if stamp != "" && stamp != gw {
-			slog.Debug("SSID considered stale: gateway changed since GUI report",
-				"ssid", ssid, "stamped_gw", stamp, "current_gw", gw)
-			ssid = ""
-		}
-	}
-	return wifi.NetworkContext{
-		SSID:        ssid,
-		PhysicalIPs: wifi.PhysicalInterfaceIPs(),
-		GatewayMAC:  gw,
-	}
+	return h.currentNetworkState().ctx
 }
 
 // handleSSIDChange is one trigger for Automation re-evaluation: the
@@ -91,6 +81,9 @@ func (h *Helper) handleSSIDChange(oldSSID, newSSID string) {
 // rules is never touched. reevalMu serialises evaluations so the slow
 // connect/disconnect calls from two overlapping triggers can't race.
 func (h *Helper) reevaluateAutomation(reason string) {
+	if !h.guiSeen.Load() { // dormant until a GUI attaches (see Helper.guiSeen)
+		return
+	}
 	h.reevalMu.Lock()
 	defer h.reevalMu.Unlock()
 
@@ -102,29 +95,115 @@ func (h *Helper) reevaluateAutomation(reason string) {
 	settings.EnsureAutomation()
 	auto := settings.Automation
 	if auto == nil || len(auto.PerTunnel) == 0 {
+		h.pruneLatchesWithoutRules(nil)
+		h.pruneAutomationDecisions(nil)
 		return
 	}
 
-	ctx := h.currentNetworkContext()
+	st := h.currentNetworkState()
+	ctx := st.ctx
+	h.pruneManualOverrides(st)
+	h.pruneLatchesWithoutRules(auto.PerTunnel)
+	h.pruneAutomationDecisions(auto.PerTunnel)
 
 	active := make(map[string]bool)
-	for _, n := range h.manager.ActiveTunnels() {
+	for _, n := range h.automationActiveTunnels() {
 		active[n] = true
 	}
 
+	// Events are broadcast only after each connect/disconnect below has
+	// returned — they release connectMu before returning — so nothing is
+	// ever emitted under it.
+	// note records a decision and broadcasts it right away when it is
+	// reportable — immediately after each connect/disconnect returns (it
+	// has released connectMu by then), so a successful connect's
+	// event.automation + auto_connect are not delayed behind slower work
+	// on other tunnels in the same pass.
+	note := func(ev *ipc.AutomationEventPayload) bool {
+		if ev == nil || !h.noteAutomationDecision(*ev) {
+			return false
+		}
+		h.emitAutomationEvents([]ipc.AutomationEventPayload{*ev})
+		return true
+	}
+
+	anyNegated, anyMedium := false, false
 	for _, name := range auto.TunnelNames() {
-		state := wifi.Evaluate(auto.PerTunnel[name], ctx)
+		rules := auto.PerTunnel[name]
+		h.noteRulesLoaded(name, rules)
+		if wifi.HasNegated(rules) {
+			anyNegated = true
+		}
+		if wifi.UsesMedium(rules) {
+			anyMedium = true
+		}
+		if latch, ok := h.manualLatchFor(name); ok {
+			ev := automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil)
+			lvl := slog.LevelDebug
+			if note(&ev) {
+				lvl = slog.LevelInfo
+			}
+			slog.Log(context.Background(), lvl, "automation: tunnel latched by manual override, skipping",
+				"tunnel", name, "disconnected", latch.disconnected, "reason", reason)
+			continue
+		}
+		state, info := wifi.EvaluateDetailed(rules, ctx)
+		if info.Held {
+			ev := automationEvent(name, ipc.AutomationActionHeld, info.RuleIndex, rules, ctx, nil)
+			lvl := slog.LevelDebug
+			if note(&ev) {
+				lvl = slog.LevelInfo
+			}
+			slog.Log(context.Background(), lvl, "automation: negated rule undecidable, holding",
+				"tunnel", name, "rule", info.RuleIndex, "reason", reason,
+				"ssid", ctx.SSID, "settled", ctx.Settled, "online", ctx.Online)
+		}
+		// A decided rule whose desired state already holds is a (silent)
+		// decision too: forget the last reported one, so a later held /
+		// latched episode (e.g. the next roam blip) counts as a change and
+		// is reported once again.
 		switch state {
 		case wifi.StateConnect:
 			if !active[name] {
-				h.automationConnect(name, reason, ctx.SSID)
+				note(h.automationConnect(name, reason, ctx, rules, info.RuleIndex))
+			} else {
+				h.clearAutomationDecision(name)
 			}
 		case wifi.StateDisconnect:
 			if active[name] {
 				slog.Info("automation: rule disconnect", "tunnel", name, "reason", reason, "ssid", ctx.SSID)
-				h.disconnectAutoManaged(name)
+				note(h.disconnectAutoManaged(name, ctx, rules, info.RuleIndex))
+			} else {
+				// Already down, but a health-check retry left over from a
+				// failed reconnect may still be pending for it; automation
+				// wants it down, so that retry must not bring it back.
+				if h.monitor != nil {
+					h.monitor.CancelRetryFor(name)
+				}
+				h.clearAutomationDecision(name)
+			}
+		case wifi.StateUnmanaged:
+			if !info.Held {
+				h.clearAutomationDecision(name)
 			}
 		}
+	}
+
+	// A negated rule can't act, and a manual latch can't clear, until the
+	// network has been stable for the settle window, and nothing else
+	// re-triggers evaluation then.
+	// An unknown medium (macOS: interface not yet in the hardware-port
+	// listing) is re-checked shortly, since a corrected classification
+	// changes no fingerprint and triggers nothing by itself.
+	delay := time.Duration(-1)
+	if (anyNegated || h.hasManualOverrides()) && !ctx.Settled {
+		delay = st.settleRemaining
+	}
+	if h.mediumRetryDue(ctx, anyMedium) && (delay < 0 || mediumRetryInterval < delay) {
+		delay = mediumRetryInterval
+	}
+	if delay >= 0 {
+		h.armSettleTimer(delay)
 	}
 }
 
@@ -141,7 +220,8 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 	settings.EnsureAutomation()
 	auto := settings.Automation
 
-	ctx := h.currentNetworkContext()
+	st := h.peekNetworkState()
+	ctx := st.ctx
 
 	ipStrs := make([]string, 0, len(ctx.PhysicalIPs))
 	for _, ip := range ctx.PhysicalIPs {
@@ -153,22 +233,39 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 		active[n] = true
 	}
 
-	resp := ipc.AutomationPreviewResponse{SSID: ctx.SSID, PhysicalIPs: ipStrs, GatewayMAC: ctx.GatewayMAC}
+	h.previewDriftCheck(auto, st)
+
+	resp := ipc.AutomationPreviewResponse{
+		SSID: ctx.SSID, PhysicalIPs: ipStrs, GatewayMAC: ctx.GatewayMAC,
+		PrimaryIface: ctx.PrimaryIface, PrimaryIsWiFi: ctx.PrimaryIsWiFi,
+		Online: ctx.Online, Settled: ctx.Settled, Medium: ctx.Medium,
+		SettleRemainingSec: int((st.settleRemaining + time.Second - 1) / time.Second),
+	}
 	if auto != nil {
 		for _, name := range auto.TunnelNames() {
 			rules := auto.PerTunnel[name]
 			decision := "unmanaged"
-			switch wifi.Evaluate(rules, ctx) {
+			state, info := wifi.EvaluateDetailed(rules, ctx)
+			switch state {
 			case wifi.StateConnect:
 				decision = "connect"
 			case wifi.StateDisconnect:
 				decision = "disconnect"
+			}
+			_, latched := h.manualLatchFor(name)
+			if info.Held {
+				decision = "held"
+			}
+			if latched {
+				decision = "latched"
 			}
 			resp.Tunnels = append(resp.Tunnels, ipc.AutomationTunnelDecision{
 				Name:      name,
 				RuleCount: len(rules),
 				Decision:  decision,
 				Active:    active[name],
+				Held:      info.Held,
+				Latched:   latched,
 			})
 		}
 	}
@@ -176,21 +273,53 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 }
 
 // automationConnect brings up a tunnel a rule matched and records it in
-// the auto-managed map. Caller holds reevalMu.
-func (h *Helper) automationConnect(name, reason, ssid string) {
+// the auto-managed map. Caller holds reevalMu. It returns the event to
+// broadcast (nil when there is nothing to report); the caller emits it,
+// never under connectMu. ruleIndex/rules identify the deciding rule.
+func (h *Helper) automationConnect(name, reason string, ctx wifi.NetworkContext, rules []wifi.Rule, ruleIndex int) *ipc.AutomationEventPayload {
+	ssid := ctx.SSID
+	fail := func(err error) *ipc.AutomationEventPayload {
+		ev := automationEvent(name, ipc.AutomationActionConnect, ruleIndex, rules, ctx, err)
+		return &ev
+	}
 	if h.userTunnelStore == nil {
 		slog.Warn("automation: tunnel store unavailable, cannot connect", "tunnel", name)
-		return
+		return fail(fmt.Errorf("tunnel store unavailable"))
 	}
 	cfg, err := h.userTunnelStore.Load(name)
 	if err != nil {
 		slog.Warn("automation: cannot load tunnel config", "tunnel", name, "error", err)
-		return
+		return fail(fmt.Errorf("cannot load tunnel config: %w", err))
 	}
+	if cidr, addr, overlaps := overlapsLocalNetwork(cfg); overlaps {
+		ev := automationEvent(name, ipc.AutomationActionSkippedOverlap, ruleIndex, rules, ctx, nil)
+		lvl := slog.LevelDebug
+		if h.wouldReportDecision(ev) {
+			lvl = slog.LevelInfo
+		}
+		slog.Log(context.Background(), lvl, "automation: not connecting, tunnel AllowedIPs overlap the local network",
+			"tunnel", name, "cidr", cidr, "local_address", addr.String())
+		return &ev
+	}
+	hc, _ := h.sidecarHealthCheck(name)
 	slog.Info("automation: rule connect", "tunnel", name, "reason", reason, "ssid", ssid)
 	h.connectMu.Lock()
+	// A manual connect/disconnect may have landed while we waited for
+	// connectMu (our own route churn re-triggers evaluation within
+	// milliseconds); its latch is recorded before it releases the lock.
+	if _, latched := h.manualLatchFor(name); latched {
+		h.connectMu.Unlock()
+		slog.Info("automation: connect skipped, manual override latched", "tunnel", name)
+		ev := automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil)
+		return &ev
+	}
+	commitReason, undoReason := h.beginConnectReason(name, domain.ChangeReasonAutomation)
 	err = h.doConnectHeld(cfg)
-	if err == nil {
+	if err != nil {
+		undoReason()
+	} else {
+		commitReason()
+		h.setHealthOverride(name, hc)
 		// Same firewall follow-up a manual connect does — otherwise a
 		// headless automation connect gets no DNS protection and, if the
 		// kill switch is already on, its endpoints are never permitted so
@@ -200,13 +329,16 @@ func (h *Helper) automationConnect(name, reason, ssid string) {
 	h.connectMu.Unlock()
 	if err != nil {
 		slog.Warn("automation connect failed", "tunnel", name, "error", err)
-		return
+		return fail(err)
 	}
 	h.wifiMu.Lock()
 	h.autoConnectedBy[name] = ssid
 	h.wifiMu.Unlock()
-	// Notify GUI so it runs the same post-connect refresh as a manual connect.
-	h.server.Broadcast(ipc.EventAutoConnect, ipc.AutoConnectPayload{TunnelName: name})
+	// The caller broadcasts this event followed by auto_connect (the post-
+	// connect refresh trigger every GUI relies on), in that order, so a
+	// GUI that understands event.automation has the rule details first.
+	ev := automationEvent(name, ipc.AutomationActionConnect, ruleIndex, rules, ctx, nil)
+	return &ev
 }
 
 // disconnectAutoManaged tears down a tunnel that the wifi-rule
@@ -218,34 +350,33 @@ func (h *Helper) automationConnect(name, reason, ssid string) {
 // would re-Connect from a stale activeCfgs entry; and the next
 // SSID change handler would try to disconnect a tunnel already
 // gone.
-func (h *Helper) disconnectAutoManaged(name string) {
+func (h *Helper) disconnectAutoManaged(name string, ctx wifi.NetworkContext, rules []wifi.Rule, ruleIndex int) *ipc.AutomationEventPayload {
+	// Same lock the manual disconnect path holds, so a rule-driven teardown
+	// can't interleave with a Connect/Disconnect from a GUI or the CLI.
+	// Lock order: reevalMu (held by our caller) -> connectMu. Nothing under
+	// connectMu may re-enter reevaluateAutomation or broadcast the event
+	// (the caller emits the returned event after we release connectMu).
+	h.connectMu.Lock()
+	if _, latched := h.manualLatchFor(name); latched {
+		h.connectMu.Unlock()
+		slog.Info("automation: disconnect skipped, manual override latched", "tunnel", name)
+		ev := automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil)
+		return &ev
+	}
 	if h.monitor != nil {
 		h.monitor.CancelRetryFor(name)
 	}
-	// Snapshot the interface name before teardown so we can strip it from
-	// the kill-switch filter set afterwards, exactly as handleDisconnect
-	// does. Without this a rule-driven disconnect leaves a dead tunnel's
-	// LUID permitted in the WFP filters (issue #12).
-	iface := ""
-	if h.firewall.IsKillSwitchEnabled() {
-		for _, st := range h.manager.AllStatuses() {
-			if st != nil && st.TunnelName == name && st.InterfaceName != "" {
-				iface = st.InterfaceName
-				break
-			}
-		}
-	}
-	if err := h.manager.DisconnectTunnel(name); err != nil {
-		slog.Warn("automation disconnect failed", "tunnel", name, "error", err)
-	}
-	if iface != "" {
-		if err := h.firewall.RemoveKillSwitchTunnel(iface); err != nil {
-			slog.Warn("RemoveKillSwitchTunnel after automation disconnect failed",
-				"interface", iface, "error", err)
+	undoReason := h.beginDisconnectReason(name, domain.ChangeReasonAutomation)
+	disconnectErr := h.manager.DisconnectTunnel(name)
+	if disconnectErr != nil {
+		slog.Warn("automation disconnect failed", "tunnel", name, "error", disconnectErr)
+		if !h.tunnelGone(name) {
+			undoReason()
 		}
 	}
 	h.mu.Lock()
 	delete(h.activeCfgs, name)
+	h.dropHealthOverrideLocked(name)
 	h.mu.Unlock()
 	h.wifiMu.Lock()
 	delete(h.autoConnectedBy, name)
@@ -255,5 +386,142 @@ func (h *Helper) disconnectAutoManaged(name string) {
 	h.latencyMu.Lock()
 	delete(h.latencyByTunnel, name)
 	h.latencyMu.Unlock()
+	// Strips the dead tunnel's kill-switch permit (issue #12) and its DNS
+	// rules, exactly as handleDisconnect does.
+	h.reconcileFirewallLocked("automation-disconnect")
+	h.cancelLegacyRetryIfIdle()
+	h.connectMu.Unlock()
 	h.maybeArmShutdownAfterTeardown("rule-driven disconnect, no GUI attached")
+	ev := automationEvent(name, ipc.AutomationActionDisconnect, ruleIndex, rules, ctx, disconnectErr)
+	return &ev
+}
+
+// previewDriftInterval rate-limits the preview's self-heal evaluation.
+const previewDriftInterval = 5 * time.Second
+
+// previewDriftCheck heals a stale settle tracker. The preview only Peeks,
+// so if rules exist that depend on settling (a negated rule, or a manual
+// latch awaiting a settled identity) but the tracker has not settled and
+// no settle timer is pending, nothing would ever Observe the network and
+// the GUI would show "settling" forever. One real evaluation observes the
+// fingerprint and arms the timer. Asynchronous and rate-limited; never runs
+// under reevalMu/connectMu.
+func (h *Helper) previewDriftCheck(auto *wifi.Automation, st networkState) {
+	if st.ctx.Settled {
+		return
+	}
+	needs := h.hasManualOverrides()
+	if auto != nil && !needs {
+		for _, rules := range auto.PerTunnel {
+			if wifi.HasNegated(rules) {
+				needs = true
+				break
+			}
+		}
+	}
+	if !needs || h.settleTimerArmed() {
+		return
+	}
+	now := time.Now()
+	if h.previewDriftNow != nil {
+		now = h.previewDriftNow()
+	}
+	h.previewDriftMu.Lock()
+	if !h.previewDriftLast.IsZero() && now.Sub(h.previewDriftLast) < previewDriftInterval {
+		h.previewDriftMu.Unlock()
+		return
+	}
+	h.previewDriftLast = now
+	h.previewDriftMu.Unlock()
+	h.goSafe("previewDrift", func() { h.triggerReevaluate("preview-drift") })
+}
+
+// triggerReevaluate runs an automation evaluation, or the test hook.
+func (h *Helper) triggerReevaluate(reason string) {
+	if h.reevalTrigger != nil {
+		h.reevalTrigger(reason)
+		return
+	}
+	h.reevaluateAutomation(reason)
+}
+
+// rulesWatchDefaultInterval is how often config.json is polled for
+// Automation changes.
+const rulesWatchDefaultInterval = 2 * time.Second
+
+// rulesWatcher remembers the last config.json stat and automation hash.
+type rulesWatcher struct {
+	mtime, size int64
+	hash        string
+}
+
+func (h *Helper) rulesStatFn(path string) (int64, int64, error) {
+	if h.rulesStat != nil {
+		return h.rulesStat(path)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	return fi.ModTime().UnixNano(), fi.Size(), nil
+}
+
+// automationHash is a canonical hash of ONLY the automation block, so
+// unrelated settings changes (theme, ...) don't trigger evaluations.
+func (h *Helper) automationHash() (string, bool) {
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return "", false
+	}
+	settings.EnsureAutomation()
+	b, err := json.Marshal(settings.Automation)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), true
+}
+
+// rulesWatchTick checks config.json once. When its stat changed and the
+// automation block differs from the last one seen it re-evaluates. Holds no
+// locks while statting/loading.
+func (h *Helper) rulesWatchTick(w *rulesWatcher) {
+	mt, sz, err := h.rulesStatFn(filepath.Join(h.userAppSupport, "config.json"))
+	if err != nil || (mt == w.mtime && sz == w.size) {
+		return
+	}
+	w.mtime, w.size = mt, sz
+	hash, ok := h.automationHash()
+	if !ok || hash == w.hash {
+		return
+	}
+	w.hash = hash
+	slog.Info("automation rules changed; re-evaluating")
+	h.triggerReevaluate("rules-changed")
+}
+
+// rulesWatchLoop polls config.json for Automation changes (see
+// rulesWatchTick). The baseline is recorded without triggering: the
+// startup evaluation already covers the rules present at start.
+func (h *Helper) rulesWatchLoop() {
+	if h.userAppSupport == "" {
+		return
+	}
+	w := &rulesWatcher{}
+	w.mtime, w.size, _ = h.rulesStatFn(filepath.Join(h.userAppSupport, "config.json"))
+	w.hash, _ = h.automationHash()
+	interval := h.rulesWatchInterval
+	if interval <= 0 {
+		interval = rulesWatchDefaultInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-h.done:
+			return
+		case <-ticker.C:
+			h.rulesWatchTick(w)
+		}
+	}
 }

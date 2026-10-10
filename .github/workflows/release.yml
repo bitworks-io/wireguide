@@ -358,7 +358,10 @@ jobs:
         with:
           files: artifacts/*
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Fork revisions (vX.Y.Z-bitworks.N) are real releases: GitHub's
+          # /releases/latest never returns prereleases, so flagging them would
+          # leave the in-app update check with nothing to find.
+          prerelease: ${{ contains(github.ref_name, '-') && !contains(github.ref_name, '-bitworks.') }}
           body_path: CHANGELOG.md
           fail_on_unmatched_files: true
 
@@ -456,12 +459,20 @@ jobs:
                 delete: [
                   "/Library/PrivilegedHelperTools/com.wireguide.helper",
                   "/Library/LaunchDaemons/com.wireguide.helper.plist",
+                  "/var/run/com.wireguide.helper.sock",
+                  "/Library/Application Support/wireguide/pf-token",
                 ],
                 trash: [
                   "~/Library/Application Support/WireGuide",
                   "~/Library/Preferences/com.korjwl1.wireguide.plist",
                   "/var/run/wireguide",
                   "/var/log/wireguide-helper.log",
+                  "/var/log/wireguide-helper.log.1",
+                  "/var/log/wireguide-helper.log.2",
+                  "/var/log/wireguide-helper.log.3",
+                  "/var/log/wireguide-helper.log.4",
+                  "/var/log/wireguide-helper.log.5",
+                  "/var/log/wireguide-helper.stderr.log",
                 ]
           end
           EOF

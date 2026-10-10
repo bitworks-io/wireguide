@@ -4,6 +4,8 @@
   import { tunnels, selectedTunnel, connectionStatus } from '../stores/tunnels.js';
   import { compactList, listSort, listActiveOnTop, saveListPrefs } from '../stores/ui.js';
   import { t } from '../i18n/index.js';
+  import { automationPreview } from '../stores/automation.js';
+  import { verdictFor, verdictText, verdictTone } from './automationLine.js';
 
   const dispatch = createEventDispatcher();
   let search = '';
@@ -130,6 +132,18 @@
             <span class="tunnel-name">{tun.name}</span>
             {#if tun.endpoint}
               <span class="tunnel-meta">{tun.endpoint}</span>
+            {/if}
+            {#if verdictFor($automationPreview, tun.name)}
+              {@const av = verdictFor($automationPreview, tun.name)}
+              {@const line = verdictText($t, av)}
+              {#if line}
+                <span class="tunnel-auto tunnel-auto-{verdictTone(av)}" title={line}>{line}</span>
+              {/if}
+            {/if}
+            {#if tun.dns_mode}
+              <span class="tunnel-dns" title={$t('tunnel.dns_chip_' + tun.dns_mode + '_hint')}>
+                {$t('tunnel.dns_chip_' + tun.dns_mode, { domains: (tun.dns_domains || []).join(', ') })}
+              </span>
             {/if}
           </div>
         </button>
@@ -406,13 +420,32 @@
     letter-spacing: 0.01em;
   }
 
+  .tunnel-dns {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 400 11px/14px var(--font-sans);
+    color: var(--text-muted);
+  }
+
   /* --- Compact mode: dense single-line rows (issue #16) --- */
   .list-items.compact .tunnel-item {
     min-height: 34px;
     padding: 4px 10px;
     margin-bottom: 1px;
   }
-  .list-items.compact .tunnel-meta {
+  .tunnel-auto {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 400 11px/14px var(--font-sans);
+    color: var(--text-muted);
+  }
+  .tunnel-auto-warn { color: var(--orange, #FF9500); }
+
+  .list-items.compact .tunnel-meta,
+  .list-items.compact .tunnel-dns,
+  .list-items.compact .tunnel-auto {
     display: none;
   }
   .list-items.compact .tunnel-item.connected::before {

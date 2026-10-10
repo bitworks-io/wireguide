@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"math"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/icons"
 	"golang.org/x/image/draw"
@@ -220,10 +222,18 @@ func trimAndSquare(src image.Image) *image.NRGBA {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			_, _, _, a := src.At(x, y).RGBA()
 			if a > 0 {
-				if x < minX { minX = x }
-				if y < minY { minY = y }
-				if x > maxX { maxX = x }
-				if y > maxY { maxY = y }
+				if x < minX {
+					minX = x
+				}
+				if y < minY {
+					minY = y
+				}
+				if x > maxX {
+					maxX = x
+				}
+				if y > maxY {
+					maxY = y
+				}
 			}
 		}
 	}
@@ -234,7 +244,9 @@ func trimAndSquare(src image.Image) *image.NRGBA {
 	cropH := maxY - minY + 1
 	// Square canvas: use the larger dimension
 	side := cropW
-	if cropH > side { side = cropH }
+	if cropH > side {
+		side = cropH
+	}
 	dst := image.NewNRGBA(image.Rect(0, 0, side, side))
 	offX := (side - cropW) / 2
 	offY := (side - cropH) / 2
@@ -278,7 +290,9 @@ func buildTrayOnIcon(wColor color.NRGBA) []byte {
 	// Green badge: bottom-left corner.
 	w, h := bounds.Dx(), bounds.Dy()
 	cx, cy, r := w/5, h-h/5, h/8
-	if r < 3 { r = 3 }
+	if r < 3 {
+		r = 3
+	}
 	green := color.NRGBA{52, 199, 89, 255} // macOS systemGreen
 	for y := cy - r; y <= cy+r; y++ {
 		for x := cx - r; x <= cx+r; x++ {
@@ -356,7 +370,11 @@ type trayManager struct {
 	mu            sync.Mutex
 	activeTunnels map[string]bool // cached from status events
 	hasHandshake  map[string]bool // per-tunnel handshake status
-	rebuildTimer  *time.Timer     // debounce timer for rebuildMenu
+	// dnsSuffix caches each tunnel's tooltip DNS annotation (" (split
+	// DNS)" / " (replaces DNS)"), filled by rebuildMenu from the stored
+	// configs so setIconState stays free of disk I/O.
+	dnsSuffix    map[string]string
+	rebuildTimer *time.Timer // debounce timer for rebuildMenu
 	// menu is the ONE Menu object backing the tray for the app's whole
 	// lifetime. rebuildMenu clears and refills it in place instead of
 	// creating a fresh Menu: Wails reuses the same NSMenu instance on
@@ -483,8 +501,8 @@ func (t *trayManager) initialBuild() {
 // state, and updates the tooltip. Called from the status event stream, so
 // it must stay O(1) — no IPC, no disk I/O.
 //
-//   disconnected → W glyph (white on dark menu bars, black on light)
-//   connected    → same W with a green dot badge
+//	disconnected → W glyph (white on dark menu bars, black on light)
+//	connected    → same W with a green dot badge
 func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string]bool) {
 	newSet := make(map[string]bool, len(activeNames))
 	for _, n := range activeNames {
@@ -524,8 +542,7 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 		}
 		if anyConnected {
 			t.tray.SetIcon(onIcon)
-			tooltip := "WireGuide — " + strings.Join(activeNames, ", ")
-			t.tray.SetTooltip(tooltip)
+			t.tray.SetTooltip(t.tooltipFor(activeNames))
 		} else {
 			if runtime.GOOS == "darwin" || ((runtime.GOOS == "windows" || runtime.GOOS == "linux") && len(offIcon) > 0) {
 				t.tray.SetIcon(offIcon)
@@ -542,8 +559,7 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 	} else if anyConnected {
 		// Active names may have reordered without count changing.
 		// Refresh tooltip only when names differ from last broadcast.
-		newTooltip := "WireGuide — " + strings.Join(activeNames, ", ")
-		t.tray.SetTooltip(newTooltip)
+		t.tray.SetTooltip(t.tooltipFor(activeNames))
 	}
 
 	// Rebuild menu if active set changed OR if handshake state changed for
@@ -562,6 +578,19 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 	if changed {
 		t.scheduleRebuild()
 	}
+}
+
+// tooltipFor renders the connected-state tray tooltip, appending each
+// tunnel's DNS mode from the cache (unknown tunnels get no annotation).
+func (t *trayManager) tooltipFor(activeNames []string) string {
+	t.mu.Lock()
+	suffix := t.dnsSuffix
+	t.mu.Unlock()
+	parts := make([]string, len(activeNames))
+	for i, n := range activeNames {
+		parts[i] = n + suffix[n]
+	}
+	return "WireGuide — " + strings.Join(parts, ", ")
 }
 
 // scheduleRebuild debounces rebuildMenu calls — multiple triggers within 100ms
@@ -608,10 +637,30 @@ func (t *trayManager) rebuildMenu() {
 	// concurrent setIconState was previously able to swap activeTunnels
 	// between the two reads, leading to "connected but no handshake
 	// glyph" flickers.
+	suffix := make(map[string]string, len(tunnels))
+	for _, tun := range tunnels {
+		suffix[tun.Name] = diag.DNSMode{Mode: tun.DNSMode, Domains: tun.DNSDomains}.TooltipSuffix()
+	}
 	t.mu.Lock()
 	activeSet := t.activeTunnels
 	hsMap := t.hasHandshake
+	t.dnsSuffix = suffix
 	t.mu.Unlock()
+	// The tooltip may have been set before the DNS modes were cached.
+	// Re-read the active set now: a disconnect may have landed since the
+	// snapshot above, and a stale name here would overwrite "WireGuide".
+	t.mu.Lock()
+	names := make([]string, 0, len(t.activeTunnels))
+	for n := range t.activeTunnels {
+		names = append(names, n)
+	}
+	t.mu.Unlock()
+	sort.Strings(names)
+	if len(names) > 0 {
+		t.tray.SetTooltip(t.tooltipFor(names))
+	} else {
+		t.tray.SetTooltip("WireGuide")
+	}
 
 	// Refill the single persistent Menu in place (see the menu field
 	// doc): Wails reuses its NSMenu on Update(), and AppKit live-updates

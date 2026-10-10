@@ -12,12 +12,30 @@
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
   import SSIDPermissionBanner from './SSIDPermissionBanner.svelte';
+  import { automationPreview, automationCheckedAt, AUTOMATION_POLL_MS, refreshAutomationPreview } from '../stores/automation.js';
+  import { networkLines, verdictFor, verdictText, verdictTone } from './automationLine.js';
+  import { removeAt, restoreAt, UNDO_MS } from './automationSafety.js';
+  import { locationAuth } from '../stores/automation.js';
+  import { noteOwnSave, setRulesBaseline } from '../stores/automationWatch.js';
+  import {
+    MEDIUMS, DEFAULT_MEDIUM, macInvalid, macCanon, commitDraft, rowFromDisk, blankRow,
+    cleanedRule, rulesDiffer,
+  } from './automationRules.js';
 
   export let TunnelService;
   export let tunnelName = '';
   export let open = false;
 
   let rules = [];
+
+  // Live "why" strip: what network the engine sees and what it decided for
+  // THIS tunnel. Fed by the shared poller (App.svelte); opening the editor
+  // also refreshes immediately so it never opens on a stale reading.
+  $: whyNet = networkLines($t, $automationPreview, $locationAuth);
+  $: whyVerdict = verdictFor($automationPreview, tunnelName);
+  $: whyLine = whyVerdict ? verdictText($t, whyVerdict) : '';
+  $: whySlowPoll = AUTOMATION_POLL_MS > 5000;
+  $: if (open) refreshAutomationPreview();
   // Local-only row identity for the {#each} key; never persisted
   // (persistSet() rebuilds plain objects). Monotonic and never reset, so
   // keys stay unique across loads. Note this does NOT preserve DOM across
@@ -44,6 +62,8 @@
     // on loadedFor, and awaiting first would leave a window where any
     // state change re-runs it and double-invokes load for the same name.
     loadedFor = name;
+    clearUndo();
+    showBackups = false;
     const gen = ++loadGen;
     // Persist any pending edit for the tunnel we're leaving BEFORE we
     // overwrite `rules`, so switching tunnels never drops the last change.
@@ -55,19 +75,7 @@
       const per = s?.automation?.per_tunnel_rules || {};
       // Deep-copy so edits don't mutate the fetched object before save.
       rules = (per[name] || []).map(r => {
-        const row = {
-          _id: ++ruleId,
-          when: {
-            type: r.when?.type || 'network',
-            ssid: r.when?.ssid || '',
-            subnet: r.when?.subnet || '',
-            gateway_mac: r.when?.gateway_mac || '',
-            // Not editable here; carried through the round-trip so a GUI
-            // save never strips a label another writer attached.
-            label: r.when?.label || '',
-          },
-          do: r.do || 'connect',
-        };
+        const row = rowFromDisk(r, ++ruleId);
         // Seed the last-committed form so an existing rule that turns
         // incomplete mid-edit keeps its on-disk value (see persistSet).
         row._committed = cleanedRule(row);
@@ -101,12 +109,66 @@
     // No save() here: a blank draft is not a configuration change — it
     // becomes persistable on the first input that completes it. Saving
     // now would also manufacture a self-write config_changed echo.
-    rules = [...rules, { _id: ++ruleId, when: { type: 'network', ssid: '', subnet: '', gateway_mac: '', label: '' }, do: 'connect' }];
+    rules = [...rules, blankRow(++ruleId)];
   }
 
+  // "Rule removed — Undo" for UNDO_MS: keeps the removed row and its index
+  // so Undo puts it back where it was. A newer removal replaces the toast
+  // (one level: the user's deletion is deliberate, this is a convenience).
+  let undoItem = null; // { row, index }
+  let undoTimer = null;
+  function clearUndo() {
+    if (undoTimer) { clearTimeout(undoTimer); undoTimer = null; }
+    undoItem = null;
+  }
   function removeRule(i) {
-    rules = rules.filter((_, idx) => idx !== i);
+    const r = removeAt(rules, i);
+    if (r.removed === null) return;
+    rules = r.list;
     save();
+    clearUndo();
+    undoItem = { row: r.removed, index: r.index };
+    undoTimer = setTimeout(clearUndo, UNDO_MS);
+  }
+  function undoRemove() {
+    if (!undoItem) return;
+    rules = restoreAt(rules, undoItem.row, undoItem.index);
+    clearUndo();
+    save();
+  }
+
+  // "Restore previous rules…": snapshots written by the GUI on every
+  // successful save. Restoring goes through the validated save path.
+  let showBackups = false;
+  let backups = [];
+  let backupError = '';
+  async function openBackups() {
+    showBackups = !showBackups;
+    backupError = '';
+    if (!showBackups) return;
+    await flush();
+    try {
+      backups = (await TunnelService.ListAutomationBackups(tunnelName)) || [];
+    } catch (e) {
+      backups = [];
+      backupError = errText(e);
+    }
+  }
+  async function restoreBackup(b) {
+    backupError = '';
+    const name = tunnelName;
+    try {
+      await flush();
+      // Register the write first so its config_changed echo is never
+      // reported as an outside edit.
+      noteOwnSave(name, (await TunnelService.AutomationBackupRules(b.name, name)) || []);
+      await TunnelService.RestoreAutomationBackup(b.name, name);
+      setRulesBaseline(await TunnelService.GetSettings());
+      showBackups = false;
+      loadedFor = ''; // re-run the reactive load for this tunnel
+    } catch (e) {
+      backupError = errText(e);
+    }
   }
 
   // Lightweight format validation for user feedback. The engine is
@@ -116,20 +178,53 @@
   // user can fix it. Empty is "incomplete", not "invalid".
   // A MAC is valid in any common style — colon, dash, or no separator —
   // as long as it reduces to exactly 12 hex digits. The engine compares
-  // canonically (separator/case-insensitive), and we normalise on commit.
-  function macHex(v) { return (v || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase(); }
-  function macInvalid(v) { const s = (v || '').trim(); return s !== '' && macHex(s).length !== 12; }
-  // Canonical form: lower-case, colon-separated (b0:38:6c:54:8b:ab).
-  function macCanon(v) {
-    const h = macHex(v);
-    if (h.length !== 12) return (v || '').trim(); // leave as-is so the user can keep fixing
-    return h.match(/.{2}/g).join(':');
-  }
+  // canonically (separator/case-insensitive), and we normalise on commit
+  // (macInvalid/macCanon live in automationRules.js).
   function onMacChange(rule) {
     rule.when.gateway_mac = macCanon(rule.when.gateway_mac);
     rules = rules;
     save();
   }
+  // Switching to "connection type" needs a concrete medium, or the select
+  // would show one value while cleanedRule() treats the row as incomplete.
+  function onTypeChange(rule) {
+    if (rule.when.type === 'medium' && !MEDIUMS.includes(rule.when.medium)) rule.when.medium = DEFAULT_MEDIUM;
+    rules = rules;
+    save();
+  }
+
+  // SSID tags: typing a comma or pressing Enter commits the name as a tag;
+  // the remaining draft text still counts (see cleanedRule).
+  function onSSIDInput(rule) {
+    if ((rule.when.ssid || '').includes(',')) { commitDraft(rule.when, false); rules = rules; }
+    save();
+  }
+  function onSSIDKeydown(e, rule) {
+    // Never commit a half-composed IME (Hangul/Kana) name; WebKit may
+    // report that Enter as keyCode 229 without isComposing.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitDraft(rule.when, true);
+      rules = rules;
+      save();
+    } else if (e.key === 'Backspace' && !rule.when.ssid && rule.when.ssids.length) {
+      rule.when.ssids = rule.when.ssids.slice(0, -1);
+      rules = rules;
+      save();
+    }
+  }
+  function onSSIDChange(rule) {
+    commitDraft(rule.when, true);
+    rules = rules;
+    save();
+  }
+  function removeSSID(rule, j) {
+    rule.when.ssids = rule.when.ssids.filter((_, idx) => idx !== j);
+    rules = rules;
+    save();
+  }
+
   function cidrInvalid(v) {
     const s = (v || '').trim();
     if (s === '') return false;
@@ -195,17 +290,7 @@
   // value instead of being transiently deleted (and lost on a crash); a
   // never-completed draft contributes nothing. Rows leave the persisted
   // set only via removeRule() or by abandoning a draft.
-  function cleanedRule(r) {
-    const t = r.when.type;
-    let when = null;
-    if (t === 'none_match') when = { type: 'none_match' };
-    else if (t === 'ssid' && r.when.ssid.trim() !== '') when = { type: 'ssid', ssid: r.when.ssid.trim() };
-    else if (t === 'subnet' && r.when.subnet.trim() !== '') when = { type: 'subnet', subnet: r.when.subnet.trim() };
-    else if (t === 'network' && r.when.gateway_mac.trim() !== '') when = { type: 'network', gateway_mac: macCanon(r.when.gateway_mac) };
-    if (!when) return null;
-    if (r.when.label) when.label = r.when.label;
-    return { when, do: r.do };
-  }
+  // (cleanedRule lives in automationRules.js.)
   function persistSet() {
     const out = [];
     for (const r of rules) {
@@ -246,8 +331,12 @@
       // update race: a CLI SettingsStore.Update landing between the two
       // IPC calls was clobbered by our stale snapshot of every setting.
       // An empty set removes the tunnel's entry (same semantics as before).
+      // Advance the external-change baseline first so the config_changed
+      // echo of this very write is never reported as an outside edit.
+      noteOwnSave(snap.name, snap.rules);
       await TunnelService.SaveAutomationRules(snap.name, snap.rules);
     } catch (e) {
+      TunnelService.GetSettings().then(setRulesBaseline).catch(() => {});
       saveError = errText(e);
       console.error('automation save:', e);
     }
@@ -262,6 +351,8 @@
 
   async function close() {
     await flush();
+    clearUndo();
+    showBackups = false;
     open = false;
     loadedFor = '';
   }
@@ -285,25 +376,9 @@
   // normalization (load()'s type fallback, MAC canonicalization), so e.g.
   // a dash-separated MAC written by `wireguide ctl` never reads as a
   // difference from our colon form and forces a spurious reload.
-  function normRule(d) {
-    return {
-      do: d?.do || 'connect',
-      type: d?.when?.type || 'network',
-      ssid: (d?.when?.ssid || '').trim(),
-      subnet: (d?.when?.subnet || '').trim(),
-      mac: macCanon(d?.when?.gateway_mac || ''),
-      label: d?.when?.label || '',
-    };
-  }
+  // (normRule / rulesDiffer live in automationRules.js.)
   function diskDiffers(disk) {
-    const local = persistSet();
-    if (disk.length !== local.length) return true;
-    // Positional compare is intentional: order is rule priority.
-    return disk.some((d, i) => {
-      const a = normRule(d), b = normRule(local[i]);
-      return a.do !== b.do || a.type !== b.type || a.ssid !== b.ssid ||
-        a.subnet !== b.subnet || a.mac !== b.mac || a.label !== b.label;
-    });
+    return rulesDiffer(disk, persistSet());
   }
   let cfgChangedUnsub = null;
   onMount(() => {
@@ -333,6 +408,7 @@
   });
   onDestroy(() => {
     if (cfgChangedUnsub) cfgChangedUnsub();
+    clearUndo();
   });
 </script>
 
@@ -347,6 +423,20 @@
         </div>
         <button class="am-close" on:click={close} aria-label="Close"><Icon name="x" size={16} strokeWidth={2} /></button>
       </div>
+      {#if $automationPreview?.available}
+        <div class="am-why" role="status" aria-live="polite" aria-label={$t('automation.why.title')}>
+          <div class="am-why-net">
+            <span>{whyNet.network}</span>
+            {#if whyNet.settle}<span class="am-why-sep">·</span><span>{whyNet.settle}</span>{/if}
+            {#if whySlowPoll && $automationCheckedAt}
+              <span class="am-why-sep">·</span><span>{$t('automation.why.checked_at', { time: new Date($automationCheckedAt).toLocaleTimeString() })}</span>
+            {/if}
+          </div>
+          {#if whyVerdict}
+            <div class="am-why-verdict am-why-{verdictTone(whyVerdict)}">{whyLine || $t('automation.why.v_no_match')}</div>
+          {/if}
+        </div>
+      {/if}
       <p class="am-hint">{$t('automation.hint')}</p>
 
       <SSIDPermissionBanner {TunnelService} />
@@ -371,12 +461,20 @@
                 <option value="disconnect">{$t('automation.disconnect')}</option>
               </select>
               <span class="am-when">{$t('automation.when')}</span>
-              <select class="am-type" bind:value={rule.when.type} on:change={save} aria-label={$t('automation.condition')}>
+              <select class="am-type" bind:value={rule.when.type} on:change={() => onTypeChange(rule)} aria-label={$t('automation.condition')}>
                 <option value="network">{$t('automation.cond_network')}</option>
                 <option value="subnet">{$t('automation.cond_subnet')}</option>
                 <option value="ssid">{$t('automation.cond_ssid')}</option>
+                <option value="medium">{$t('automation.cond_medium')}</option>
                 <option value="none_match">{$t('automation.cond_none')}</option>
               </select>
+              {#if rule.when.type !== 'none_match'}
+                <select class="am-neg" bind:value={rule.when.negate} on:change={save} aria-label={$t('automation.negate')}
+                  title={rule.when.negate ? $t('automation.negated_hint') : ''}>
+                  <option value={false}>{$t('automation.is')}</option>
+                  <option value={true}>{$t('automation.is_not')}</option>
+                </select>
+              {/if}
               {#if rule.when.type === 'network'}
                 <input
                   class="am-val" class:am-invalid={macInvalid(rule.when.gateway_mac)}
@@ -394,12 +492,26 @@
                   bind:value={rule.when.subnet}
                   on:input={save} on:change={save} />
               {:else if rule.when.type === 'ssid'}
-                <input
-                  class="am-val"
-                  list="am-ssid-list"
-                  placeholder={currentSSID || $t('automation.ssid_placeholder')}
-                  bind:value={rule.when.ssid}
-                  on:input={save} on:change={save} />
+                <div class="am-val am-tags" title={$t('automation.ssid_tags_hint')}>
+                  {#each rule.when.ssids as tag, j}
+                    <span class="am-tag">{tag}<button class="am-tag-x" type="button"
+                      on:click={() => removeSSID(rule, j)}
+                      aria-label={$t('automation.remove_ssid', { ssid: tag })}><Icon name="x" size={9} strokeWidth={2.5} /></button></span>
+                  {/each}
+                  <input
+                    class="am-tag-input"
+                    list="am-ssid-list"
+                    placeholder={rule.when.ssids.length ? $t('automation.ssid_add_placeholder') : (currentSSID || $t('automation.ssid_placeholder'))}
+                    aria-label={$t('automation.ssid_tags_hint')}
+                    bind:value={rule.when.ssid}
+                    on:input={() => onSSIDInput(rule)}
+                    on:keydown={(e) => onSSIDKeydown(e, rule)}
+                    on:change={() => onSSIDChange(rule)} />
+                </div>
+              {:else if rule.when.type === 'medium'}
+                <select class="am-val am-medium" bind:value={rule.when.medium} on:change={save} aria-label={$t('automation.cond_medium')}>
+                  {#each MEDIUMS as m}<option value={m}>{$t(`automation.medium_${m}`)}</option>{/each}
+                </select>
               {:else}
                 <span class="am-val am-val-none">{$t('automation.cond_none_desc')}</span>
               {/if}
@@ -425,14 +537,73 @@
 
       {#if saveError}<div class="am-error">{saveError}</div>{/if}
 
-      <button class="am-add" on:click={addRule} disabled={rules.length >= MAX_RULES}>
-        <Icon name="plus" size={13} strokeWidth={2.25} /> {$t('automation.add_rule')}
-      </button>
+      {#if undoItem}
+        <div class="am-undo" role="status">
+          <span>{$t('automation.safety.removed')}</span>
+          <button type="button" class="am-undo-btn" on:click={undoRemove}>{$t('automation.safety.undo')}</button>
+        </div>
+      {/if}
+
+      {#if showBackups}
+        <div class="am-backups">
+          {#if backupError}<div class="am-error">{backupError}</div>{/if}
+          {#if backups.length === 0}
+            <div class="am-backups-empty">{$t('automation.safety.no_backups')}</div>
+          {:else}
+            {#each backups as b}
+              <div class="am-backup-row">
+                <span>{new Date(b.time).toLocaleString()} · {$t('automation.safety.rule_count', { n: b.rule_count })}</span>
+                <button type="button" class="am-undo-btn" on:click={() => restoreBackup(b)}>{$t('automation.safety.restore')}</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
+      <div class="am-footer">
+        <button class="am-add" on:click={addRule} disabled={rules.length >= MAX_RULES}>
+          <Icon name="plus" size={13} strokeWidth={2.25} /> {$t('automation.add_rule')}
+        </button>
+        <button class="am-restore" type="button" on:click={openBackups}>{$t('automation.safety.restore_open')}</button>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
+  .am-undo, .am-backup-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; border-radius: 8px; margin: 6px 0 0;
+    background: var(--bg-card); border: 0.5px solid var(--border);
+    font: 400 12px/16px var(--font-sans); color: var(--text-primary);
+  }
+  .am-undo-btn {
+    background: transparent; border: 0; color: var(--accent); cursor: pointer;
+    font: 600 12px/16px var(--font-sans); padding: 2px 6px; border-radius: 6px;
+  }
+  .am-undo-btn:hover { background: var(--bg-hover); }
+  .am-backups { margin-top: 6px; max-height: 140px; overflow-y: auto; flex-shrink: 0; }
+  .am-backups-empty { font: 400 12px/16px var(--font-sans); color: var(--text-muted); padding: 6px 2px; }
+  .am-footer { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .am-restore {
+    background: transparent; border: 0; color: var(--text-secondary); cursor: pointer;
+    font: 400 12px/16px var(--font-sans); padding: 4px 8px; border-radius: 6px; margin-left: auto;
+  }
+  .am-restore:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .am-why {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    font: 400 12px/16px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .am-why-net { display: flex; flex-wrap: wrap; gap: 0 6px; }
+  .am-why-sep { color: var(--text-muted); }
+  .am-why-verdict { margin-top: 3px; font-weight: 500; color: var(--text-primary); }
+  .am-why-warn { color: var(--orange, #FF9500); }
+
   .am-backdrop {
     position: fixed; inset: 0; z-index: 1000;
     background: color-mix(in srgb, #000 45%, transparent);
@@ -530,9 +701,31 @@
     border-radius: 7px; padding: 5px 7px;
   }
   .am-do { font-weight: 600; }
+  .am-neg { font-weight: 600; }
   .am-when { font: 400 11px var(--font-sans); color: var(--text-muted); }
   .am-val { flex: 1; min-width: 120px; }
   .am-val-none { color: var(--text-muted); border: 0 !important; background: transparent !important; }
+  .am-tags {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 7px; padding: 3px 4px;
+  }
+  .am-tags:focus-within { border-color: var(--accent); }
+  .am-tag {
+    display: inline-flex; align-items: center; gap: 2px;
+    font: 500 11px var(--font-sans); color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-radius: 5px; padding: 2px 3px 2px 6px; max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .am-tag-x {
+    display: inline-flex; background: transparent; border: 0; padding: 2px;
+    color: var(--text-muted); cursor: pointer; border-radius: 4px;
+  }
+  .am-tag-x:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-muted) 20%, transparent); }
+  .am-rule .am-tags input.am-tag-input {
+    flex: 1; min-width: 80px; border: 0; background: transparent; padding: 2px 3px; outline: none;
+  }
   .am-rule input.am-invalid {
     border-color: var(--error-text, #ff453a);
     background: color-mix(in srgb, var(--error-text, #ff453a) 8%, var(--bg-primary));

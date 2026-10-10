@@ -1,6 +1,13 @@
 // Package network provides OS-specific IP, routing, and DNS configuration.
 package network
 
+import "errors"
+
+// ErrSplitDNSUnsupported is returned by SetDNS when the DNS= list asks for
+// split DNS ("~domain" tokens) on a platform or system that cannot do it.
+// Callers treat it as a warning: the tunnel stays up without DNS handling.
+var ErrSplitDNSUnsupported = errors.New("split DNS is not supported on this platform")
+
 // NetworkManager handles OS-level network configuration for WireGuard tunnels.
 type NetworkManager interface {
 	// AssignAddress assigns an IP address to the named interface.
@@ -74,6 +81,13 @@ type DNSSnapshotProvider interface {
 	SavedDNSSnapshot() DNSSnapshot
 }
 
+// SkippedRoutesProvider is an optional interface for platform managers whose
+// AddRoutes leaves out AllowedIPs ranges (the macOS LAN-overlap guard). It
+// only reports what was skipped; it never changes which routes are installed.
+type SkippedRoutesProvider interface {
+	SkippedRoutes() []string
+}
+
 // RoutingStateRestorer is an optional interface that platform managers may
 // implement to accept persisted table/fwmark values during crash recovery.
 // This allows cleanup to use the correct routing table instead of hardcoded
@@ -112,4 +126,13 @@ type PersistentStateDirSetter interface {
 // metric and clearing its DNS first makes that lingering adapter benign.
 type PreCloseCleaner interface {
 	PreCloseAdapterCleanup(ifaceName string)
+}
+
+// SplitDNSRemover is an optional interface for platform managers whose
+// split-DNS state lives outside the process (macOS dynamic-store keys).
+// RemoveSplitDNS is idempotent and derives everything from the interface
+// name, so it is safe to call on every teardown path, including ones that
+// never ran SetDNS or run in a fresh helper process.
+type SplitDNSRemover interface {
+	RemoveSplitDNS(ifaceName string) error
 }

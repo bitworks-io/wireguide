@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"github.com/korjwl1/wireguide/internal/config"
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/domain"
+	"github.com/korjwl1/wireguide/internal/firewall"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/update"
 	"github.com/korjwl1/wireguide/internal/wifi"
@@ -39,6 +41,20 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodSetPinInterface, h.handleSetPinInterface)
 	h.server.Handle(ipc.MethodReportSSID, h.handleReportSSID)
 	h.server.Handle(ipc.MethodAutomationPreview, h.handleAutomationPreview)
+	h.server.Handle(ipc.MethodFirewallStatus, h.handleFirewallStatus)
+	h.server.Handle(ipc.MethodResetDNS, h.handleResetDNS)
+	h.server.Handle(ipc.MethodHelperInfo, h.handleHelperInfo)
+	h.server.Handle(ipc.MethodDiagSnapshot, h.handleDiagSnapshot)
+}
+
+// handleDiagSnapshot returns the read-only root-only diagnostics for the
+// diagnostics bundle. It takes no parameters and runs only fixed commands.
+func (h *Helper) handleDiagSnapshot(_ json.RawMessage) (interface{}, error) {
+	resp := ipc.DiagSnapshotResponse{Platform: runtime.GOOS}
+	for _, a := range firewall.DumpAnchors() {
+		resp.Anchors = append(resp.Anchors, ipc.DiagAnchor{Name: a.Name, Rules: a.Rules, Error: a.Error})
+	}
+	return resp, nil
 }
 
 func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) {
@@ -54,7 +70,12 @@ func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) 
 }
 
 func (h *Helper) handlePing(params json.RawMessage) (interface{}, error) {
-	return ipc.PingResponse{Version: ipc.ProtocolVersion, AppVersion: update.CurrentVersion(), PID: os.Getpid()}, nil
+	return ipc.PingResponse{
+		Version:     ipc.ProtocolVersion,
+		AppVersion:  update.CurrentVersion(),
+		PID:         os.Getpid(),
+		GUIAttached: h.server.HasControlConn(),
+	}, nil
 }
 
 func (h *Helper) handleShutdown(params json.RawMessage) (interface{}, error) {
@@ -73,8 +94,9 @@ func (h *Helper) handleShutdown(params json.RawMessage) (interface{}, error) {
 //   - A GUI is attached: broadcast EventQuit and let the GUI terminate
 //     itself. Its normal quit path disconnects tunnels and then stops us.
 //     We must NOT shut down directly here — the GUI's health monitor would
-//     see the helper vanish and respawn it, which on macOS means an admin
-//     password prompt seconds after the user asked everything to stop.
+//     see the helper vanish and bring it back (on macOS the dial itself
+//     re-activates it via launchd), seconds after the user asked everything
+//     to stop.
 //
 //   - No GUI attached (helper running solo): nothing will relay the quit,
 //     so shut ourselves down on the same grace-free path as MethodShutdown.
@@ -198,6 +220,10 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		delete(h.autoConnectedBy, req.OldName)
 		h.autoConnectedBy[req.NewName] = owner
 	}
+	if latch, ok := h.manualOverride[req.OldName]; ok {
+		delete(h.manualOverride, req.OldName)
+		h.manualOverride[req.NewName] = latch
+	}
 	h.wifiMu.Unlock()
 
 	// Move the cached latency under the new key so the old name doesn't
@@ -209,6 +235,18 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		h.latencyByTunnel[req.NewName] = lat
 	}
 	h.latencyMu.Unlock()
+
+	// Per-tunnel bookkeeping added for automation visibility: the health
+	// override (under mu, like activeCfgs), the last automation decision and
+	// rules digest, and the change reasons.
+	h.mu.Lock()
+	if v, ok := h.healthOverride[req.OldName]; ok {
+		delete(h.healthOverride, req.OldName)
+		h.healthOverride[req.NewName] = v
+	}
+	h.mu.Unlock()
+	h.renameAutomationState(req.OldName, req.NewName)
+	h.renameChangeReasons(req.OldName, req.NewName)
 	return ipc.Empty{}, nil
 }
 
@@ -229,12 +267,24 @@ func (h *Helper) doConnectHeld(cfg *domain.WireGuardConfig) error {
 		}
 	}
 
+	// Clear any DNS rule that no longer matches a connected tunnel (a dead
+	// utun, a tunnel torn down behind our back) BEFORE Connect: a stale
+	// port-53 block would otherwise break endpoint hostname resolution. DNS
+	// only - the kill switch is deliberately suspended for this transaction.
+	h.reconcileDNSLocked("pre-connect")
+
 	h.mu.Lock()
 	prevCfgs := h.copyActiveCfgs()
 	h.activeCfgs[cfg.Name] = cfg
 	h.mu.Unlock()
 
-	if err := h.manager.Connect(cfg); err != nil {
+	var connectErr error
+	if h.tunnelConnectFn != nil {
+		connectErr = h.tunnelConnectFn(context.Background(), cfg)
+	} else {
+		connectErr = h.manager.Connect(cfg)
+	}
+	if err := connectErr; err != nil {
 		h.mu.Lock()
 		delete(h.activeCfgs, cfg.Name)
 		if prev, ok := prevCfgs[cfg.Name]; ok {
@@ -262,11 +312,13 @@ func (h *Helper) doConnectHeld(cfg *domain.WireGuardConfig) error {
 			}
 			h.mu.Unlock()
 			restoreErr := h.enableKillSwitchForActiveTunnels()
+			h.reconcileFirewallLocked("connect-rolled-back")
 			h.maybeArmShutdownAfterTeardown("connect rolled back, no GUI attached")
 			return fmt.Errorf("restore kill switch after connect: %v (disconnect rollback: %v; blockade restore: %v)",
 				err, disconnectErr, restoreErr)
 		}
 	}
+	h.reconcileFirewallLocked("post-connect")
 	return nil
 }
 
@@ -299,7 +351,11 @@ func (h *Helper) enableKillSwitchForActiveTunnels() error {
 	}
 
 	if len(active) == 0 {
-		return h.firewall.EnableKillSwitch("", nil, nil)
+		if err := h.firewall.EnableKillSwitch("", nil, nil); err != nil {
+			return err
+		}
+		h.ksIfaces = map[string]struct{}{}
+		return nil
 	}
 
 	// Endpoints are already resolved by Engine before routes are installed.
@@ -312,8 +368,13 @@ func (h *Helper) enableKillSwitchForActiveTunnels() error {
 	for _, tunnel := range active[1:] {
 		if err := h.firewall.AddKillSwitchTunnel(tunnel.interfaceName, tunnel.addresses, endpoints); err != nil {
 			_ = h.firewall.DisableKillSwitch()
+			h.ksIfaces = nil
 			return fmt.Errorf("add tunnel %q to kill switch: %w", tunnel.name, err)
 		}
+	}
+	h.ksIfaces = make(map[string]struct{}, len(active))
+	for _, t := range active {
+		h.ksIfaces[t.interfaceName] = struct{}{}
 	}
 	return nil
 }
@@ -356,11 +417,17 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 		}
 	}
 
+	commitReason, undoReason := h.beginConnectReason(req.Config.Name, domain.ChangeReasonUser)
 	if err := h.doConnectHeld(req.Config); err != nil {
+		undoReason()
 		return nil, err
 	}
+	commitReason()
+	h.setHealthOverride(req.Config.Name, req.HealthCheck)
 
 	h.applyPostConnectFirewall(req.Config)
+	// An explicit connect overrides automation until the network changes.
+	h.recordManualOverride(req.Config.Name, false)
 	return ipc.Empty{}, nil
 }
 
@@ -373,49 +440,16 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 // already-enabled kill switch never learned its endpoints (issue #12).
 // Best-effort: logs and continues on error, exactly like manual connect.
 func (h *Helper) applyPostConnectFirewall(cfg *domain.WireGuardConfig) {
-	// Windows-only: auto-enable DNS protection on full-tunnel.
-	//
-	// Why Windows-specific: Windows' resolver does "smart multi-homed
-	// name resolution" which queries the DNS servers on EVERY active
-	// interface in parallel, leaking VPN-tunnel DNS queries to the
-	// ISP's DNS at the same time. Even with a kill switch this is a
-	// silent privacy leak. WFP DNS-port blocking is the documented
-	// fix (see wireguard-windows netquirk.md).
-	//
-	// macOS and Linux don't have this leak — their resolvers honour
-	// the tunnel-interface DNS exclusively when the route table sends
-	// the query out the tunnel. Auto-enabling there would override
-	// the user's explicit Settings.DNSProtection=false choice (the
-	// v0.2.0 behaviour), so we leave non-Windows platforms alone.
-	if runtime.GOOS == "windows" && cfg.IsFullTunnel() && len(cfg.Interface.DNS) > 0 {
-		status := h.manager.Status()
-		if status != nil && status.InterfaceName != "" {
-			if err := h.firewall.EnableDNSProtection(status.InterfaceName, cfg.Interface.DNS); err != nil {
-				slog.Warn("auto-DNS protection failed (full-tunnel)", "error", err)
-			}
-		}
-	}
-
-	// If the kill switch is already enabled (user toggled it on before
-	// connecting, OR it's been on the whole time and we just brought up
-	// another tunnel), fold the new tunnel's LUID + endpoints into the
-	// existing WFP filter set. The base "block all" filter would
-	// otherwise still drop the new tunnel's encapsulated UDP traffic
-	// because the only "permit tunnel" filter still references whatever
-	// LUID was current at Enable time.
-	if h.firewall.IsKillSwitchEnabled() {
-		status := h.manager.StatusFor(cfg.Name)
-		ifaceName := ""
-		if status != nil {
-			ifaceName = status.InterfaceName
-		}
-		if ifaceName != "" {
-			eps := h.manager.ResolvedEndpoints()
-			if err := h.firewall.AddKillSwitchTunnel(ifaceName, cfg.Interface.Address, eps); err != nil {
-				slog.Warn("AddKillSwitchTunnel after connect failed", "error", err)
-			}
-		}
-	}
+	// One reconcile covers both follow-ups. DNS protection: installed only
+	// when the user wants it (or, on Windows, for a full tunnel with DNS -
+	// its multi-homed resolver otherwise leaks queries to the ISP's DNS) and
+	// only for connected tunnels. Kill switch: when already enabled (user
+	// toggled it on before connecting, or it has been on while another
+	// tunnel came up) the new tunnel's interface + endpoints are folded into
+	// the permit set; the base "block all" would otherwise still drop the new
+	// tunnel's encapsulated UDP.
+	// Caller holds h.connectMu.
+	h.reconcileFirewallLocked("post-connect:" + cfg.Name)
 }
 
 func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
@@ -445,28 +479,22 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		}
 	}
 
-	// Snapshot interface names BEFORE disconnect so we can remove their
-	// kill-switch permits after teardown. After DisconnectTunnel the
-	// engine pointer (and its ifaceName) is gone.
-	var ifaceSnapshot []string
-	if h.firewall.IsKillSwitchEnabled() {
-		for _, st := range h.manager.AllStatuses() {
-			if st == nil || st.InterfaceName == "" {
-				continue
-			}
-			if tunnelName != "" && st.TunnelName != tunnelName {
-				continue
-			}
-			ifaceSnapshot = append(ifaceSnapshot, st.InterfaceName)
-		}
-	}
-
+	// Kill-switch permits and DNS rules for the torn-down tunnels are removed
+	// by the reconcile below, which diffs against the tunnels still up. It
+	// runs on EVERY path, including a partial legacy failure, so the
+	// tunnels that did go down never keep permits or DNS rules.
 	if tunnelName != "" {
+		undoReason := h.beginDisconnectReason(tunnelName, domain.ChangeReasonUser)
 		if err := h.manager.DisconnectTunnel(tunnelName); err != nil {
+			if !h.tunnelGone(tunnelName) {
+				undoReason()
+			}
+			h.reconcileFirewallLocked("disconnect-failed")
 			return nil, err
 		}
 		h.mu.Lock()
 		delete(h.activeCfgs, tunnelName)
+		h.dropHealthOverrideLocked(tunnelName)
 		h.mu.Unlock()
 		h.wifiMu.Lock()
 		delete(h.autoConnectedBy, tunnelName)
@@ -474,50 +502,62 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		h.latencyMu.Lock()
 		delete(h.latencyByTunnel, tunnelName)
 		h.latencyMu.Unlock()
+		// An explicit disconnect overrides automation until the network
+		// changes (otherwise a connect rule that still holds undoes it).
+		h.recordManualOverride(tunnelName, true)
 	} else {
-		// Legacy "no name" path: tear down EVERY active tunnel via
-		// per-tunnel calls so manager.Disconnect()'s "pick the first"
-		// semantic doesn't leave half the snapshot still up while we
-		// blanket-evict their cached configs. Each successful per-
-		// tunnel disconnect drops its cache entry; partial failures
-		// leave the still-up tunnels intact in activeCfgs so the
-		// reconnect monitor can still recover them.
-		toDisconnect := h.manager.ActiveTunnels()
-		var firstErr error
-		for _, name := range toDisconnect {
-			if err := h.manager.DisconnectTunnel(name); err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				slog.Warn("legacy disconnect: tunnel teardown failed",
-					"tunnel", name, "error", err)
-				continue
-			}
-			h.mu.Lock()
-			delete(h.activeCfgs, name)
-			h.mu.Unlock()
-			h.wifiMu.Lock()
-			delete(h.autoConnectedBy, name)
-			h.wifiMu.Unlock()
-			h.latencyMu.Lock()
-			delete(h.latencyByTunnel, name)
-			h.latencyMu.Unlock()
-		}
-		if firstErr != nil {
-			return nil, firstErr
+		// Legacy "no name" path: tear down EVERY active tunnel.
+		if err := h.disconnectAllHeld(domain.ChangeReasonUser); err != nil {
+			h.reconcileFirewallLocked("legacy-disconnect-partial")
+			return nil, err
 		}
 	}
 
-	// Strip the just-torn-down tunnels from the kill-switch filter set.
-	// Best-effort: log failures but never block the disconnect response.
-	for _, iface := range ifaceSnapshot {
-		if err := h.firewall.RemoveKillSwitchTunnel(iface); err != nil {
-			slog.Warn("RemoveKillSwitchTunnel after disconnect failed",
-				"interface", iface, "error", err)
-		}
-	}
+	h.reconcileFirewallLocked("disconnect")
+	// With nothing left up, a still-pending legacy "" retry has nothing to
+	// restore and would only bounce whatever is connected next.
+	h.cancelLegacyRetryIfIdle()
 	h.maybeArmShutdownAfterTeardown("tunnel disconnected, no GUI attached")
 	return ipc.Empty{}, nil
+}
+
+// disconnectAllHeld tears down EVERY active tunnel via per-tunnel calls so
+// manager.Disconnect()'s "pick the first" semantic doesn't leave half the
+// snapshot still up while we blanket-evict their cached configs. Each
+// successful per-tunnel disconnect drops its cache entry; partial failures
+// leave the still-up tunnels intact in activeCfgs so the reconnect monitor
+// can still recover them. Returns the first error. Caller MUST hold
+// h.connectMu and runs the firewall reconcile itself. reason is recorded as
+// each tunnel's end reason (user for a disconnect, recovery for ResetDNS).
+func (h *Helper) disconnectAllHeld(reason string) error {
+	toDisconnect := h.manager.ActiveTunnels()
+	var firstErr error
+	for _, name := range toDisconnect {
+		undoReason := h.beginDisconnectReason(name, reason)
+		if err := h.manager.DisconnectTunnel(name); err != nil {
+			if !h.tunnelGone(name) {
+				undoReason()
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			slog.Warn("legacy disconnect: tunnel teardown failed",
+				"tunnel", name, "error", err)
+			continue
+		}
+		h.mu.Lock()
+		delete(h.activeCfgs, name)
+		h.dropHealthOverrideLocked(name)
+		h.mu.Unlock()
+		h.wifiMu.Lock()
+		delete(h.autoConnectedBy, name)
+		h.wifiMu.Unlock()
+		h.latencyMu.Lock()
+		delete(h.latencyByTunnel, name)
+		h.latencyMu.Unlock()
+		h.recordManualOverride(name, true)
+	}
+	return firstErr
 }
 
 func (h *Helper) handleStatus(params json.RawMessage) (interface{}, error) {
@@ -556,45 +596,38 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 		if err := h.enableKillSwitchForActiveTunnels(); err != nil {
 			return nil, err
 		}
+		h.setKSWanted(true)
 	} else {
+		h.setKSWanted(false)
 		if err := h.firewall.DisableKillSwitch(); err != nil {
 			return nil, err
 		}
+		h.ksIfaces = nil
 	}
+	// Re-render DNS rules under the right mode (kill-switch mode drops
+	// unpinned permits; DNS-only mode keeps them).
+	h.reconcileFirewallLocked("kill-switch-toggle")
 	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{KillSwitch: &req.Enabled})
 	return ipc.Empty{}, nil
 }
 
+// handleSetDNSProtection records whether the user WANTS DNS protection; the
+// helper derives the actual rules from its connected tunnels
+// (reconcileFirewallLocked). req.DNSServers is accepted for IPC compatibility
+// but ignored: the servers come from each connected tunnel's own config, and
+// the permits are pinned or unpinned according to how those servers are
+// routed. Enabling with no tunnel up is accepted and installs nothing; the
+// rules appear when a tunnel connects and vanish when it goes away.
 func (h *Helper) handleSetDNSProtection(params json.RawMessage) (interface{}, error) {
 	var req ipc.DNSProtectionRequest
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, err
 	}
-	if req.Enabled {
-		// Accept the toggle even with no active tunnel — the GUI persists
-		// the preference and re-sends SetDNSProtection(true) via
-		// applyFirewallSettings() after every successful connect. Without
-		// a tunnel we have no interface to scope the "allow port 53"
-		// permit to, so we just succeed silently and let the next connect
-		// install the pf rules with the right interface + DNS list.
-		if !h.manager.IsConnected() || len(req.DNSServers) == 0 {
-			return ipc.Empty{}, nil
-		}
-		status := h.manager.Status()
-		// DNS protection uses a single tunnel's interface name for the pf
-		// rule. This is intentional: the pf rule blocks port 53 globally
-		// and only allows it through the tunnel interface. With multiple
-		// tunnels, using the first connected tunnel's interface is
-		// sufficient because the DNS protection rule is a global "block
-		// port 53 except on <tunnel_iface>" anchor — any tunnel interface
-		// will work as the exception.
-		if err := h.firewall.EnableDNSProtection(status.InterfaceName, req.DNSServers); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := h.firewall.DisableDNSProtection(); err != nil {
-			return nil, err
-		}
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
+	h.setDNSWanted(req.Enabled)
+	if err := h.reconcileFirewallErrLocked("set-dns-protection"); err != nil {
+		return nil, err
 	}
 	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{DNSProtection: &req.Enabled})
 	return ipc.Empty{}, nil
@@ -649,6 +682,7 @@ func (h *Helper) handleReportSSID(params json.RawMessage) (interface{}, error) {
 	gw := wifi.GatewayMAC()
 	h.wifiMu.Lock()
 	h.ssidStampGW = gw
+	h.ssidFromGUI = true
 	h.wifiMu.Unlock()
 	h.wifiMon.ReportExternalSSID(req.SSID)
 	return ipc.Empty{}, nil

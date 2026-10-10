@@ -1,0 +1,98 @@
+// Pure formatting for the Automation "why" strip and the per-tunnel chips.
+// Takes the translator `tr(key, params)` as an argument (instead of
+// importing the i18n store) so it stays testable under plain node.
+
+const MEDIUMS = ['wifi', 'wired', 'tethered'];
+
+// mediumText localises a connection type (wifi / wired / tethered).
+export function mediumText(tr, m) {
+  return MEDIUMS.includes(m) ? tr(`automation.medium_${m}`) : (m || '?');
+}
+
+// "ssid is CafeWiFi" / "ssid is one of A, B" / "subnet is not 10.0.0.0/24" /
+// "connection is wired" / "otherwise".
+export function conditionText(tr, v) {
+  if (v.rule_type === 'none_match') return tr('automation.why.cond_none');
+  if (!v.rule_type) return '';
+  if (v.rule_type === 'medium') {
+    return tr(`automation.why.cond_medium_${v.rule_negate ? 'not' : 'is'}`, { value: mediumText(tr, v.rule_value) });
+  }
+  if (v.rule_type === 'ssid' && v.rule_multi) {
+    return tr(`automation.why.cond_ssid_${v.rule_negate ? 'not_in' : 'in'}`, { value: v.rule_value || '?' });
+  }
+  const kind = ['ssid', 'subnet', 'network'].includes(v.rule_type) ? v.rule_type : 'network';
+  const neg = v.rule_negate ? '_not' : '_is';
+  return tr(`automation.why.cond_${kind}${neg}`, { value: v.rule_value || '?' });
+}
+
+function ruleSuffix(tr, v) {
+  if (!v.rule_index) return '';
+  return tr('automation.why.rule', { n: v.rule_index, cond: conditionText(tr, v) });
+}
+
+// One tunnel's verdict as a single line, or '' when nothing worth saying
+// (no rule matches / preview unavailable).
+export function verdictText(tr, v) {
+  return rawVerdictText(tr, v).trim();
+}
+
+function rawVerdictText(tr, v) {
+  if (!v) return '';
+  switch (v.verdict) {
+    case 'connect':
+      return tr(v.active ? 'automation.why.v_connected' : 'automation.why.v_connect', { rule: ruleSuffix(tr, v) });
+    case 'disconnect':
+      return tr(v.active ? 'automation.why.v_disconnect' : 'automation.why.v_stays_off', { rule: ruleSuffix(tr, v) });
+    case 'held':
+      return tr('automation.why.v_held');
+    case 'paused':
+      return tr(v.active ? 'automation.why.v_paused_connected' : 'automation.why.v_paused_disconnected');
+    case 'overlap':
+      return tr('automation.why.v_overlap', { cidr: v.overlap_cidr || '' });
+    default:
+      return '';
+  }
+}
+
+// Severity for chip colouring: 'warn' when automation is NOT doing what
+// the rules say (held / paused / overlap), 'info' otherwise.
+export function verdictTone(v) {
+  return v && ['held', 'paused', 'overlap'].includes(v.verdict) ? 'warn' : 'info';
+}
+
+// Why the Wi-Fi name is unreadable. With a known Location Services state
+// the line says so precisely instead of guessing.
+export function unknownSSIDText(tr, locAuth) {
+  if (locAuth === 'denied' || locAuth === 'restricted') return tr('automation.why.net_unknown_denied');
+  if (locAuth === 'not_determined') return tr('automation.why.net_unknown_not_allowed');
+  // Allowed, yet the name is blank: a roam / reconnect, not a permission issue.
+  if (locAuth === 'authorized') return tr('automation.why.net_unknown_roaming');
+  return tr('automation.why.net_unknown');
+}
+
+// The network context line(s): { network, settle } — settle is '' when no
+// "is not" rule exists (nothing is being held back, so don't mention it).
+export function networkLines(tr, p, locAuth = 'unknown') {
+  if (!p || !p.available) return { network: '', settle: '' };
+  // The connection type comes first when the default route is wired or
+  // tethered: a Wi-Fi association alongside isn't what carries traffic.
+  let network;
+  if (p.online === false) network = tr('automation.why.net_offline');
+  else if (p.medium === 'wired') network = tr('automation.why.net_wired');
+  else if (p.medium === 'tethered') network = tr('automation.why.net_tethered');
+  else if (p.ssid) network = tr('automation.why.net_ssid', { ssid: p.ssid });
+  else if (p.ssid_unknown) network = unknownSSIDText(tr, locAuth);
+  else if (p.primary_known === false) network = tr('automation.why.net_type_unknown');
+  else network = tr('automation.why.net_no_wifi');
+  let settle = '';
+  if (p.has_negated_rules) {
+    settle = p.settled
+      ? tr('automation.why.settled')
+      : tr('automation.why.settling', { n: p.settle_remaining_sec || 0 });
+  }
+  return { network, settle };
+}
+
+export function verdictFor(preview, name) {
+  return (preview?.tunnels || []).find((t) => t.name === name) || null;
+}

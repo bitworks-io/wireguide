@@ -7,7 +7,9 @@ WireGuide is a **two-process** WireGuard VPN client:
 - **GUI process** (unprivileged) — Wails v3 + Svelte webview, system tray, config editor
 - **Helper process** (root) — wireguard-go TUN, routing, DNS, firewall, reconnect
 
-They communicate over **JSON-RPC 2.0** on a Unix domain socket (`/var/run/wireguide/wireguide.sock`). The helper is installed as a macOS LaunchDaemon with `RunAtLoad=false` and `KeepAlive={AfterInitialDemand:true, SuccessfulExit:false}`: launchd never starts it at boot (a running GUI is what signals the user wants WireGuide active) and only restarts it after a crash. The helper's lifetime is tied to the GUI — a 60 s startup grace covers a helper whose GUI never attaches, and it exits shortly after the last GUI connection drops if no tunnels remain (CLI control connections are transient and don't extend its life).
+They communicate over **JSON-RPC 2.0** on a Unix domain socket. On macOS that socket is **owned by launchd** (`/var/run/com.wireguide.helper.sock`, mode 0600, owner = the installing user): the LaunchDaemon plist declares it under `Sockets.Listeners`, with `RunAtLoad=false` and `KeepAlive={AfterInitialDemand:true, SuccessfulExit:false}`. launchd binds the socket at boot but starts no process; the helper is launched on the first `connect()`, so the GUI (or `ctl`) brings it up just by dialing — **no administrator prompt** at boot, on app relaunch, or after the helper idled out. The helper adopts the launchd socket (`launch_activate_socket`, `internal/launchd`) instead of creating its own; only when it was not started by launchd (dev runs, tests, old plists) does it fall back to `ipc.Listen` on the legacy path `/var/run/wireguide/wireguide.sock`. The admin prompt remains only for install/repair: a first install, an app update (new binary or plist), a job that is not loaded or whose socket launchd could not bind, or a helper that does not come up in time. Because the plist changes, the first launch of this version after an upgrade asks for the password exactly once (and a still-running pre-activation helper is shut down gracefully via its legacy socket first).
+
+Security trade-off, accepted: any process running as the owning user can now start the root helper without a password. The reachable RPC surface is the same as when the app is open, and the helper still serves only the owner uid (socket mode/owner plus the per-connection peer-credential check). To keep a stray connect from doing anything, the helper is **dormant until a GUI attaches**: no automation (SSID/subnet rules, including the startup re-evaluation) runs until the first non-transient control connection arrives (`guiSeen`), and a launchd-activated helper that never gets a GUI exits after a 15 s idle grace (60 s otherwise); an active tunnel always keeps it alive. The helper's lifetime is otherwise tied to the GUI — it exits shortly after the last GUI connection drops if no tunnels remain (CLI control connections are transient and don't extend its life). Since a successful dial no longer proves the app is running, `Helper.Ping` reports `gui_attached` (protocol 1.2) and the CLI treats a helper without a GUI as "app not running". On quit the GUI stops its health monitor before sending Shutdown so a health tick cannot re-activate the helper. A plain `brew uninstall` unloads the daemon and removes the socket and plist.
 
 ```
 ┌──────────────────────────────┐     ┌──────────────────────────────┐
@@ -30,7 +32,9 @@ WireGuard requires root to create TUN devices and modify routing tables. Rather 
 - **GUI stays unprivileged** — a compromised webview can't touch the network stack
 - **Helper does only privileged work** — smaller attack surface
 - **Helper survives GUI restarts** — closing the window doesn't kill the VPN
-- **LaunchDaemon KeepAlive (crash-only)** — helper auto-restarts on crash, but never runs at boot and exits on its own once no GUI and no tunnels remain
+- **LaunchDaemon socket activation + KeepAlive (crash-only)** — launchd owns the socket and starts the helper on demand (no admin prompt); it auto-restarts on crash, never runs at boot, stays dormant until a GUI attaches, and exits on its own once no GUI and no tunnels remain
+- **Orphaned-helper self-uninstall (macOS)** — the plist passes `--app-bundle=<installing .app>` (derived from the symlink-resolved GUI exe; omitted for dev runs). Socket activation keeps the job startable after the app is deleted, so after crash recovery, a root helper whose bundle path is missing on two checks 2 s apart (guards in-place updates) removes `/Library/LaunchDaemons/com.wireguide.helper.plist`, `/Library/PrivilegedHelperTools/com.wireguide.helper` and the launchd socket, then runs `launchctl bootout system/com.wireguide.helper` last and exits 0 without serving (`internal/helper/orphan.go`, seams for tests). The new argument changes the plist, so existing installs reinstall once.
+- **Legacy reconnect teardown hook** — `reconnect.Monitor.SetLegacyTeardown` replaces `manager.Disconnect()` on the wake/network-change path; the helper only disconnects connected tunnels without automation rules or a manual latch, so rule tunnels are decided by automation instead of being bounced.
 
 This mirrors the architecture of `wg-quick` (which also runs as root) but wraps it in a persistent daemon with IPC.
 
@@ -219,13 +223,84 @@ Each tunnel owns an ordered list of `condition → action` rules
 - `none_match` — the fallback ("otherwise")
 
 The action is `connect` or `disconnect`. `Evaluate` walks the rules top to
-bottom: the **first** matching concrete condition wins; if none match, the
-first `none_match` rule applies; else the tunnel is left untouched. **Order
-is priority** (drag-reorderable in the GUI). A rule disconnects a tunnel
+bottom and the **first matching, well-formed rule wins** — uniformly, by
+position. `none_match` ("otherwise") is an unconditional match *at its own
+position*: a fallback when placed last, an unconditional override if dragged
+to the top. If nothing matches, the tunnel is left untouched. **Order is
+priority** (drag-reorderable in the GUI). A rule disconnects a tunnel
 **regardless of how it was brought up** — but a tunnel with *no* rules is
 never auto-touched. Legacy `Settings.WifiRules` (SSID-only auto-connect +
 global trusted list) is migrated once into this model by
 `Settings.EnsureAutomation`.
+
+### Negated conditions ("is not")
+
+`ssid`, `subnet` and `network` conditions carry an optional `negate` flag
+(JSON `"negate": true`, omitted when false so existing configs round-trip
+byte-identically; CLI `not-ssid:`/`not-subnet:`/`not-mac:`; `none_match`
+cannot be negated). A negated rule matches only when its input is **known
+and different**. The canonical remote-site setup is a pair:
+
+    {ssid = Home, disconnect}
+    {ssid != Home, connect}
+
+Positive rules keep the simple semantics: unknown (empty) input never
+matches and evaluation falls through. A negated rule that cannot be decided
+**holds**: `Evaluate` stops and returns `StateUnmanaged` rather than falling
+through to later rules (otherwise a trailing `else → disconnect` would fire
+on every roam blip). "Cannot be decided" means any of:
+
+- the network has not been stable (`Settled`) for `NegationSettleWindow`
+  (15 s) — a fingerprint of SSID, primary interface, canonical gateway MAC
+  and sorted physical subnets (`wifi.SettleTracker`);
+- there is no default route (`Online` false);
+- the required input is empty — except a blank SSID on a settled, online
+  network whose primary interface is **not** Wi-Fi (Ethernet, USB
+  tethering), which is a known "no SSID", so a negated SSID rule matches.
+  A blank SSID while the primary interface *is* Wi-Fi (roam blip, GUI not
+  reporting, missing Location permission) is unknown and holds.
+
+Nothing re-triggers evaluation when the settle window ends (macOS has no
+poll), so when any tunnel has a negated rule and the context is unsettled,
+`reevaluateAutomation` arms a `time.AfterFunc(remaining+250ms)` that calls
+`reevaluateAutomation("settled")`. `EvaluateDetailed` additionally reports
+the deciding rule index and whether the decision was a hold (surfaced as
+`held` in `ctl automation`).
+
+### Manual override latch
+
+An explicit connect or disconnect arriving through IPC (`handleConnect` /
+`handleDisconnect`: GUI, tray, CLI — never automation's own calls) latches
+that tunnel: `manualOverride[tunnel] = identity of the current network`
+(`ssid:<SSID>`, else `net:<iface>|<gatewayMAC>|<subnets>`). Automation will
+not connect or disconnect a latched tunnel. The latch clears only when the
+context is **settled** on a different identity, so a 4-10 s roam blip never
+clears it. This stops a still-true connect rule from undoing a manual
+disconnect (its own route churn re-triggers evaluation within ~200 ms).
+Rename moves latch entries like `autoConnectedBy`; latches for tunnels with
+no rules are dropped.
+
+### Reconnect monitor interplay
+
+The legacy all-tunnels reconnect path (sleep/wake, primary-interface
+change) reconnects only cached tunnels that are **not currently connected**,
+treats `ErrAlreadyConnected` as success, waits up to 10 s for a default
+route, and leaves two kinds of tunnel alone: tunnels that have automation
+rules (unless the user manually connected them — then the latch says the
+user owns it) and tunnels under a manual-disconnect latch. After it
+finishes it triggers `reevaluateAutomation("reconnect")` asynchronously,
+without holding `connectMu` (lock order is `reevalMu → connectMu`). When
+nothing is left to reconnect the retry ends (`ErrNothingToReconnect`);
+`CancelRetryFor("")` also runs whenever a disconnect leaves zero active
+tunnels.
+
+### LAN-overlap guard
+
+A tunnel whose AllowedIPs contain an address currently assigned to a
+physical interface would route the machine's own LAN (gateway, resolver)
+into the tunnel. macOS `AddRoutes` skips such non-default routes with a
+warning; automation connects and legacy reconnects refuse to bring up such a
+tunnel at all. Manual connects proceed (with the `AddRoutes` guard).
 
 ### Evaluation triggers (helper-side)
 
@@ -234,16 +309,18 @@ in `internal/helper/wifi_rules.go`), so they fire whether or not a GUI is
 alive. `reevalMu` serialises evaluations. Triggers:
 
 ```
-current network context = { SSID, physical IPs, gateway MAC }
+current network context = { SSID, physical IPs, gateway MAC, primary iface,
+                            is-Wi-Fi, online, settled }
   ├─ SSID change      → wifiMon (CoreWLAN via GUI on macOS 14+) — instant
   ├─ network change   → macOS: the shared `route -n monitor` subscription
   │                     (SubscribeNetworkChange) — instant, ~zero added cost
   └─ poll (30s)       → Windows/Linux fallback (no process-wide monitor yet)
 
 for each tunnel with rules:
+  (latched by a manual connect/disconnect → skip)
   Evaluate(rules, ctx) → StateConnect  → doConnectHeld (same as manual)
                          StateDisconnect → disconnectAutoManaged
-                         StateUnmanaged  → leave as-is
+                         StateUnmanaged  → leave as-is (also: negated hold)
 ```
 
 The gateway MAC is read unprivileged and locale-independently:
@@ -285,7 +362,8 @@ The helper's locks:
   takes the locks below.
 - `connectMu` — serializes connect/disconnect operations
 - `mu` — protects `activeCfgs` and other manager state
-- `wifiMu` — protects `autoConnectedBy`
+- `wifiMu` — protects `autoConnectedBy` and `manualOverride`
+- `settleMu` — protects the settle tracker and its re-evaluation timer
 
 Rule: within an evaluation, always acquire in the order
 `connectMu → mu → wifiMu`. Never hold a lower-priority lock when acquiring

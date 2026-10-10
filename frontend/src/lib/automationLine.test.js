@@ -1,0 +1,80 @@
+import { test } from 'vitest';
+import assert from 'node:assert/strict';
+import { conditionText, verdictText, verdictTone, networkLines, verdictFor } from './automationLine.js';
+
+// Echo translator: renders "key|k=v,..." so assertions stay readable.
+const tr = (key, params = {}) => {
+  const p = Object.entries(params).map(([k, v]) => `${k}=${v}`).join(',');
+  return p ? `${key}|${p}` : key;
+};
+
+test('condition text covers negation and none_match', () => {
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_value: 'Home' }), 'automation.why.cond_ssid_is|value=Home');
+  assert.equal(conditionText(tr, { rule_type: 'subnet', rule_negate: true, rule_value: '10.0.0.0/24' }), 'automation.why.cond_subnet_not|value=10.0.0.0/24');
+  assert.equal(conditionText(tr, { rule_type: 'none_match' }), 'automation.why.cond_none');
+  assert.equal(conditionText(tr, {}), '');
+});
+
+test('verdict lines per state', () => {
+  const base = { rule_index: 2, rule_type: 'ssid', rule_value: 'X' };
+  assert.match(verdictText(tr, { ...base, verdict: 'connect', active: false }), /^automation\.why\.v_connect\|rule=automation\.why\.rule\|n=2/);
+  assert.match(verdictText(tr, { ...base, verdict: 'connect', active: true }), /^automation\.why\.v_connected/);
+  assert.match(verdictText(tr, { ...base, verdict: 'disconnect', active: false }), /^automation\.why\.v_stays_off/);
+  assert.equal(verdictText(tr, { verdict: 'paused', active: true }), 'automation.why.v_paused_connected');
+  assert.equal(verdictText(tr, { verdict: 'paused', active: false }), 'automation.why.v_paused_disconnected');
+  assert.equal(verdictText(tr, { verdict: 'overlap', overlap_cidr: '192.168.1.0/24' }), 'automation.why.v_overlap|cidr=192.168.1.0/24');
+  assert.equal(verdictText(tr, { verdict: 'no_match' }), '');
+  assert.equal(verdictText(tr, null), '');
+});
+
+test('tone flags the silent do-nothing states', () => {
+  for (const v of ['held', 'paused', 'overlap']) assert.equal(verdictTone({ verdict: v }), 'warn');
+  assert.equal(verdictTone({ verdict: 'connect' }), 'info');
+});
+
+test('network lines: ssid, unknown, ethernet, settling', () => {
+  assert.equal(networkLines(tr, { available: true, ssid: 'Home', settled: true }).network, 'automation.why.net_ssid|ssid=Home');
+  assert.equal(networkLines(tr, { available: true, ssid_unknown: true }).network, 'automation.why.net_unknown');
+  assert.equal(networkLines(tr, { available: true }).network, 'automation.why.net_no_wifi');
+  assert.equal(networkLines(tr, { available: true, settled: false, has_negated_rules: true, settle_remaining_sec: 9 }).settle, 'automation.why.settling|n=9');
+  assert.equal(networkLines(tr, { available: true, settled: true, has_negated_rules: true }).settle, 'automation.why.settled');
+  assert.equal(networkLines(tr, { available: true, settled: false }).settle, '');
+  assert.deepEqual(networkLines(tr, { available: false }), { network: '', settle: '' });
+});
+
+test('network lines: offline and unknown interface never blame Location Services', () => {
+  assert.equal(networkLines(tr, { available: true, online: false, ssid_unknown: false }).network, 'automation.why.net_offline');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: false }).network, 'automation.why.net_type_unknown');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true }).network, 'automation.why.net_no_wifi');
+});
+
+test('verdictFor finds by name', () => {
+  assert.equal(verdictFor({ tunnels: [{ name: 'a' }, { name: 'b', verdict: 'x' }] }, 'b').verdict, 'x');
+  assert.equal(verdictFor(null, 'a'), null);
+});
+
+test('condition text: ssid lists and connection type', () => {
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_multi: true, rule_value: 'A, B' }), 'automation.why.cond_ssid_in|value=A, B');
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_multi: true, rule_negate: true, rule_value: 'A, B' }), 'automation.why.cond_ssid_not_in|value=A, B');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_value: 'wired' }), 'automation.why.cond_medium_is|value=automation.medium_wired');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_negate: true, rule_value: 'wifi' }), 'automation.why.cond_medium_not|value=automation.medium_wifi');
+});
+
+test('network lines show the connection type', () => {
+  assert.equal(networkLines(tr, { available: true, online: true, medium: 'wifi', ssid: 'Home' }).network, 'automation.why.net_ssid|ssid=Home');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true, medium: 'wired' }).network, 'automation.why.net_wired');
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true, medium: 'tethered', ssid: 'Cafe' }).network, 'automation.why.net_tethered');
+  // Older helper / Windows: no medium, previous behaviour.
+  assert.equal(networkLines(tr, { available: true, online: true, primary_known: true }).network, 'automation.why.net_no_wifi');
+  assert.equal(networkLines(tr, { available: true, online: false, medium: 'wired' }).network, 'automation.why.net_offline');
+});
+
+test('unreadable Wi-Fi name says why, by Location Services state', () => {
+  const p = { available: true, online: true, ssid_unknown: true };
+  assert.equal(networkLines(tr, p, 'denied').network, 'automation.why.net_unknown_denied');
+  assert.equal(networkLines(tr, p, 'restricted').network, 'automation.why.net_unknown_denied');
+  assert.equal(networkLines(tr, p, 'not_determined').network, 'automation.why.net_unknown_not_allowed');
+  assert.equal(networkLines(tr, p, 'authorized').network, 'automation.why.net_unknown_roaming');
+  assert.equal(networkLines(tr, p).network, 'automation.why.net_unknown');
+  assert.equal(networkLines(tr, { ...p, ssid_unknown: false, ssid: 'Home' }, 'denied').network, 'automation.why.net_ssid|ssid=Home');
+});

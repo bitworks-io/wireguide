@@ -12,11 +12,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/autostart"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
@@ -49,6 +52,7 @@ func init() {
 	application.RegisterEvent[update.UpdateInfo]("update-available")
 	application.RegisterEvent[map[string]any]("update_progress")
 	application.RegisterEvent[ipc.SettingsChangedPayload]("settings_changed")
+	application.RegisterEvent[ipc.AutomationEventPayload]("automation_event")
 	application.RegisterEvent[struct{}]("config_changed")
 	application.RegisterEvent[struct{}]("tunnels_changed")
 }
@@ -90,6 +94,20 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	// gets it after ensureHelper + the SaveSettings path).
 	if s, err := settingsStore.Load(); err == nil && s != nil && s.LogLevel != "" {
 		setGUILogLevel(s.LogLevel)
+	}
+
+	// Bring an existing login item up to date with the current template
+	// (macOS: AssociatedBundleIdentifiers). SaveSettings only (re)writes it
+	// when the toggle changes, so an upgraded user would otherwise keep the
+	// old LaunchAgent. User-level file, no prompt; best-effort.
+	if s, err := settingsStore.Load(); err == nil && s != nil && s.AutoStart {
+		if exe, err := os.Executable(); err == nil {
+			if changed, err := autostart.SyncAutostart(exe); err != nil {
+				slog.Warn("autostart: cannot refresh login item", "error", err)
+			} else if changed {
+				slog.Info("autostart: login item updated to the current template")
+			}
+		}
 	}
 
 	// 2. Helper process (spawn if needed).
@@ -251,13 +269,31 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	tray.SetTooltip("WireGuide")
 
 	// 7. Shutdown coordination (declared upfront so closures can reference it)
+	//
+	// healthDone stops the helper health monitor and the other background
+	// loops. It is closed at the START of a quit (stopHealth), not only after
+	// app.Run returns: the helper socket is launchd-activated, so a health
+	// tick that pings or reconnects after the quit's Shutdown RPC would
+	// start the helper again right after the user quit.
+	healthDone := make(chan struct{})
+	var stopHealthOnce sync.Once
+	stopHealth := func() { stopHealthOnce.Do(func() { close(healthDone) }) }
 	var (
 		shutdownOnce sync.Once
 		doShutdown   func()
+		quitNotifier atomic.Pointer[notifier]
 	)
 	doShutdown = func() {
 		shutdownOnce.Do(func() {
+			stopHealth() // before any RPC to the helper; see healthDone above
 			slog.Info("shutting down GUI + helper")
+			// Our own quit tears the tunnels down: record it as a user
+			// disconnect and silence the notifier so the status stream
+			// catching up never reads as "disconnected outside the app".
+			tunnelService.UserActions().Begin(wgapp.AnyTunnel, false)
+			if nt := quitNotifier.Load(); nt != nil {
+				nt.stop()
+			}
 			// Close any in-flight history sessions BEFORE the helper goes
 			// away — snapshotActiveStats needs the helper alive to fetch
 			// last-known rx/tx counters.
@@ -296,6 +332,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 
 	trayMgr := newTrayManager(app, win, tray, tunnelService, doShutdown)
 	trayMgr.initialBuild()
+	registerURLHandler(app, win, tunnelService)
 
 	if runtime.GOOS == "darwin" {
 		app.Event.OnApplicationEvent(events.Mac.ApplicationWillTerminate, func(_ *application.ApplicationEvent) {
@@ -309,7 +346,9 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	// process restarts. The health monitor swaps the client in the holder.
 	// Pass the tray's cheap icon-update hook — NOT the full menu rebuild —
 	// so the 1 Hz status stream doesn't trigger IPC round-trips on every event.
-	bridge := newEventBridge(app, clients, trayMgr.setIconState, tunnelService.ReconcileHistoryFromStatus, trayMgr.quitApp)
+	bridge := newEventBridge(app, clients, trayMgr.setIconState, tunnelService.ReconcileHistory, trayMgr.quitApp)
+	bridge.notify = newNotifier(settingsStore, tunnelService.UserActions())
+	quitNotifier.Store(bridge.notify)
 	bridge.start()
 
 	// Push the persisted log level to the helper now that the event
@@ -322,7 +361,12 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		}
 	}
 
-	healthDone := make(chan struct{})
+	// "Repair helper" in Settings > Advanced (and the helper-unavailable
+	// banner) runs the administrator repair path with the live client holder.
+	wgapp.SetHelperRepairer(func(ctx context.Context) error {
+		return repairHelper(ctx, clients, bridge, dataDir)
+	})
+
 	var healthWg sync.WaitGroup
 	healthWg.Add(1)
 	startHelperHealthMonitor(app, clients, dataDir, bridge, healthDone, &healthWg)
@@ -382,7 +426,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 
 	// 9. Run (blocks)
 	err = app.Run()
-	close(healthDone)
+	stopHealth()
 	healthWg.Wait()
 	return err
 }

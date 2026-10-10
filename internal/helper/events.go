@@ -77,8 +77,10 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	if len(allStats) == 0 {
 		// Mirror the previous Status()==nil behavior with an empty
 		// disconnected struct so subscribers don't spuriously see
-		// "tunnel disappeared" events on idle helpers.
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		// "tunnel disappeared" events on idle helpers. Recently ended
+		// tunnels still report why they went down.
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 
 	// Pick the primary the same way manager.Status() did: prefer
@@ -97,10 +99,19 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 		}
 	}
 	if primary == nil {
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 	result := *primary
 	result.ActiveTunnels = h.manager.ActiveTunnels()
+
+	// Additive DNS/route visibility fields, from the mirrored reconcile view
+	// (never connectMu) and the manager's status-only network detail.
+	dnsWanted, _ := h.wantedState()
+	view := h.viewSnapshot()
+	h.mu.Lock()
+	cfgs := h.copyActiveCfgs()
+	h.mu.Unlock()
 
 	// Snapshot the latency cache once per call so we don't take the
 	// lock per-tunnel inside the loop.
@@ -114,6 +125,25 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	if lat, ok := latencies[result.TunnelName]; ok {
 		result.LatencyMs = lat
 	}
+	h.decorateStatus(&result, cfgs, view, dnsWanted)
+
+	// Change reasons (protocol minor 4): why each listed tunnel came up,
+	// and why recently-ended tunnels went down — a gone tunnel is absent
+	// from the status entirely, so its end reason travels top-level.
+	activeSet := make(map[string]bool, len(allStats))
+	for _, ts := range allStats {
+		if ts != nil && ts.TunnelName != "" {
+			activeSet[ts.TunnelName] = true
+		}
+	}
+	connReasons, ended := h.changeSnapshot(activeSet)
+	applyChange := func(st *domain.ConnectionStatus) {
+		if c, ok := connReasons[st.TunnelName]; ok {
+			st.LastChangeReason, st.LastChangeAt = c.Reason, c.At
+		}
+	}
+	applyChange(&result)
+	result.RecentDisconnects = ended
 
 	// Include complete per-tunnel status. The same DTO backs both the
 	// frontend's selected-tunnel statistics and `ctl status --json`; copying
@@ -133,6 +163,9 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 			if lat, ok := latencies[ts.TunnelName]; ok {
 				sub.LatencyMs = lat
 			}
+			h.decorateStatus(&sub, cfgs, view, dnsWanted)
+			sub.RecentDisconnects = nil
+			applyChange(&sub)
 			result.Tunnels = append(result.Tunnels, sub)
 		}
 	}
@@ -288,8 +321,8 @@ func (h *Helper) runOneLatencyProbe(t latencyTask) {
 	h.latencyByTunnel[t.tunnelName] = latency
 	h.latencyMu.Unlock()
 	// Debug, not Info: this fires per connected tunnel every 30s, and
-	// launchd appends StandardOutPath forever with no rotation — at Info
-	// it was 95.7% of a 7.7 MB helper log (33,720 of 35,240 lines over
+	// the helper log was once appended forever with no rotation (it is
+	// now size-rotated, see log_handler.go) — at Info it was 95.7% of a 7.7 MB helper log (33,720 of 35,240 lines over
 	// four months). Nothing is lost by demoting it: the same value is
 	// already broadcast in the status event, rendered in the UI and
 	// readable via `ctl status`. The log level is runtime-mutable, so
@@ -320,6 +353,12 @@ func (h *Helper) eventLoop() {
 		case <-h.done:
 			return
 		case <-ticker.C:
+			// Safety net, independent of GUI subscribers: if the set of
+			// connected tunnels changed behind the handlers' back (loop-
+			// watchdog teardown, direct manager calls), reconcile so DNS
+			// rules and kill-switch permits never outlive their tunnel.
+			h.maybeReconcileOnTunnelChange()
+			h.maybeAlertReconcileFailure()
 			// Skip if nobody's listening — saves the wgctrl syscalls + JSON marshal.
 			if !h.server.HasSubscribers() {
 				lastJSON = nil // force next broadcast (post-resubscribe) to fire

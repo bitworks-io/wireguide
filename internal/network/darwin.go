@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/wgctrl"
+
+	"github.com/korjwl1/wireguide/internal/domain"
 )
 
 // cmdTimeout bounds every external command. Without this, a hung
@@ -65,6 +67,11 @@ type DarwinManager struct {
 	// pinInterface controls whether bypass routes use -ifscope to pin
 	// to the upstream interface. Disabled by default.
 	pinInterface bool
+
+	// skippedRoutes are the AllowedIPs ranges AddRoutes did not install
+	// because they overlap the local network (status visibility only).
+	// Guarded by mu.
+	skippedRoutes []string
 
 	// Route-monitor subscription key (the tunnel interface name). The
 	// underlying `route -n monitor` subprocess is process-wide; this
@@ -161,6 +168,9 @@ func (m *DarwinManager) AddRoutes(ifaceName string, allowedIPs []string, fullTun
 		slog.Info("Table=off: skipping route installation", "interface", ifaceName)
 		return nil
 	}
+	m.mu.Lock()
+	m.skippedRoutes = nil
+	m.mu.Unlock()
 	// Sort by prefix length descending (longest first)
 	sorted := sortAllowedIPs(allowedIPs)
 
@@ -174,6 +184,17 @@ func (m *DarwinManager) AddRoutes(ifaceName string, allowedIPs []string, fullTun
 		}
 		if cidr == "::/0" {
 			hasV6Default = true
+			continue
+		}
+		// Non-default route that contains an address on a local physical
+		// interface: routing it through the tunnel would hijack the LAN
+		// (gateway, resolver and all). Skip it instead.
+		if ip, overlaps := LocalNetworkOverlap(cidr); overlaps {
+			slog.Warn("AllowedIPs overlaps local network; not routing it through the tunnel",
+				"interface", ifaceName, "cidr", cidr, "local_address", ip.String())
+			m.mu.Lock()
+			m.skippedRoutes = append(m.skippedRoutes, cidr)
+			m.mu.Unlock()
 			continue
 		}
 		// Non-default route: skip if already pointing at this interface (idempotent)
@@ -857,6 +878,16 @@ func (m *DarwinManager) SetDNS(ifaceName string, entries []string) error {
 		return nil
 	}
 
+	// Mode decision is made once, before any splitting: a "~name" token
+	// means split DNS, which installs a supplemental resolver in the
+	// dynamic store and never touches the system's own DNS. Everything
+	// below (snapshot, networksetup, lastDNS/dnsActive, verifyDNS, the
+	// reapply drift loop) is the global-override machinery and must not run.
+	parsed := domain.ParseDNSEntries(entries)
+	if len(parsed.Match) > 0 {
+		return m.setSplitDNS(ifaceName, parsed)
+	}
+
 	services := getAllNetworkServices()
 	if len(services) == 0 {
 		return fmt.Errorf("no network services found")
@@ -938,6 +969,9 @@ func (m *DarwinManager) SetDNS(ifaceName string, entries []string) error {
 // M5: Also captures original DNS for any new network services that weren't
 // present when SetDNS was first called, so they can be properly restored.
 func (m *DarwinManager) applyDNS(entries []string) error {
+	if hasSplitDNSToken(entries) {
+		return fmt.Errorf("refusing to apply split-DNS entries to network services")
+	}
 	services := getAllNetworkServices()
 	m.captureNewServices(services)
 	m.applyDNSToServices(entries, services)
@@ -953,6 +987,9 @@ func (m *DarwinManager) applyDNS(entries []string) error {
 // cache — per event. Reads are parallel networksetup queries; the resolver
 // flush runs only when at least one service actually needed a rewrite.
 func (m *DarwinManager) applyDNSIfDrifted(entries []string) error {
+	if hasSplitDNSToken(entries) {
+		return fmt.Errorf("refusing to apply split-DNS entries to network services")
+	}
 	services := getAllNetworkServices()
 	m.captureNewServices(services)
 
@@ -1047,6 +1084,10 @@ func (m *DarwinManager) captureNewServices(services []string) {
 // `networksetup -listallnetworkservices` calls) and fans out one goroutine
 // per service.
 func (m *DarwinManager) applyDNSToServices(entries []string, services []string) {
+	if hasSplitDNSToken(entries) {
+		slog.Error("applyDNSToServices: refusing split-DNS entries")
+		return
+	}
 	servers, search := splitDNSEntries(entries)
 	if len(services) == 0 {
 		return
@@ -1081,7 +1122,7 @@ func (m *DarwinManager) applyDNSToServices(entries []string, services []string) 
 // Connect over — but we now log the outcome at debug so a flaky
 // mDNSResponder ("operation not permitted" under SIP, MDM blocks) leaves
 // a breadcrumb in helper.log instead of vanishing.
-func flushDNSCache() {
+var flushDNSCache = func() {
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, "dscacheutil", "-flushcache").CombinedOutput(); err != nil {
@@ -1201,6 +1242,13 @@ func (m *DarwinManager) ResetDNSToSystemDefault() error {
 // consistent system snapshot once we've started mutating, and re-running
 // RestoreDNS with the same stale map would just repeat the same failed call.
 func (m *DarwinManager) RestoreDNS(ifaceName string) error {
+	// Split-DNS keys are derived from the interface name alone and must go
+	// even when dnsActive is false (split mode never sets it, and
+	// RestoreDNSFromSnapshot clears it before Cleanup runs RestoreDNS).
+	if err := m.removeSplitDNS(ifaceName); err != nil {
+		slog.Warn("RestoreDNS: removing split DNS failed", "iface", ifaceName, "error", err)
+	}
+
 	// Snapshot saved state under the lock. We deliberately keep dnsActive=true
 	// during the restore: a concurrent SetDNS racing in here would otherwise
 	// re-snapshot the *partially-restored* system DNS as if it were the
@@ -1399,6 +1447,7 @@ func (m *DarwinManager) Cleanup(ifaceName string) error {
 	if key != "" {
 		rmMgr.Unsubscribe(key)
 	}
+	// RestoreDNS removes the split-DNS keys first, even when dnsActive is false.
 	if err := m.RestoreDNS(ifaceName); err != nil {
 		slog.Warn("Cleanup: RestoreDNS failed", "iface", ifaceName, "error", err)
 	}
@@ -1642,4 +1691,13 @@ func prefixLen(cidr string) int {
 	var n int
 	fmt.Sscanf(cidr[idx+1:], "%d", &n)
 	return n
+}
+
+// SkippedRoutes returns the AllowedIPs ranges the last AddRoutes call left
+// out because they overlap the local network. Read-only; it does not change
+// which routes are installed.
+func (m *DarwinManager) SkippedRoutes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.skippedRoutes...)
 }

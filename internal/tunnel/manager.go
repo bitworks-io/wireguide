@@ -30,6 +30,10 @@ type tunnelEntry struct {
 	connectedAt time.Time
 	netMgr      network.NetworkManager // per-tunnel network state (routes, DNS, monitor)
 
+	// dnsUnsupported is set when the platform could not apply the config's
+	// DNS= handling (split DNS on a platform without it). Status-only.
+	dnsUnsupported bool
+
 	// watchdogCancel stops the runaway-TX watchdog goroutine started
 	// after a successful full-tunnel connect. nil for split-tunnel and
 	// non-Windows where the watchdog is a no-op.
@@ -273,6 +277,7 @@ func (m *Manager) ConnectWithContext(ctx context.Context, cfg *domain.WireGuardC
 		if err := netMgr.RemoveRoutes(ifaceName, nil, fullTunnel); err != nil {
 			slog.Warn("connect race: RemoveRoutes failed", "iface", ifaceName, "error", err)
 		}
+		removeSplitDNS(netMgr, ifaceName)
 		if err := netMgr.RestoreDNS(ifaceName); err != nil {
 			slog.Warn("connect race: RestoreDNS failed", "iface", ifaceName, "error", err)
 		}

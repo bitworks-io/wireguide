@@ -33,6 +33,12 @@ type Session struct {
 	RxBytes          int64      `json:"rx_bytes"`
 	TxBytes          int64      `json:"tx_bytes"`
 	DisconnectReason string     `json:"disconnect_reason,omitempty"`
+	// StartReason says what brought the session up ("user", "automation",
+	// "wake", "network_change", "health_check", "reconnect"); empty when
+	// unknown (older helper, older record). SSID is the Wi-Fi network the
+	// GUI saw when the session started ("" when unknown / not on Wi-Fi).
+	StartReason string `json:"start_reason,omitempty"`
+	SSID        string `json:"ssid,omitempty"`
 }
 
 // historyFlushDelay debounces disk writes when multiple RecordConnect /
@@ -120,12 +126,20 @@ func (h *HistoryStore) Flush() {
 // the generated ID. Disk failures are logged at warn — recording is
 // best-effort and never blocks connect.
 func (h *HistoryStore) RecordConnect(tunnelName string) string {
+	return h.RecordConnectDetail(tunnelName, "", "")
+}
+
+// RecordConnectDetail is RecordConnect with the session's start reason and
+// the SSID at start (either may be empty).
+func (h *HistoryStore) RecordConnectDetail(tunnelName, startReason, ssid string) string {
 	id := newSessionID()
 	now := time.Now()
 	session := Session{
-		ID:         id,
-		TunnelName: tunnelName,
-		StartTime:  now,
+		ID:          id,
+		TunnelName:  tunnelName,
+		StartTime:   now,
+		StartReason: startReason,
+		SSID:        ssid,
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()

@@ -17,9 +17,14 @@
   import { startLogListener, stopLogListener } from './stores/logs.js';
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
+  import { startAutomationPolling, stopAutomationPolling, refreshAutomationPreview } from './stores/automation.js';
+  import { takeExternalRuleChanges } from './stores/automationWatch.js';
+  import { get } from 'svelte/store';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
+  import { diagText } from './lib/wireguard-lint.js';
+  import { mergeURLActions } from './lib/urlActions.js';
 
   // View state
   let currentView = 'tunnels'; // 'tunnels' | 'history' | 'dnsleak' | 'routes' | 'logs'
@@ -28,6 +33,7 @@
   // Modal state
   let showEditor = false;
   let showSettings = false;
+  let settingsTab = 'general';
   let showConflictWarning = false;
   let showZipResult = false;
   let zipResults = [];
@@ -53,7 +59,11 @@
   let updateUnsub = null;
   let configChangedUnsub = null;
   let tunnelsChangedUnsub = null;
-  let criticalErrors = []; // array of { where, detail, at } — shown as a persistent banner
+  let criticalErrors = []; // array of { where, detail, code, action, at } — shown as a persistent banner
+  // Startup crash-recovery notice (info, not an error): what the helper
+  // cleaned up when it started. Deduped per helper start via started_at.
+  let recoveryNotice = null; // { dns_restored, firewall_flushed, started_at }
+  let helperRecoveryUnsub = null;
 
   // App-level ESC handler: close the editor modal. ConfigEditor wraps
   // a CodeMirror instance whose own keymaps may handle ESC for things
@@ -80,6 +90,11 @@
   // writes is harmless.
   async function applySettingsToUI() {
     const s = await TunnelService.GetSettings();
+    // Rules edited outside this window (CLI / another process): say so.
+    // The first call only seeds the baseline; the editor's own saves
+    // advance it (noteOwnSave) so they never read as external.
+    const changedRules = takeExternalRuleChanges(s, new Set(get(tunnels).map((x) => x.name)));
+    if (changedRules.length) showToast(get(t)('automation.safety.external', { name: changedRules.join(', ') }), 6000);
     applyTheme(s?.theme || 'system');
     compactList.set(s?.compact_list ?? false);
     listSort.set(s?.list_sort || 'name_asc');
@@ -169,6 +184,8 @@
       }
     });
 
+    startAutomationPolling(TunnelService);
+
     // Helper reset — the GUI's IPC client was swapped after a helper
     // restart. Local caches may be stale; re-fetch everything AND
     // close any in-flight modals whose state references something
@@ -184,31 +201,38 @@
       criticalErrors = [];
       await initialLoad(TunnelService);
       await refreshStatus(TunnelService);
+      refreshAutomationPreview();
+      checkRecovery();
     });
 
-    // Wi-Fi SSID change events are still broadcast by the helper for
-    // observability, but rule evaluation now lives in the helper
-    // itself (internal/helper/wifi_rules_darwin.go). That keeps
-    // auto-connect / auto-disconnect working when the GUI is fully
-    // quit — the helper has KeepAlive=true and runs the rules
-    // independently. We just show a brief toast here so the user
-    // sees what happened.
-    wifiSsidUnsub = Events.On('wifi_ssid', (event) => {
-      const { new_ssid } = event.data || {};
-      if (new_ssid) {
-        showToast(`Wi-Fi: ${new_ssid}`);
-      }
+    // Wi-Fi SSID change events are still broadcast by the helper, but rule
+    // evaluation lives in the helper itself (internal/helper/wifi_rules*.go)
+    // so auto-connect / auto-disconnect keep working with the GUI quit.
+    // No toast here: a raw "Wi-Fi: X" on every roam is noise. The Automation
+    // status strip and the per-tunnel chips show the network and what the
+    // rules decided; just refresh them now rather than at the next poll.
+    wifiSsidUnsub = Events.On('wifi_ssid', () => {
+      refreshAutomationPreview();
     });
 
-    // Helper auto-connected a tunnel via Wi-Fi rules.
+    // Helper auto-connected a tunnel via Automation rules.
     // EventStatus broadcast handles tunnel state/status update within 1s.
-    // Only need to apply firewall settings here (same as after manual connect).
-    autoConnectedUnsub = Events.On('auto_connected', async () => {
+    // Apply firewall settings here (same as after manual connect) and tell
+    // the user which tunnel automation brought up.
+    autoConnectedUnsub = Events.On('auto_connected', async (event) => {
+      const name = event.data?.tunnel_name;
+      if (name) showToast($t('automation.why.toast_connected', { name }));
+      refreshAutomationPreview();
       await applyFirewallSettings();
     });
 
     // External config.json / tunnel-file changes (the CLI) — reflect them
     // in the running GUI so it never sits on stale state.
+    // wireguide:// links and Shortcuts: connect/disconnect requests that
+    // arrived while WireGuide was not frontmost wait here for approval.
+    urlActionUnsub = Events.On('url-action', () => { takeURLActions(); });
+    takeURLActions();
+
     configChangedUnsub = Events.On('config_changed', () => {
       applySettingsToUI().catch(() => {});
     });
@@ -221,10 +245,12 @@
     // helper subsystem (status broadcast, latency probe, wifi rules)
     // is permanently dead and the user should restart the helper.
     criticalErrorUnsub = Events.On('critical_error', (event) => {
-      const { where, detail } = event.data || {};
+      const { where, detail, code, action } = event.data || {};
       const next = [...criticalErrors, {
         where: where || 'unknown',
         detail: detail || '',
+        code: code || '',
+        action: action || '',
         at: new Date().toLocaleTimeString(),
       }];
       // Cap at the 5 most recent entries. A storm of helper goSafe
@@ -232,10 +258,51 @@
       // would otherwise fill the screen with banners and freeze the UI.
       criticalErrors = next.slice(-5);
     });
+
+    helperRecoveryUnsub = Events.On('helper_recovery', () => { checkRecovery(); });
+    checkRecovery();
   });
+
+  // What the helper's startup recovery cleaned up. The event fires once per
+  // helper start, but the frontend may not have been listening yet, so the
+  // same data is also read from Helper.Info on load and after a helper reset.
+  async function checkRecovery() {
+    try {
+      const info = await TunnelService.GetHelperInfo();
+      const r = info?.recovery;
+      if (!info?.available || !r || !(r.dns_restored || r.firewall_flushed)) return;
+      let dismissed = '';
+      try { dismissed = localStorage.getItem('wg.recovery.dismissed') || ''; } catch (_) {}
+      if (dismissed === info.started_at) return;
+      recoveryNotice = { dns_restored: !!r.dns_restored, firewall_flushed: !!r.firewall_flushed, started_at: info.started_at };
+    } catch (_) { /* older helper or helper mid-restart: no notice */ }
+  }
+
+  function dismissRecovery() {
+    try { localStorage.setItem('wg.recovery.dismissed', recoveryNotice?.started_at || ''); } catch (_) {}
+    recoveryNotice = null;
+  }
+
+  function recoveryKey(n) {
+    if (n.dns_restored && n.firewall_flushed) return 'recovery.dns_and_firewall';
+    return n.dns_restored ? 'recovery.dns_only' : 'recovery.firewall_only';
+  }
+
+  // Banner text: known helper codes are translated, anything else falls back
+  // to the helper's own (English) detail.
+  const CRITICAL_CODES = ['dns_protection_failing', 'helper_unavailable'];
+  function criticalText(e) {
+    return CRITICAL_CODES.includes(e.code) ? $t('critical.' + e.code) : e.detail;
+  }
+
+  function openSettingsFromBanner() {
+    settingsTab = 'advanced';
+    showSettings = true;
+  }
 
   onDestroy(() => {
     unsubscribe();
+    if (urlActionUnsub) urlActionUnsub();
     stopLogListener();
     if (filesDroppedUnsub) filesDroppedUnsub();
     if (helperUnsub) helperUnsub();
@@ -243,20 +310,62 @@
     if (wifiSsidUnsub) wifiSsidUnsub();
     if (autoConnectedUnsub) autoConnectedUnsub();
     if (criticalErrorUnsub) criticalErrorUnsub();
+    if (helperRecoveryUnsub) helperRecoveryUnsub();
     if (updateUnsub) updateUnsub();
     if (configChangedUnsub) configChangedUnsub();
     if (tunnelsChangedUnsub) tunnelsChangedUnsub();
+    stopAutomationPolling();
     if (toastTimer) clearTimeout(toastTimer);
   });
+
+  // wireguide:// confirmation sheet. Approval runs the ordinary Connect /
+  // DisconnectTunnel calls; nothing else can be requested through a URL.
+  let urlActionUnsub = null;
+  let urlActions = [];
+  async function takeURLActions() {
+    try {
+      const got = await TunnelService.TakeURLActions();
+      if (got && got.length) urlActions = mergeURLActions(urlActions, got);
+    } catch (_) { /* queue is best-effort */ }
+  }
+  async function approveURLAction() {
+    const [a, ...rest] = urlActions;
+    urlActions = rest;
+    if (!a) return;
+    try {
+      if (a.kind === 'connect') await TunnelService.Connect(a.tunnel);
+      else if (a.kind === 'disconnect') await TunnelService.DisconnectTunnel(a.tunnel);
+    } catch (e) {
+      showToast(errText(e));
+    }
+  }
+  function denyURLAction() {
+    urlActions = urlActions.slice(1);
+  }
 
   function dismissCriticalError(idx) {
     criticalErrors = criticalErrors.filter((_, i) => i !== idx);
   }
 
-  function showToast(msg) {
+  function showToast(msg, ms = 3000) {
     if (toastTimer) clearTimeout(toastTimer);
     toast = msg;
-    toastTimer = setTimeout(() => { toast = ''; toastTimer = null; }, 3000);
+    toastTimer = setTimeout(() => { toast = ''; toastTimer = null; }, ms);
+  }
+
+  // Non-blocking lint warnings (duplicate Address across tunnels) shown after
+  // a successful import or save. Only the cross-tunnel diagnostics are
+  // surfaced here; the rest are visible in the editor itself.
+  function warningText(diagnostics) {
+    return (diagnostics || [])
+      .filter((d) => d.code === 'address_shared')
+      .map((d) => diagText(d, $t))
+      .join('; ');
+  }
+
+  function toastImported(name, info) {
+    const warn = warningText(info && info.warnings);
+    showToast(warn ? `Imported "${name}" — ${warn}` : `Imported "${name}"`, warn ? 8000 : 3000);
   }
 
   // sanitizeImportName maps an arbitrary filename stem to something
@@ -336,8 +445,8 @@
       }
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportConfig(name, content);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast("Import failed: " + errText(e));
@@ -351,8 +460,8 @@
     try {
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName || 'tunnel');
-      await TunnelService.ImportQRFromPath(path, name);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportQRFromPath(path, name);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast('QR import failed: ' + errText(e));
@@ -374,8 +483,8 @@
       }
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'tunnel';
       const name = await uniqueName(baseName);
-      await TunnelService.ImportQRFromBytes(btoa(binary), name);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportQRFromBytes(btoa(binary), name);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast('QR import failed: ' + errText(e));
@@ -394,8 +503,8 @@
         return;
       }
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast(`Imported "${name}"`);
+      const info = await TunnelService.ImportConfig(name, content);
+      toastImported(name, info);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast("Import failed: " + errText(e));
@@ -507,6 +616,7 @@
     // wrong target.
     const originalName = editorOriginalName;
     editorErrors = [];
+    let saveWarning = '';
 
     if (!saveName) {
       editorErrors = [$t('editor.name_required')];
@@ -520,7 +630,8 @@
         return;
       }
       if (editorIsNew) {
-        await TunnelService.ImportConfig(saveName, saveContent);
+        const info = await TunnelService.ImportConfig(saveName, saveContent);
+        saveWarning = warningText(info && info.warnings);
       } else {
         const renamed = saveName !== originalName;
         if (renamed) {
@@ -549,6 +660,12 @@
         }
       }
       showEditor = false;
+      if (!editorIsNew) {
+        try {
+          saveWarning = warningText(await TunnelService.LintConfigFor(saveName, saveContent));
+        } catch (_) { /* advisory only */ }
+      }
+      if (saveWarning) showToast(saveWarning, 8000);
       await refreshTunnels(TunnelService);
     } catch (err) {
       editorErrors = [errText(err)];
@@ -567,7 +684,7 @@
         showToast(`Exported to ${path}`);
       }
     } catch (err) {
-      showToast('Export failed: ' + err.toString());
+      showToast('Export failed: ' + errText(err));
     }
   }
 
@@ -618,6 +735,28 @@
     await doConnectFinal(pendingConnectName);
   }
 
+  // Address conflict: disconnect the other tunnel(s) sharing this Address,
+  // then connect. Explicit user choice only; nothing is automatic.
+  async function handleConflictDisconnectProceed(e) {
+    const names = (e.detail && e.detail.names) || [];
+    const target = pendingConnectName;
+    showConflictWarning = false;
+    try {
+      for (const n of names) {
+        try {
+          await TunnelService.DisconnectTunnel(n);
+        } catch (err) {
+          // Already disconnected while the dialog was open: the goal is met.
+          if (!/is not connected/i.test(errText(err))) throw err;
+        }
+      }
+    } catch (err) {
+      showToast($t('conflict.disconnect_failed', { error: errText(err) }));
+      return;
+    }
+    await doConnectFinal(target);
+  }
+
   function handleConflictCancel() {
     showConflictWarning = false;
     conflictList = [];
@@ -632,7 +771,7 @@
     try {
       await TunnelService.RunUpdate(updateInfo);
     } catch (e) {
-      showToast('Update failed: ' + (e?.message || e));
+      showToast('Update failed: ' + errText(e));
       // Rethrow: modal-context callers (Settings → About, the banner)
       // render the failure inline — a toast alone can sit underneath an
       // open modal where it is never seen.
@@ -653,7 +792,7 @@
      separate components mounted conditionally below; they pick up the new
      language on their next open (deliberate — otherwise changing language
      mid-interaction would destroy the modal). -->
-<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
+<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult || urlActions.length > 0} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
   <!-- Wails adds .file-drop-target-active class to .app when dragging files.
        We only render the overlay when drop-target is actually active — i.e.
        on the tunnels view with no modal open — so it can never steal clicks
@@ -675,20 +814,36 @@
     <div class="toast">{toast}</div>
   {/if}
 
+  <div class="banner-stack">
   {#if criticalErrors.length > 0}
     <div class="critical-banner" role="alert">
-      <div class="critical-banner-title">⚠ Helper subsystem failure</div>
+      <div class="critical-banner-title">⚠ {$t('critical.title')}</div>
       {#each criticalErrors as e, i}
         <div class="critical-banner-row">
-          <span class="critical-banner-where">{e.where}</span>
-          <span class="critical-banner-detail">{e.detail}</span>
+          <span class="critical-banner-where">{e.code === 'dns_protection_failing' ? $t('settings.dns_protection') : e.where}</span>
+          <span class="critical-banner-detail">{criticalText(e)}</span>
           <span class="critical-banner-time">{e.at}</span>
-          <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label="Dismiss">×</button>
+          <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label={$t('critical.dismiss')}>×</button>
         </div>
       {/each}
-      <div class="critical-banner-hint">Restart the app to recover the affected subsystem.</div>
+      {#if criticalErrors.some((e) => e.action === 'repair_helper' || e.code === 'dns_protection_failing')}
+        <div class="critical-banner-hint">
+          {$t('critical.hint_settings')}
+          <button class="critical-banner-action" on:click={openSettingsFromBanner}>{$t('critical.open_settings')}</button>
+        </div>
+      {:else}
+        <div class="critical-banner-hint">{$t('critical.hint_restart')}</div>
+      {/if}
     </div>
   {/if}
+
+  {#if recoveryNotice}
+    <div class="recovery-banner" role="status">
+      <span class="recovery-banner-text">{$t(recoveryKey(recoveryNotice))}</span>
+      <button class="recovery-banner-close" on:click={dismissRecovery} aria-label={$t('recovery.dismiss')}>×</button>
+    </div>
+  {/if}
+  </div>
 
   <div class="layout">
     <nav class="sidebar">
@@ -743,7 +898,7 @@
       <div class="nav-spacer"></div>
 
       <div class="nav-footer">
-        <button class="nav-item" on:click={() => showSettings = true}>
+        <button class="nav-item" on:click={() => { settingsTab = 'general'; showSettings = true; }}>
           <span class="nav-icon-box">
             <Icon name="settings" size={15} strokeWidth={2} />
           </span>
@@ -835,6 +990,7 @@
           errors={editorErrors}
           isNew={editorIsNew}
           nameEditable={true}
+          lintName={editorIsNew ? '' : editorOriginalName}
           on:save={doSave}
           on:cancel={() => showEditor = false} />
       </div>
@@ -842,14 +998,28 @@
   {/if}
 
   {#if showSettings}
-    <Settings {TunnelService} onClose={() => showSettings = false} {updateInfo} onInstall={handleUpdate} />
+    <Settings {TunnelService} initialTab={settingsTab} onClose={() => showSettings = false} {updateInfo} onInstall={handleUpdate} />
   {/if}
 
   {#if showConflictWarning}
     <ConflictWarning
       conflicts={conflictList}
       on:proceed={handleConflictProceed}
+      on:disconnect_proceed={handleConflictDisconnectProceed}
       on:cancel={handleConflictCancel} />
+  {/if}
+
+  {#if urlActions.length}
+    <div class="modal-backdrop">
+      <div class="modal modal-zip-result" role="alertdialog" aria-modal="true" aria-labelledby="url-action-title">
+        <h3 id="url-action-title">{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_title' : 'url_action.disconnect_title')}</h3>
+        <p>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_message' : 'url_action.disconnect_message', { name: urlActions[0].tunnel })}</p>
+        <div class="zip-result-footer">
+          <button class="btn-secondary" on:click={denyURLAction}>{$t('url_action.cancel')}</button>
+          <button class="btn-primary" on:click={approveURLAction}>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect' : 'url_action.disconnect')}</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if showZipResult}
@@ -862,7 +1032,7 @@
             <div class="zip-result-row">
               <span class="zip-result-icon" class:zip-ok={!r.error} class:zip-err={!!r.error}>{r.error ? '✕' : '✓'}</span>
               <span class="zip-result-name" class:zip-err={!!r.error}>{r.name}</span>
-              {#if r.error}<span class="zip-result-msg">{r.error}</span>{/if}
+              {#if r.error}<span class="zip-result-msg">{r.error}</span>{:else if warningText(r.warnings)}<span class="zip-result-msg">{warningText(r.warnings)}</span>{/if}
             </div>
           {/each}
         </div>
@@ -1279,17 +1449,26 @@
   }
 
   /* ---------- Critical helper-failure banner (top-centre, persistent) ---------- */
-  .critical-banner {
+  .banner-stack {
     position: fixed;
     top: var(--space-3);
     left: 50%;
     transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    z-index: 400;
+    max-width: calc(100vw - 32px);
+    pointer-events: none;
+  }
+  .banner-stack > * { pointer-events: auto; }
+  .critical-banner {
     padding: var(--space-3) var(--space-4);
     background: rgba(220, 60, 60, 0.96);
     color: white;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-md);
-    z-index: 400;
     max-width: 640px;
     min-width: 320px;
     font: var(--text-body);
@@ -1334,6 +1513,44 @@
     margin-top: var(--space-2);
     font-size: 0.75rem;
     opacity: 0.85;
+  }
+  .critical-banner-action {
+    margin-left: var(--space-2);
+    padding: 2px var(--space-2);
+    background: rgba(255, 255, 255, 0.2);
+    border: 0.5px solid rgba(255, 255, 255, 0.5);
+    border-radius: var(--radius-xs);
+    color: white;
+    font: inherit;
+    cursor: pointer;
+  }
+  .critical-banner-action:hover { background: rgba(255, 255, 255, 0.3); }
+
+  /* ---------- Startup-recovery info banner (top-centre, dismissible) ---------- */
+  .recovery-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    color: var(--text-primary);
+    max-width: 560px;
+    font: var(--text-body);
+  }
+  .recovery-banner-text { flex: 1 1 auto; }
+  .recovery-banner-close {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 0 var(--space-2);
+    line-height: 1;
   }
 
   /* ---------- Toast (bottom-centre) ---------- */

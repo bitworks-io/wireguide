@@ -65,7 +65,7 @@ That means most of WireGuide runs silently in the background.
 - Drag-and-drop `.conf` import (also QR and ZIP)
 - A list of tunnels, each with one big toggle (sortable, resizable, optional compact mode)
 - A tray icon that shows whether you're connected
-- Per-tunnel **Automation** — connect or disconnect a tunnel automatically based on which network you're on (by Wi-Fi SSID, subnet, or the router's MAC address; rules are ordered by priority and drag-reorderable)
+- Per-tunnel **Automation** — connect or disconnect a tunnel automatically based on which network you're on (by Wi-Fi SSID, subnet, or the router's MAC address, with "is" / "is not" matching; rules are ordered by priority and drag-reorderable)
 - A **command-line interface** (`wireguide ctl …`) for scripting — see below
 
 ### What runs silently underneath
@@ -123,6 +123,8 @@ Download from [Releases](https://github.com/korjwl1/wireguide/releases), unzip, 
 
 > If macOS shows "app is damaged", run: `xattr -cr /Applications/WireGuide.app`
 
+> The first launch of a new version asks for your administrator password once, to install or update the privileged helper. After that, opening the app (including at login) does not ask again.
+
 ### Windows (Installer)
 
 Download the latest `WireGuide-windows-amd64.exe` (or `-arm64.exe`) installer from
@@ -174,6 +176,25 @@ gaps, please [open an issue](https://github.com/korjwl1/wireguide/issues/new/cho
 
 ---
 
+## DNS
+
+`DNS =` in `[Interface]` takes IP servers, search domains and split-DNS domains:
+
+```ini
+DNS = 10.0.0.1                          # all queries go to the tunnel (default)
+DNS = 10.0.0.1, corp.example            # plus a search domain
+DNS = 192.168.1.1, ~corp.lan, ~1.168.192.in-addr.arpa
+```
+
+- **No `~` token**: global mode. The tunnel's servers replace system DNS while connected and it is restored on disconnect.
+- **Any `~name` token**: split mode. The servers are added as a supplemental resolver for the `~` domains only. System DNS (and your own search domains) are never touched, and DNS protection is never applied to the tunnel. Plain hostnames in the list become match and search domains, so bare names expand. At least one server IP is required, and the server must be reachable through `AllowedIPs`.
+- Reverse zones (`~1.168.192.in-addr.arpa`) are not derived automatically; add them yourself.
+- Split DNS works on macOS (SystemConfiguration supplemental resolver) and Linux with systemd-resolved (`resolvectl`). On Windows the tunnel connects without DNS handling.
+
+On macOS a resolver for a matched domain does **not** fall back to your local DNS when it answers NXDOMAIN, so a name that only exists locally under a `~` domain will fail. `dig`, `nslookup` and `host` read `/etc/resolv.conf` and bypass supplemental resolvers; test with `dscacheutil -q host -a name <host>` (or `ping`/`curl`). Match domains ending in `.local` may be answered by mDNS instead of the tunnel.
+
+---
+
 ## Command line
 
 WireGuide ships a small CLI, `wireguide ctl`, for scripting and automation. Like
@@ -198,6 +219,7 @@ wireguide ctl automation                # what the engine decides right now
 wireguide ctl automation rules <name>   # list a tunnel's rules
 wireguide ctl automation add <name> <connect|disconnect> <cond>
     #   cond = ssid:<wifi>  subnet:<CIDR>  mac:<gateway-MAC>  else
+    #   negated: not-ssid:<wifi>  not-subnet:<CIDR>  not-mac:<MAC>
 wireguide ctl automation rm <name> <n>
 
 # Settings & diagnostics:
@@ -208,6 +230,7 @@ wireguide ctl set pin-interface <on|off>
 wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
+wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 
 # Teach coding agents (Claude Code, Codex, ...) how to drive the CLI:
 wireguide ctl install-skills
@@ -215,12 +238,68 @@ wireguide ctl install-skills
 # e.g. turn the work VPN off on the office network, on everywhere else:
 wireguide ctl automation add work disconnect mac:b0:38:6c:54:8b:ab
 wireguide ctl automation add work connect else
+
+# e.g. a tunnel for a remote site: off at home, on anywhere else:
+wireguide ctl automation add remote disconnect ssid:HomeWiFi
+wireguide ctl automation add remote connect not-ssid:HomeWiFi
 ```
+
+**"is not" rules.** A negated rule matches only when the value is known and
+different. While it is unknown the tunnel is left alone and later rules are
+*not* tried: a blank Wi-Fi name during a roam, a network that changed less
+than ~15 seconds ago, or no default route. A blank Wi-Fi name on an Ethernet
+or USB-tethered connection counts as "no Wi-Fi" and matches. Positive rules
+are unchanged (no delay; unknown input just doesn't match). If you connect or
+disconnect a tunnel by hand, automation leaves that tunnel alone until the
+network changes. Tunnels with automation rules are also not restored by the
+sleep/wake reconnect; the rules decide.
+
+**Diagnostics bundle.** `wireguide ctl diag bundle` (or Settings → Logging →
+"Export diagnostics…") writes a zip with the last 5 MB of the helper log, the
+list of rotated log files, `config.json`, every tunnel `.conf` with
+`PrivateKey` and `PresharedKey` replaced by `<redacted>`, the `.meta.json`
+files, `history.json`, `scutil --dns`, `networksetup -getdnsservers` per
+service, both WireGuide pf anchors (read by the helper, since `pfctl` needs
+root), `netstat -nr`, the Automation preview, a DNS leak test and versions.
+Private keys are never included; PreUp/PostUp lines are, so skim the bundle
+before sharing it. The helper log rotates itself at 10 MB (five files,
+`/var/log/wireguide-helper.log` to `.5`); launchd's own capture goes to
+`/var/log/wireguide-helper.stderr.log` and holds startup output, fatal errors
+from before logging is set up, and panics.
 
 Connect/disconnect/status need the app (or its helper) running — start it with
 `wireguide ctl start` (or by opening the app); nothing else starts a VPN stack
 behind your back. list, import, rename, delete and automation edits work
 directly against the local files.
+
+---
+
+## URL scheme and Shortcuts (macOS)
+
+WireGuide registers `wireguide://` so Shortcuts, Focus filters, Raycast or a
+shell (`open "wireguide://connect/Home"`) can drive it:
+
+| URL | Effect |
+| --- | --- |
+| `wireguide://connect/<name>` | connect the tunnel named `<name>` |
+| `wireguide://disconnect/<name>` | disconnect it |
+| `wireguide://show` | bring the window forward |
+
+Tunnel names are validated like everywhere else (letters, digits, `-`, `_`,
+spaces; percent-encode spaces as `%20`). The scheme cannot import, delete,
+rename or edit a config. A connect or disconnect always
+shows a confirmation sheet in the window first, so a web page cannot silently
+toggle your VPN. `wireguide://automation/pause` is not
+implemented yet (it needs a helper-side latch); use `wireguide ctl` or a
+manual connect/disconnect, which already pause automation for that tunnel
+until the network changes.
+
+**Shortcuts recipe:** add the *Open URLs* action (Safari category), set the URL
+to `wireguide://connect/Home`, and name the shortcut "VPN on". Make a second
+one with `disconnect` for "VPN off". Both then work from Spotlight, Siri, the
+menu bar and Shortcuts automations. For Focus modes, a Shortcuts *Personal
+Automation* triggered by the Focus turning on can run the same *Open URLs*
+action. You will see the confirmation sheet each time.
 
 ---
 

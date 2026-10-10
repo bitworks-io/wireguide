@@ -22,6 +22,10 @@ type Settings struct {
 	PinInterface  bool   `json:"pin_interface"` // pin bypass routes to upstream interface (-ifscope)
 	LogLevel      string `json:"log_level"`     // "debug", "info", "warn", "error"
 	CompactList   bool   `json:"compact_list"`  // dense tunnel list: hide endpoint line, shorter rows
+	// NotifyAutoChanges: show a native notification when a tunnel
+	// connects/disconnects without a user action in the GUI (automation,
+	// wake, CLI) and on critical helper errors. Defaults to on.
+	NotifyAutoChanges bool `json:"notify_auto_changes"`
 
 	// ListSort controls tunnel-list ordering: "name_asc" (default),
 	// "name_desc". ListActiveOnTop floats connected tunnels above the
@@ -106,18 +110,19 @@ func (s *Settings) DeleteTunnelRules(name string) {
 func DefaultSettings() *Settings {
 	on := true
 	return &Settings{
-		Language:        "auto",
-		Theme:           "system", // follows OS dark/light mode
-		TrayIconStyle:   "color",
-		KillSwitch:      false,
-		DNSProtection:   false,
-		HealthCheck:     false,
-		PinInterface:    false, // off by default — enable for dual-network setups
-		LogLevel:        "info",
-		AutoUpdateCheck: &on,
-		ListSort:        "name_asc",
-		ListActiveOnTop: true,
-		ListPaneWidth:   240,
+		Language:          "auto",
+		Theme:             "system", // follows OS dark/light mode
+		TrayIconStyle:     "color",
+		KillSwitch:        false,
+		DNSProtection:     false,
+		HealthCheck:       false,
+		PinInterface:      false, // off by default — enable for dual-network setups
+		LogLevel:          "info",
+		NotifyAutoChanges: true,
+		AutoUpdateCheck:   &on,
+		ListSort:          "name_asc",
+		ListActiveOnTop:   true,
+		ListPaneWidth:     240,
 		WifiRules: wifi.Rules{
 			// Initialize the map so JSON serialization round-trips
 			// produce {} rather than null for an empty mapping.
@@ -148,6 +153,10 @@ func NewSettingsStore(configDir string) *SettingsStore {
 		path: filepath.Join(configDir, "config.json"),
 	}
 }
+
+// Dir returns the config directory holding config.json (siblings such as
+// automation-backups live next to it).
+func (s *SettingsStore) Dir() string { return filepath.Dir(s.path) }
 
 // Load reads settings from disk. Returns defaults if file doesn't exist.
 func (s *SettingsStore) Load() (*Settings, error) {

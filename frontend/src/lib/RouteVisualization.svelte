@@ -1,7 +1,10 @@
 <script>
   import { t } from '../i18n/index.js';
+  import { errText } from './errors.js';
   import { TunnelService } from '../../bindings/github.com/korjwl1/wireguide/internal/app';
   import { onMount } from 'svelte';
+  import { connectionStatus } from '../stores/tunnels.js';
+  import { skippedRouteRows } from './dnsTruth.js';
 
   let routes = [];
   let loading = false;
@@ -13,7 +16,7 @@
     try {
       routes = (await TunnelService.GetRoutingTable()) || [];
     } catch (e) {
-      error = e?.message || String(e);
+      error = errText(e);
     }
     loading = false;
   }
@@ -21,6 +24,11 @@
   function isVPN(iface) {
     return iface.startsWith('utun') || iface.startsWith('wg') || iface.startsWith('tun');
   }
+
+  // AllowedIPs ranges the macOS LAN-overlap guard did not install. They are
+  // not in the OS table, so show them as marked rows: the tunnel says
+  // "connected" but traffic to these ranges stays local.
+  $: skipped = skippedRouteRows($connectionStatus);
 
   onMount(loadRoutes);
 </script>
@@ -46,13 +54,20 @@
       <div class="error-msg">{error}</div>
     {/if}
 
-    {#if routes.length > 0}
+    {#if routes.length > 0 || skipped.length > 0}
       <div class="route-table">
         <div class="route-header">
           <span>{$t('tools.route_header_dest')}</span>
           <span>{$t('tools.route_header_gateway')}</span>
           <span>{$t('tools.route_header_iface')}</span>
         </div>
+        {#each skipped as s}
+          <div class="route-row skipped" title={$t('tools.route_skipped_hint')}>
+            <span class="dest">{s.cidr}</span>
+            <span class="gw">{s.tunnel}</span>
+            <span class="iface skipped-iface">{$t('tools.route_skipped_badge')}</span>
+          </div>
+        {/each}
         {#each routes as route}
           <div class="route-row" class:vpn={isVPN(route.interface)}>
             <span class="dest">{route.destination}</span>
@@ -172,6 +187,8 @@
   }
   .route-row:last-child { border-bottom: 0; }
   .route-row.vpn { background: color-mix(in srgb, var(--green) 6%, transparent); }
+  .route-row.skipped { background: color-mix(in srgb, var(--orange, #FF9500) 8%, transparent); }
+  .skipped-iface { color: var(--orange, #FF9500); }
   .dest { color: var(--text-primary); }
   .gw { color: var(--text-secondary); }
   .iface { color: var(--text-secondary); display: flex; align-items: center; gap: var(--space-1); }

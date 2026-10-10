@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/korjwl1/wireguide/internal/config"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
@@ -33,6 +34,11 @@ type TunnelService struct {
 	historyStore  *storage.HistoryStore
 	clients       *ipc.ClientHolder
 	app           *application.App
+
+	// userActions records connects/disconnects the user (window, tray)
+	// made in THIS process, so the notifier can tell them apart from
+	// automatic changes. See autonotify.go.
+	userActions *UserActions
 
 	// updateScheduler + updateStore are wired in by the GUI Run() entry
 	// after the Wails service registers (we can't inject them at
@@ -64,6 +70,10 @@ type TunnelService struct {
 	// would walk the activeSessions sync.Map even in the steady state.
 	reconcileMu      sync.Mutex
 	lastReconcileSig string
+
+	// urlQueue holds wireguide:// connect/disconnect requests awaiting the
+	// user's confirmation in the window. See url_actions.go.
+	urlQueue urlActionQueue
 }
 
 // lastKnownTunnelStats is the value type for TunnelService.lastKnownStats.
@@ -73,10 +83,44 @@ type TunnelService struct {
 // resulting history row is labelled "user" instead of the default
 // "reconnect" — without this, every user disconnect would look
 // indistinguishable from a helper-driven one in the timeline.
+//
+// rx/tx are the SESSION totals; rawRx/rawTx are the last raw counter reading
+// from the helper. They differ because the helper's per-device counters are
+// not monotonic over a session: a tunnel in the Connecting/Disconnecting
+// state reports 0/0 while still listed as active, and a reconnect builds a
+// fresh WireGuard device whose counters restart from zero. Storing the raw
+// reading blindly zeroed the cache one tick before the session closed, which
+// is how most history rows ended up with 0 B rx/tx.
 type lastKnownTunnelStats struct {
 	rx     int64
 	tx     int64
+	rawRx  int64
+	rawTx  int64
 	reason string
+}
+
+// merge folds a fresh raw counter reading into the session totals. A reading
+// below the previous one means the underlying counters were reset (teardown or
+// a new device), so everything counted so far is carried over as a base.
+func (st lastKnownTunnelStats) merge(rawRx, rawTx int64) lastKnownTunnelStats {
+	// A 0/0 reading is a failed or mid-transition read, not evidence of a
+	// counter reset: keep what we have so a one-tick blip does not make the
+	// next real reading count the whole session again.
+	if rawRx == 0 && rawTx == 0 {
+		return st
+	}
+	baseRx, baseTx := st.rx-st.rawRx, st.tx-st.rawTx
+	if rawRx < st.rawRx {
+		baseRx = st.rx
+	}
+	if rawTx < st.rawTx {
+		baseTx = st.tx
+	}
+	return lastKnownTunnelStats{
+		rx: baseRx + rawRx, tx: baseTx + rawTx,
+		rawRx: rawRx, rawTx: rawTx,
+		reason: st.reason,
+	}
 }
 
 // NewTunnelService creates a service. Set the app reference via SetApp()
@@ -87,8 +131,15 @@ func NewTunnelService(ts *storage.TunnelStore, ss *storage.SettingsStore, hs *st
 		settingsStore: ss,
 		historyStore:  hs,
 		clients:       clients,
+		userActions:   NewUserActions(),
 	}
 }
+
+// UserActions exposes the record of user-initiated connects/disconnects
+// to the GUI's notifier. Not bound to the frontend.
+//
+//wails:ignore
+func (s *TunnelService) UserActions() *UserActions { return s.userActions }
 
 // SetApp injects the Wails app for dialog access.
 func (s *TunnelService) SetApp(app *application.App) {
@@ -151,6 +202,14 @@ type TunnelInfo struct {
 	// feed the tunnel-list "date added" / "last used" sort (issue #17).
 	CreatedAtUnix int64 `json:"created_at_unix,omitempty"`
 	LastUsedUnix  int64 `json:"last_used_unix,omitempty"`
+	// DNSMode is the intended DNS behaviour from the config: "global"
+	// (replaces system DNS), "split" (only DNSDomains) or "none".
+	DNSMode    string   `json:"dns_mode,omitempty"`
+	DNSDomains []string `json:"dns_domains,omitempty"`
+	// Warnings carries non-blocking lint findings (currently the
+	// cross-tunnel duplicate-Address warning) from ImportConfig so the UI
+	// can surface them after a successful import.
+	Warnings []config.Diagnostic `json:"warnings,omitempty"`
 }
 
 // ConnectionStatus is re-exported from the domain package so Wails bindings

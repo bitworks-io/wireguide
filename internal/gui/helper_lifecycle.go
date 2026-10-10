@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/elevate"
@@ -18,29 +19,70 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+// Contact budgets for the first dial/ping. On macOS the socket belongs to
+// launchd: connect() succeeds at once and launchd then starts the helper, so
+// the ping response can lag by launchd's ThrottleInterval (5 s) plus helper
+// startup (crash recovery runs before Serve). When the socket file is absent
+// there is nothing to wait for.
+const (
+	activatedContactBudget = 15 * time.Second
+	plainContactBudget     = 2 * time.Second
+	reconnectBudget        = 10 * time.Second
+)
+
+// plistNeedsReinstall is elevate.PlistNeedsReinstall, replaceable in tests
+// (the real one reads /Library/LaunchDaemons).
+var plistNeedsReinstall = elevate.PlistNeedsReinstall
+
+// firstContactBudget is how long the first dial and ping may take.
+func firstContactBudget(addr string) time.Duration {
+	if runtime.GOOS == "darwin" {
+		if _, err := os.Stat(addr); err == nil {
+			return activatedContactBudget
+		}
+	}
+	return plainContactBudget
+}
+
 // ensureHelper connects to an existing helper (via socket) or spawns a new
 // one with privilege elevation. Authorization time is excluded from the
 // 30-second readiness timeout; ctx can still cancel recovery during shutdown.
 func ensureHelper(ctx context.Context, dataDir string) (*ipc.Client, error) {
-	addr := ipc.DefaultSocketPath()
-	forceReinstall := false
 	args := elevate.Args{
-		SocketPath: addr,
+		SocketPath: ipc.DefaultSocketPath(),
 		// -1 on Windows — the SID below is the owner identity there.
 		SocketUID: os.Getuid(),
 		SocketSID: elevate.CurrentUserSID(),
 		DataDir:   dataDir,
 	}
+	legacyAddr := ""
+	if runtime.GOOS == "darwin" {
+		legacyAddr = ipc.LegacyDarwinSocketPath
+	}
+	return ensureHelperWith(ctx, args, elevate.SpawnHelper, legacyAddr)
+}
+
+// ensureHelperWith is ensureHelper with the spawn function and the legacy
+// socket path injectable. spawn is only called when no compatible helper is
+// reachable: on macOS an up-to-date install is started by the dial itself
+// (launchd socket activation), so a slow first response is waited for rather
+// than answered with an administrator prompt.
+func ensureHelperWith(ctx context.Context, args elevate.Args, spawn func(context.Context, elevate.Args) error, legacyAddr string) (*ipc.Client, error) {
+	addr := args.SocketPath
+	forceReinstall := false
 
 	// Try an existing helper first (survives GUI restarts).
-	connectCtx, connectCancel := context.WithTimeout(ctx, 2*time.Second)
+	budget := firstContactBudget(addr)
+	connectCtx, connectCancel := context.WithTimeout(ctx, budget)
 	client, connectErr := ipc.NewClientContext(connectCtx, addr)
 	connectCancel()
+	reachable := false
 	if connectErr == nil {
-		pingCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		pingCtx, cancel := context.WithTimeout(ctx, budget)
 		defer cancel()
 		var resp ipc.PingResponse
 		if err := client.CallWithContext(pingCtx, ipc.MethodPing, nil, &resp); err == nil {
+			reachable = true
 			guiVersion := update.CurrentVersion()
 			helperAppVersion := resp.AppVersion
 			if helperAppVersion == "" {
@@ -53,7 +95,7 @@ func ensureHelper(ctx context.Context, dataDir string) (*ipc.Client, error) {
 			//     write (e.g. KeepAlive policy change in the same version).
 			// Without (2), a plist-only change would never reach existing users
 			// because version-matched helpers are otherwise reused as-is.
-			plistDrifted := elevate.PlistNeedsReinstall(args)
+			plistDrifted := plistNeedsReinstall(args)
 			if helperAppVersion == guiVersion && !plistDrifted {
 				slog.Info("connected to existing helper", "version", helperAppVersion)
 				return client, nil
@@ -65,59 +107,92 @@ func ensureHelper(ctx context.Context, dataDir string) (*ipc.Client, error) {
 				slog.Warn("helper version mismatch, upgrading",
 					"helper", helperAppVersion, "gui", guiVersion)
 			}
-			// Graceful shutdown first; if it fails, escalate to
-			// ForceShutdown which the helper handles internally via
-			// os.Exit. Cross-privilege Kill from the GUI (normal user)
-			// to the helper (root/SYSTEM) doesn't work, so we ask the
-			// helper to terminate itself.
-			helperPID := resp.PID
-			shutdownErr := client.Call(ipc.MethodShutdown, nil, nil)
-			if shutdownErr != nil {
-				slog.Warn("helper Shutdown RPC failed, escalating to ForceShutdown",
-					"error", shutdownErr)
-				forceErr := client.Call(ipc.MethodForceShutdown, nil, nil)
-				// ForceShutdown's handler does `time.Sleep(50ms); os.Exit`,
-				// so the response may not reach us before the process
-				// dies — Call returns "client closed" / EOF in that case.
-				// That's actually a SUCCESS signal: helper is dead, which
-				// is exactly what we wanted.
-				if forceErr == nil || isHelperGoneErr(forceErr) {
-					shutdownErr = nil
-				} else {
-					slog.Warn("helper ForceShutdown also failed",
-						"error", forceErr, "pid", helperPID)
-				}
-			}
-			client.Close()
-			// Only attempt last-resort cross-privilege kill if the user is
-			// running an un-elevated dev helper (same UID — proc.Kill
-			// works). For LaunchDaemon/SYSTEM helpers this will fail with
-			// EPERM, but logging it is still useful. We do NOT remove the
-			// socket file when the helper might still be alive — that
-			// would race a fresh listener.
-			if shutdownErr != nil && helperPID > 0 {
-				if killErr := elevate.KillProcess(helperPID); killErr != nil {
-					slog.Warn("helper still up after Shutdown+ForceShutdown; cross-privilege kill failed",
-						"pid", helperPID, "error", killErr,
-						"hint", "the next helper spawn will fail until this PID is cleared")
-				} else {
-					// Same-UID kill succeeded; safe to clean up the socket.
-					elevate.RemoveStaleSocket(addr)
-				}
-			}
+			shutdownStaleHelper(client, resp.PID, addr)
 			// Force reinstall so SpawnHelper skips the "already running"
 			// check — KeepAlive may have restarted the old binary already.
 			forceReinstall = true
-			time.Sleep(300 * time.Millisecond)
 		} else {
 			client.Close()
+		}
+	}
+
+	// Migration: before socket activation the helper listened on a different
+	// path. An old helper (possibly with a tunnel up) may still be running
+	// there; it must be stopped through its own graceful Shutdown before the
+	// reinstall, or the installer's bootout would kill it.
+	if !reachable && legacyAddr != "" && legacyAddr != addr {
+		if shutdownLegacyHelper(ctx, legacyAddr) {
+			forceReinstall = true
 		}
 	}
 
 	// Spawn new helper with elevation
 	slog.Info("spawning helper with elevation...")
 	args.ForceReinstall = forceReinstall
-	return spawnAndConnectHelper(ctx, args, elevate.SpawnHelper, 30*time.Second)
+	return spawnAndConnectHelper(ctx, args, spawn, 30*time.Second)
+}
+
+// shutdownLegacyHelper probes the pre-activation socket path and, if an old
+// helper answers, shuts it down gracefully. Reports whether one was found.
+func shutdownLegacyHelper(ctx context.Context, legacyAddr string) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, plainContactBudget)
+	defer cancel()
+	client, err := ipc.NewClientContext(probeCtx, legacyAddr)
+	if err != nil {
+		return false
+	}
+	var resp ipc.PingResponse
+	if err := client.CallWithContext(probeCtx, ipc.MethodPing, nil, &resp); err != nil {
+		client.Close()
+		return false
+	}
+	slog.Warn("found a helper on the legacy socket path, shutting it down before reinstall",
+		"path", legacyAddr, "helper", resp.AppVersion, "pid", resp.PID)
+	shutdownStaleHelper(client, resp.PID, legacyAddr)
+	return true
+}
+
+// shutdownStaleHelper stops a running helper that must be replaced: graceful
+// Shutdown first; if that fails, escalate to ForceShutdown, which the helper
+// handles internally via os.Exit. Cross-privilege Kill from the GUI (normal
+// user) to the helper (root/SYSTEM) doesn't work, so we ask the helper to
+// terminate itself. Closes client.
+func shutdownStaleHelper(client *ipc.Client, helperPID int, addr string) {
+	shutdownErr := client.Call(ipc.MethodShutdown, nil, nil)
+	if shutdownErr != nil {
+		slog.Warn("helper Shutdown RPC failed, escalating to ForceShutdown",
+			"error", shutdownErr)
+		forceErr := client.Call(ipc.MethodForceShutdown, nil, nil)
+		// ForceShutdown's handler does `time.Sleep(50ms); os.Exit`,
+		// so the response may not reach us before the process
+		// dies — Call returns "client closed" / EOF in that case.
+		// That's actually a SUCCESS signal: helper is dead, which
+		// is exactly what we wanted.
+		if forceErr == nil || isHelperGoneErr(forceErr) {
+			shutdownErr = nil
+		} else {
+			slog.Warn("helper ForceShutdown also failed",
+				"error", forceErr, "pid", helperPID)
+		}
+	}
+	client.Close()
+	// Only attempt last-resort cross-privilege kill if the user is
+	// running an un-elevated dev helper (same UID — proc.Kill
+	// works). For LaunchDaemon/SYSTEM helpers this will fail with
+	// EPERM, but logging it is still useful. We do NOT remove the
+	// socket file when the helper might still be alive — that
+	// would race a fresh listener.
+	if shutdownErr != nil && helperPID > 0 {
+		if killErr := elevate.KillProcess(helperPID); killErr != nil {
+			slog.Warn("helper still up after Shutdown+ForceShutdown; cross-privilege kill failed",
+				"pid", helperPID, "error", killErr,
+				"hint", "the next helper spawn will fail until this PID is cleared")
+		} else {
+			// Same-UID kill succeeded; safe to clean up the socket.
+			elevate.RemoveStaleSocket(addr)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
 }
 
 // spawnAndConnectHelper keeps interactive authorization outside the readiness
@@ -264,21 +339,51 @@ func startHelperHealthMonitor(app *application.App, clients *ipc.ClientHolder, d
 				app.Event.Emit("helper", HelperEvent{Alive: true})
 				wasAlive = true
 			}
+			if helperRepairing.Load() {
+				// The administrator prompt of a user-requested repair takes
+				// longer than the outage window; do not announce an outage
+				// the user is in the middle of fixing.
+				outageStarted = time.Now()
+			}
 			if !wasAlive && !outageReported && time.Since(outageStarted) >= 10*time.Second {
 				app.Event.Emit("critical_error", ipc.CriticalErrorPayload{
 					Where:  "Helper connection",
-					Detail: "The VPN helper is unavailable. Quit and reopen WireGuide to retry helper setup.",
+					Detail: "The VPN helper is unavailable. Use Repair helper (Settings > Advanced) to reinstall it.",
+					Code:   "helper_unavailable",
+					Action: "repair_helper",
 				})
 				outageReported = true
+				if bridge != nil && bridge.notify != nil {
+					bridge.notify.onCriticalError("Helper connection")
+				}
 			}
 		}
 	}()
+}
+
+// recoveryDial is how recoverHelper reaches the helper; a seam for tests.
+var recoveryDial = func(ctx context.Context, dataDir string) (*ipc.Client, error) {
+	if runtime.GOOS == "darwin" {
+		return reconnectHelper(ctx, ipc.DefaultSocketPath())
+	}
+	return ensureHelper(ctx, dataDir)
 }
 
 // recoverHelper attempts to re-establish a working helper connection. Returns
 // true if a new client is now in place. Best-effort — caller decides whether
 // to retry on the next tick.
 func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir string, done <-chan struct{}) bool {
+	// A user-requested repair owns the client holder while it runs.
+	if helperRepairing.Load() {
+		return false
+	}
+	// Quitting: never touch the helper socket again (on macOS a connect would
+	// start the helper right after the user quit).
+	select {
+	case <-done:
+		return false
+	default:
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -297,13 +402,7 @@ func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir strin
 
 	// macOS launchd handles crash restarts. Background recovery must never
 	// reopen administrator prompts after cancellation or a persistent failure.
-	var newClient *ipc.Client
-	var err error
-	if runtime.GOOS == "darwin" {
-		newClient, err = reconnectHelper(ctx, ipc.DefaultSocketPath())
-	} else {
-		newClient, err = ensureHelper(ctx, dataDir)
-	}
+	newClient, err := recoveryDial(ctx, dataDir)
 	if err != nil {
 		slog.Debug("helper recovery attempt failed", "error", err)
 		return false
@@ -321,7 +420,10 @@ func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir strin
 // reconnectHelper is deliberately limited to RPC connection and version checks.
 // It cannot install, shut down, or replace a helper during background recovery.
 func reconnectHelper(ctx context.Context, addr string) (*ipc.Client, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	// Covers launchd's ThrottleInterval plus helper startup: the connect
+	// itself starts a launchd-activated helper, so this restarts one that
+	// exited cleanly (e.g. after ForceShutdown) without a prompt.
+	ctx, cancel := context.WithTimeout(ctx, reconnectBudget)
 	defer cancel()
 	client, err := ipc.NewClientContext(ctx, addr)
 	if err != nil {
@@ -334,7 +436,7 @@ func reconnectHelper(ctx context.Context, addr string) (*ipc.Client, error) {
 	}
 	if ping.AppVersion != update.CurrentVersion() {
 		client.Close()
-		return nil, fmt.Errorf("helper version %q does not match app %q; reopen WireGuide to update it", ping.AppVersion, update.CurrentVersion())
+		return nil, fmt.Errorf("helper version %q does not match app %q; use Repair helper in Settings > Advanced to update it", ping.AppVersion, update.CurrentVersion())
 	}
 	return client, nil
 }
@@ -356,4 +458,52 @@ func isHelperGoneErr(err error) bool {
 		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, ipc.ErrClientClosed)
+}
+
+// helperRepairing is true while repairHelper runs, so the background health
+// monitor does not race it for the client holder while the helper is down.
+var helperRepairing atomic.Bool
+
+// repairHelper is the user-requested "Repair helper" action. It runs the same
+// administrator install/repair path as an upgrade (ForceReinstall makes
+// SpawnHelper skip the "already running" shortcut and reinstall the binary and
+// plist), which is the only action that prompts. The old helper, if it still
+// answers, is shut down first through its own graceful Shutdown so the
+// installer's bootout never kills a running one. Replacing the helper drops
+// any connected tunnel; callers must ask the user first.
+func repairHelper(ctx context.Context, clients *ipc.ClientHolder, bridge *eventBridge, dataDir string) error {
+	if !helperRepairing.CompareAndSwap(false, true) {
+		return errors.New("a helper repair is already running")
+	}
+	defer helperRepairing.Store(false)
+
+	args := elevate.Args{
+		SocketPath:     ipc.DefaultSocketPath(),
+		SocketUID:      os.Getuid(),
+		SocketSID:      elevate.CurrentUserSID(),
+		DataDir:        dataDir,
+		ForceReinstall: true,
+	}
+	// Stop a helper that still answers so the install replaces it cleanly.
+	if old := clients.Get(); old != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		var resp ipc.PingResponse
+		err := old.CallWithContext(pingCtx, ipc.MethodPing, nil, &resp)
+		cancel()
+		if err == nil {
+			slog.Warn("repair: stopping the running helper before reinstall", "pid", resp.PID)
+			shutdownStaleHelper(old, resp.PID, args.SocketPath)
+		}
+	}
+	newClient, err := spawnAndConnectHelper(ctx, args, elevate.SpawnHelper, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	clients.Set(newClient)
+	if bridge != nil {
+		bridge.Resubscribe()
+	}
+	ResendSSIDToHelper(clients)
+	slog.Info("helper repaired")
+	return nil
 }

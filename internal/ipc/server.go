@@ -41,6 +41,7 @@ type Server struct {
 	shutdownCh   chan struct{}
 	onConnect    func() // called when a control conn attaches (any)
 	onDisconnect func() // called when the last control conn closes
+	onSubscribe  func() // called after a client's event subscription is live
 	controlConns map[net.Conn]struct{}
 
 	// connWg tracks in-flight safeHandleConn goroutines. Shutdown waits on it
@@ -58,7 +59,10 @@ type subscriber struct {
 	ch   chan []byte
 }
 
-// NewServer creates a server. ownerUID is the expected UID of connecting
+// NewServer creates a server on an already-bound listener — one from Listen,
+// or one adopted from launchd (socket activation). Every accepted connection
+// is peer-credential checked against ownerUID regardless of where the
+// listener came from. ownerUID is the expected UID of connecting
 // peers on Unix (pass -1 to skip peer credential checks, e.g. in tests).
 func NewServer(listener net.Listener, ownerUID ...int) *Server {
 	uid := -1
@@ -104,6 +108,15 @@ func (s *Server) OnConnect(fn func()) {
 func (s *Server) OnDisconnect(fn func()) {
 	s.mu.Lock()
 	s.onDisconnect = fn
+	s.mu.Unlock()
+}
+
+// OnSubscribe sets a callback fired (on its own goroutine) after a client's
+// event subscription is registered and acknowledged. The helper uses it to
+// deliver once-per-start notices that were produced before any GUI attached.
+func (s *Server) OnSubscribe(fn func()) {
+	s.mu.Lock()
+	s.onSubscribe = fn
 	s.mu.Unlock()
 }
 
@@ -420,6 +433,13 @@ func (s *Server) handleSubscribe(conn net.Conn, reqID uint64) {
 	ack, _ := NewResponse(reqID, Empty{})
 	if err := WriteFrame(conn, ack); err != nil {
 		return
+	}
+
+	s.mu.Lock()
+	onSub := s.onSubscribe
+	s.mu.Unlock()
+	if onSub != nil {
+		go onSub()
 	}
 
 	// Pump events to this subscriber

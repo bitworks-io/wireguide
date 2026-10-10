@@ -3,6 +3,7 @@ package reconnect
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
@@ -50,6 +51,12 @@ type State struct {
 	MaxAttempts  int    `json:"max_attempts"`
 	NextRetry    string `json:"next_retry"`
 }
+
+// ErrNothingToReconnect is returned by a ReconnectFunc when there is no
+// tunnel left that it should restore (nothing cached, or every candidate
+// is owned by automation or was disconnected on purpose). The legacy
+// all-tunnels retry ends instead of backing off forever.
+var ErrNothingToReconnect = errors.New("nothing to reconnect")
 
 // ReconnectFunc is called to perform the actual reconnection of a specific
 // tunnel identified by name. The ctx is the same ctx the monitor created for
@@ -101,6 +108,7 @@ type Monitor struct {
 	cfg             Config
 	manager         TunnelManager
 	reconnectFn     ReconnectFunc
+	legacyTeardown  func() error
 	statusFn        StatusChangedFunc
 	fwSuspendFn     FirewallSuspendFunc
 	fwResumeFn      FirewallResumeFunc
@@ -122,7 +130,33 @@ type Monitor struct {
 	// check runs in monitorLoop. Can be toggled at runtime via
 	// SetHealthCheck. Default: true.
 	healthCheckEnabled bool
+
+	// healthCheckFor, when set, decides per tunnel whether the handshake
+	// check applies (a per-tunnel override over the global setting). It is
+	// passed the global value and called WITHOUT m.mu (it may read disk).
+	healthCheckFor func(name string, global bool) bool
+
+	// lastWake is when the sleep detector last reported a wake. The
+	// handshake check is skipped for wakeGrace afterwards and never counts
+	// time from before the wake. Guarded by mu.
+	lastWake time.Time
+	// noHandshakeStreak counts consecutive health-check reconnects of a
+	// tunnel that never completed a handshake (see staleThresholdFor).
+	noHandshakeStreak map[string]int
+
+	// now is the clock (tests inject a fake). nil means time.Now.
+	now func() time.Time
 }
+
+// Handshake health-check timing.
+const (
+	healthCheckInterval     = 30 * time.Second
+	handshakeStaleThreshold = 180 * time.Second // 3 minutes
+	// wakeGrace suppresses the handshake check right after a wake: the
+	// handshake is necessarily old (the machine was asleep) and the wake
+	// trigger is already rebuilding the tunnel.
+	wakeGrace = 90 * time.Second
+)
 
 // NewMonitor creates a reconnection monitor.
 func NewMonitor(manager TunnelManager, reconnectFn ReconnectFunc, statusFn StatusChangedFunc, cfg Config) *Monitor {
@@ -147,6 +181,54 @@ func (m *Monitor) SetFirewallCallbacks(suspend FirewallSuspendFunc, resume Firew
 	defer m.mu.Unlock()
 	m.fwSuspendFn = suspend
 	m.fwResumeFn = resume
+}
+
+// SetLegacyTeardown installs the teardown used by the legacy all-tunnels
+// path (tunnelName == "") INSTEAD of manager.Disconnect(). It lets the owner
+// decide which tunnels may be torn down (e.g. leave automation-owned tunnels
+// alone). A nil error, or ErrNotConnected, counts as success. Must be called
+// before Start().
+func (m *Monitor) SetLegacyTeardown(fn func() error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.legacyTeardown = fn
+}
+
+// SetHealthCheckFilter installs a per-tunnel override for the handshake
+// check: fn receives the tunnel name and the global setting and returns
+// whether the check applies to that tunnel. nil restores the global
+// behaviour. Safe to call while running.
+func (m *Monitor) SetHealthCheckFilter(fn func(name string, global bool) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCheckFor = fn
+}
+
+func (m *Monitor) clock() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// noteWake records a wake event for the handshake check's grace window.
+func (m *Monitor) noteWake() {
+	now := m.clock()
+	m.mu.Lock()
+	m.lastWake = now
+	m.mu.Unlock()
+}
+
+// online reports whether the network detector sees a primary interface.
+// Detectors that can't tell (and no detector) count as online.
+func (m *Monitor) online() bool {
+	m.mu.Lock()
+	nd := m.networkDetector
+	m.mu.Unlock()
+	if r, ok := nd.(OnlineReporter); ok {
+		return r.Online()
+	}
+	return true
 }
 
 // SetHealthCheck enables or disables the periodic handshake age check.
@@ -278,6 +360,7 @@ func (m *Monitor) CancelRetry() {
 		}
 		delete(m.retries, name)
 	}
+	m.noHandshakeStreak = nil
 }
 
 // CancelRetryFor aborts the in-flight reconnect attempt for a
@@ -292,6 +375,9 @@ func (m *Monitor) CancelRetryFor(name string) {
 		}
 		delete(m.retries, name)
 	}
+	// An explicit cancel (user disconnect) ends the no-handshake backoff;
+	// a later connect starts from the normal threshold.
+	delete(m.noHandshakeStreak, name)
 }
 
 // GetState returns the aggregate reconnection state across all
@@ -318,10 +404,7 @@ func (m *Monitor) GetState() State {
 }
 
 func (m *Monitor) monitorLoop() {
-	const checkInterval = 30 * time.Second
-	const handshakeStaleThreshold = 180 * time.Second // 3 minutes
-
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -329,37 +412,119 @@ func (m *Monitor) monitorLoop() {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.mu.Lock()
-			enabled := m.healthCheckEnabled
-			m.mu.Unlock()
-			if !enabled {
-				continue
-			}
-			if !m.manager.IsConnected() {
-				continue
-			}
-			// Check EACH tunnel's handshake individually. If a specific
-			// tunnel is stale, disconnect and reconnect only THAT tunnel.
-			statuses := m.manager.AllStatuses()
-			for _, status := range statuses {
-				if status == nil || status.LastHandshakeTime.IsZero() {
-					continue
-				}
-				if status.State != domain.StateConnected {
-					continue
-				}
-				age := time.Since(status.LastHandshakeTime)
-				if age > handshakeStaleThreshold {
-					tunnelName := status.TunnelName
-					slog.Warn("handshake stale, triggering per-tunnel reconnect",
-						"tunnel", tunnelName,
-						"last_handshake_age", age.Round(time.Second),
-						"threshold", handshakeStaleThreshold)
-					m.triggerReconnectTunnel(tunnelName)
-				}
-			}
+			m.checkHandshakes(m.clock())
 		}
 	}
+}
+
+// checkHandshakes is one health-check tick: it reconnects each connected
+// tunnel whose handshake is older than handshakeStaleThreshold, measured
+// from the later of the last handshake (or, if it never handshook, the
+// connect time) and the last wake. Skipped entirely
+// within wakeGrace of a wake and while the machine is offline (no primary
+// interface) — a handshake cannot succeed then, so its age says nothing
+// about the tunnel. Tunnels the per-tunnel filter disables are skipped.
+func (m *Monitor) checkHandshakes(now time.Time) {
+	m.mu.Lock()
+	global := m.healthCheckEnabled
+	filter := m.healthCheckFor
+	lastWake := m.lastWake
+	m.mu.Unlock()
+	if filter == nil && !global {
+		return
+	}
+	if !m.manager.IsConnected() {
+		return
+	}
+	if !lastWake.IsZero() && now.Sub(lastWake) < wakeGrace {
+		slog.Debug("health check skipped: within wake grace",
+			"since_wake", now.Sub(lastWake).Round(time.Second), "grace", wakeGrace)
+		return
+	}
+	if !m.online() {
+		slog.Debug("health check skipped: offline")
+		return
+	}
+	// Check EACH tunnel's handshake individually. If a specific
+	// tunnel is stale, disconnect and reconnect only THAT tunnel.
+	for _, status := range m.manager.AllStatuses() {
+		if status == nil {
+			continue
+		}
+		if status.State != domain.StateConnected {
+			continue
+		}
+		enabled := global
+		if filter != nil {
+			enabled = filter(status.TunnelName, global)
+		}
+		if !enabled {
+			continue
+		}
+		// Reference point: the last handshake, or — for a tunnel that has
+		// never completed one (fresh connect, or rebuilt on wake against an
+		// unreachable peer) — the connect time, so a new connect gets the
+		// full threshold to handshake before it is considered dead. Either
+		// way the last wake moves the reference forward.
+		ref := status.LastHandshakeTime
+		neverHandshaked := ref.IsZero()
+		if neverHandshaked {
+			ref = status.ConnectedAt
+			if ref.IsZero() {
+				continue
+			}
+		}
+		if lastWake.After(ref) {
+			ref = lastWake
+		}
+		threshold := m.staleThresholdFor(status.TunnelName, neverHandshaked)
+		age := now.Sub(ref)
+		if age > threshold {
+			tunnelName := status.TunnelName
+			slog.Warn("handshake stale, triggering per-tunnel reconnect",
+				"tunnel", tunnelName,
+				"last_handshake_age", age.Round(time.Second),
+				"threshold", threshold,
+				"never_handshaked", neverHandshaked)
+			if neverHandshaked {
+				m.noteNoHandshakeReconnect(tunnelName)
+			}
+			m.startReconnectTunnel(tunnelName, false, nil, TriggerHealthCheck)
+		}
+	}
+}
+
+// maxNoHandshakeBackoff caps the threshold doubling for tunnels whose peer
+// never answers (180 s << 4 = 48 min between attempts).
+const maxNoHandshakeBackoff = 4
+
+// staleThresholdFor returns the staleness threshold for a tunnel. A tunnel
+// that has never completed a handshake since its last health-check reconnect
+// (peer down, endpoint changed) is retried with exponential backoff instead
+// of every threshold forever: each such reconnect "succeeds" (resetting
+// ConnectedAt) without proving the peer is reachable. Any completed
+// handshake resets the streak.
+func (m *Monitor) staleThresholdFor(name string, neverHandshaked bool) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !neverHandshaked {
+		delete(m.noHandshakeStreak, name)
+		return handshakeStaleThreshold
+	}
+	n := m.noHandshakeStreak[name]
+	if n > maxNoHandshakeBackoff {
+		n = maxNoHandshakeBackoff
+	}
+	return handshakeStaleThreshold << n
+}
+
+func (m *Monitor) noteNoHandshakeReconnect(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.noHandshakeStreak == nil {
+		m.noHandshakeStreak = make(map[string]int)
+	}
+	m.noHandshakeStreak[name]++
 }
 
 func (m *Monitor) triggerReconnect() {
@@ -367,16 +532,21 @@ func (m *Monitor) triggerReconnect() {
 	m.triggerReconnectTunnel("")
 }
 
+// triggerReconnectFor is triggerReconnect with a known trigger kind.
+func (m *Monitor) triggerReconnectFor(kind Trigger) {
+	m.startReconnectTunnel("", false, nil, kind)
+}
+
 // ReconnectTunnelIfIdle lets an additional health signal share the existing
 // retry/backoff state without resetting an in-flight retry.
 func (m *Monitor) ReconnectTunnelIfIdle(tunnelName string, stillNeeded func() bool) {
 	if tunnelName != "" {
-		m.startReconnectTunnel(tunnelName, true, stillNeeded)
+		m.startReconnectTunnel(tunnelName, true, stillNeeded, TriggerHealthCheck)
 	}
 }
 
 func (m *Monitor) triggerReconnectTunnel(tunnelName string) {
-	m.startReconnectTunnel(tunnelName, false, nil)
+	m.startReconnectTunnel(tunnelName, false, nil, "")
 }
 
 // CancelInvalidRetries also runs while tunnels are disconnected or in backoff.
@@ -413,7 +583,7 @@ func (m *Monitor) cancelInvalidRetry(name string, entry *retryState) bool {
 	return true
 }
 
-func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool) {
+func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool, kind Trigger) {
 	m.mu.Lock()
 	if onlyIfIdle && (!m.running || m.retries[tunnelName] != nil || m.retries[""] != nil) {
 		m.mu.Unlock()
@@ -438,7 +608,7 @@ func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, still
 
 	// Create new context + retry slot under the lock so two concurrent
 	// triggers for the same key can't both spawn goroutines.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithTrigger(context.Background(), kind))
 	entry := &retryState{
 		cancel:      cancel,
 		done:        make(chan struct{}),
@@ -489,6 +659,25 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 	m.mu.Lock()
 	entry.delay = m.cfg.InitialDelay
 	m.mu.Unlock()
+
+	// firewallSuspended is true between a suspend attempt and its matching
+	// resume. The deferred resume guarantees the firewall is restored on
+	// EVERY exit path (success, failure, cancel, give-up, panic): a
+	// suspended firewall must never outlive this goroutine. Panic coverage
+	// relies on the callbacks' locks being released by defer while the panic
+	// unwinds (reconnectFn does; a panic inside a manager-internal locked
+	// section is not covered).
+	firewallSuspended := false
+	resumeFirewall := func(reason string) {
+		if !firewallSuspended || m.fwResumeFn == nil {
+			return
+		}
+		firewallSuspended = false
+		if err := m.fwResumeFn(); err != nil {
+			slog.Warn("failed to resume firewall", "reason", reason, "error", err)
+		}
+	}
+	defer resumeFirewall("reconnect goroutine exit")
 
 	for {
 		m.mu.Lock()
@@ -550,12 +739,13 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		// Suspend firewall rules before disconnect so old pf rules (which
 		// reference the old utun interface name) don't block the new
 		// connection's traffic when the interface name changes.
-		firewallWasSuspended := false
 		if m.fwSuspendFn != nil {
+			// A failed suspend may still have been partial, so resume is
+			// owed either way (resume is idempotent and reconciles from the
+			// helper's wanted state).
+			firewallSuspended = true
 			if err := m.fwSuspendFn(); err != nil {
 				slog.Warn("failed to suspend firewall for reconnect", "error", err)
-			} else {
-				firewallWasSuspended = true
 			}
 		}
 
@@ -567,17 +757,35 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		if tunnelName != "" {
 			disconnectErr = m.manager.DisconnectTunnel(tunnelName)
 		} else {
-			disconnectErr = m.manager.Disconnect()
+			m.mu.Lock()
+			teardown := m.legacyTeardown
+			m.mu.Unlock()
+			if teardown != nil {
+				// First attempt only: the hook bounces every plain connected
+				// tunnel, so repeating it on later attempts would keep
+				// dropping tunnels that were already rebuilt while another
+				// one stays unreachable. Later attempts let reconnectFn("")
+				// restore just the tunnels that are still down.
+				if attempt == 1 {
+					disconnectErr = teardown()
+				}
+			} else {
+				disconnectErr = m.manager.Disconnect()
+			}
+		}
+		// ErrNotConnected only means there is nothing to tear down: on the
+		// legacy path everything is already down, and on the per-tunnel path
+		// an earlier attempt's failed connect removed the tunnel. Fall
+		// through to the reconnect step (the helper decides from its cached
+		// configs whether anything is left to restore); treating it as a
+		// teardown failure would back off forever without ever reconnecting.
+		if disconnectErr != nil && isNotConnected(disconnectErr) {
+			disconnectErr = nil
 		}
 		if disconnectErr != nil {
 			slog.Warn("pre-reconnect disconnect failed; will retry after backoff",
 				"tunnel", tunnelName, "attempt", attempt, "error", disconnectErr)
-			if firewallWasSuspended && m.fwResumeFn != nil {
-				if err := m.fwResumeFn(); err != nil {
-					slog.Warn("failed to resume firewall after disconnect failure",
-						"error", err)
-				}
-			}
+			resumeFirewall("disconnect failure")
 			m.mu.Lock()
 			entry.delay = delay * 2
 			if entry.delay > m.cfg.MaxDelay {
@@ -593,25 +801,30 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 			slog.Info("reconnection cancelled before reconnectFn", "attempt", attempt)
 			// Re-enable firewall even on cancel to avoid leaving the
 			// system unprotected.
-			if firewallWasSuspended && m.fwResumeFn != nil {
-				if err := m.fwResumeFn(); err != nil {
-					slog.Warn("failed to resume firewall after cancel", "error", err)
-				}
-			}
+			resumeFirewall("cancel")
 			return
 		}
 
 		// Attempt reconnection — pass tunnel name so only the specific
 		// tunnel is reconnected when doing per-tunnel health recovery.
 		if err := m.reconnectFn(ctx, tunnelName); err != nil {
+			if errors.Is(err, ErrNothingToReconnect) {
+				// Nothing left to restore: end this retry rather than
+				// cycling (and suspending the firewall) forever.
+				slog.Info("reconnect retry ended: nothing to reconnect", "tunnel", tunnelName, "attempt", attempt)
+				resumeFirewall("nothing to reconnect")
+				m.notifyStatus(State{Reconnecting: false})
+				m.mu.Lock()
+				if cur, ok := m.retries[tunnelName]; ok && cur == entry {
+					delete(m.retries, tunnelName)
+				}
+				m.mu.Unlock()
+				return
+			}
 			slog.Warn("reconnection failed", "attempt", attempt, "tunnel", tunnelName, "error", err)
 			// Re-enable firewall after failed attempt so the system stays
 			// protected between retries.
-			if firewallWasSuspended && m.fwResumeFn != nil {
-				if err := m.fwResumeFn(); err != nil {
-					slog.Warn("failed to resume firewall after failed reconnect", "error", err)
-				}
-			}
+			resumeFirewall("failed reconnect")
 			// Exponential backoff stored on the entry so a sibling
 			// trigger (e.g. CancelRetry + new triggerReconnectTunnel)
 			// can read it for an informative GetState snapshot, and so
@@ -627,11 +840,7 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		}
 
 		// Resume firewall with the new interface name and endpoints.
-		if firewallWasSuspended && m.fwResumeFn != nil {
-			if err := m.fwResumeFn(); err != nil {
-				slog.Warn("failed to resume firewall after successful reconnect", "error", err)
-			}
-		}
+		resumeFirewall("successful reconnect")
 
 		slog.Info("reconnected successfully", "attempt", attempt, "tunnel", tunnelName)
 		m.notifyStatus(State{Reconnecting: false})
@@ -667,16 +876,24 @@ func (m *Monitor) triggerLoop() {
 			return
 		case <-wakeCh:
 			slog.Info("system wake detected, triggering reconnect")
+			m.noteWake()
 			if m.manager.IsConnected() || m.manager.ActiveTunnel() != "" {
-				m.triggerReconnect()
+				m.triggerReconnectFor(TriggerWake)
 			}
 		case <-netCh:
 			slog.Info("primary interface change detected, triggering reconnect")
 			if m.manager.IsConnected() || m.manager.ActiveTunnel() != "" {
-				m.triggerReconnect()
+				m.triggerReconnectFor(TriggerNetworkChange)
 			}
 		}
 	}
+}
+
+// isNotConnected reports whether err is the tunnel manager's "nothing is
+// connected" error.
+func isNotConnected(err error) bool {
+	var te *tunnel.TunnelError
+	return errors.As(err, &te) && te.Kind == tunnel.ErrNotConnected
 }
 
 func (m *Monitor) notifyStatus(state State) {

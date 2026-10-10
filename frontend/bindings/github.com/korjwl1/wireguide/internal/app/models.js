@@ -8,7 +8,226 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as config$0 from "../config/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as domain$0 from "../domain/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as ipc$0 from "../ipc/models.js";
+
+/**
+ * AutomationPreview is the GUI-facing view of the helper's read-only
+ * Automation.Preview: the network the engine currently sees plus one
+ * verdict per rule-bearing tunnel. The strings the user reads are built
+ * in the frontend from these structured fields (so they go through i18n).
+ */
+export class AutomationPreview {
+    /**
+     * Creates a new AutomationPreview instance.
+     * @param {Partial<AutomationPreview>} [$$source = {}] - The source object to create the AutomationPreview.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * Available is false when the helper could not be asked (the frontend
+             * then hides the strip instead of showing stale or wrong state).
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("ssid" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["ssid"] = "";
+        }
+        if (!("ssid_unknown" in $$source)) {
+            /**
+             * SSIDUnknown is true only when we are online, the primary interface is
+             * known to be Wi-Fi, and no SSID is readable (Location Services denied,
+             * or a roam blip). An unknown interface (offline, Windows, a utun
+             * default route) never counts.
+             * @member
+             * @type {boolean}
+             */
+            this["ssid_unknown"] = false;
+        }
+        if (!("primary_known" in $$source)) {
+            /**
+             * PrimaryKnown is true when the helper identified the default-route
+             * interface; when false, PrimaryIsWiFi is only a placeholder.
+             * @member
+             * @type {boolean}
+             */
+            this["primary_known"] = false;
+        }
+        if (!("primary_is_wifi" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["primary_is_wifi"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Medium is the primary interface's connection type: wifi, wired or
+             * tethered ("" unknown, e.g. on Windows or an older helper).
+             * @member
+             * @type {string | undefined}
+             */
+            this["medium"] = undefined;
+        }
+        if (!("online" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["online"] = false;
+        }
+        if (!("settled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["settled"] = false;
+        }
+        if (!("settle_remaining_sec" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["settle_remaining_sec"] = 0;
+        }
+        if (!("has_negated_rules" in $$source)) {
+            /**
+             * HasNegatedRules is true when any tunnel has an "is not" rule, i.e.
+             * the settle window actually holds something back.
+             * @member
+             * @type {boolean}
+             */
+            this["has_negated_rules"] = false;
+        }
+        if (!("tunnels" in $$source)) {
+            /**
+             * @member
+             * @type {AutomationVerdict[]}
+             */
+            this["tunnels"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationPreview instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationPreview}
+     */
+    static createFrom($$source = {}) {
+        const $$createField10_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tunnels" in $$parsedSource) {
+            $$parsedSource["tunnels"] = $$createField10_0($$parsedSource["tunnels"]);
+        }
+        return new AutomationPreview(/** @type {Partial<AutomationPreview>} */($$parsedSource));
+    }
+}
+
+/**
+ * AutomationVerdict is one tunnel's evaluated automation state.
+ */
+export class AutomationVerdict {
+    /**
+     * Creates a new AutomationVerdict instance.
+     * @param {Partial<AutomationVerdict>} [$$source = {}] - The source object to create the AutomationVerdict.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("verdict" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["verdict"] = "";
+        }
+        if (!("active" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["active"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RuleIndex is the 1-based position of the deciding rule (0 = none).
+             * @member
+             * @type {number | undefined}
+             */
+            this["rule_index"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RuleType/RuleNegate/RuleValue describe the deciding rule's condition:
+             * type is ssid|subnet|network|medium|none_match, value the SSID (a
+             * comma-separated list for a multi-SSID rule) / CIDR / MAC / medium.
+             * @member
+             * @type {string | undefined}
+             */
+            this["rule_type"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["rule_negate"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["rule_value"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RuleMulti is true for an ssid rule over several SSIDs (RuleValue is
+             * then the comma-separated list: "is one of" / "is none of").
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["rule_multi"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["overlap_cidr"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationVerdict instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationVerdict}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationVerdict(/** @type {Partial<AutomationVerdict>} */($$parsedSource));
+    }
+}
 
 /**
  * ConnectionStatus is re-exported from the domain package so Wails bindings
@@ -102,6 +321,27 @@ export class DNSLeakResult {
              */
             this["error"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["split_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["missing_match_domains"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {DomainCheck[] | undefined}
+             */
+            this["domains"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -112,10 +352,18 @@ export class DNSLeakResult {
      * @returns {DNSLeakResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType1;
+        const $$createField1_0 = $$createType3;
+        const $$createField5_0 = $$createType4;
+        const $$createField6_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_servers" in $$parsedSource) {
             $$parsedSource["dns_servers"] = $$createField1_0($$parsedSource["dns_servers"]);
+        }
+        if ("missing_match_domains" in $$parsedSource) {
+            $$parsedSource["missing_match_domains"] = $$createField5_0($$parsedSource["missing_match_domains"]);
+        }
+        if ("domains" in $$parsedSource) {
+            $$parsedSource["domains"] = $$createField6_0($$parsedSource["domains"]);
         }
         return new DNSLeakResult(/** @type {Partial<DNSLeakResult>} */($$parsedSource));
     }
@@ -167,6 +415,286 @@ export class DNSServer {
 }
 
 /**
+ * DomainCheck mirrors diag.DomainCheck.
+ */
+export class DomainCheck {
+    /**
+     * Creates a new DomainCheck instance.
+     * @param {Partial<DomainCheck>} [$$source = {}] - The source object to create the DomainCheck.
+     */
+    constructor($$source = {}) {
+        if (!("domain" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["domain"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolver"] = undefined;
+        }
+        if (!("registered" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["registered"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DomainCheck instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DomainCheck}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DomainCheck(/** @type {Partial<DomainCheck>} */($$parsedSource));
+    }
+}
+
+/**
+ * FirewallStatus is the read-only DNS protection / kill switch state for the
+ * Settings sub-lines. Available is false for an older helper or on failure,
+ * in which case the UI falls back to the wanted setting alone.
+ */
+export class FirewallStatus {
+    /**
+     * Creates a new FirewallStatus instance.
+     * @param {Partial<FirewallStatus>} [$$source = {}] - The source object to create the FirewallStatus.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {ipc$0.FirewallStatusResponse | null | undefined}
+             */
+            this["status"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType8;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("status" in $$parsedSource) {
+            $$parsedSource["status"] = $$createField1_0($$parsedSource["status"]);
+        }
+        return new FirewallStatus(/** @type {Partial<FirewallStatus>} */($$parsedSource));
+    }
+}
+
+/**
+ * HelperInfo is the Settings > Advanced "Helper" card. Available is false
+ * when the helper cannot be asked at all; fields are blank when an older
+ * helper does not report them (it predates Helper.Info).
+ */
+export class HelperInfo {
+    /**
+     * Creates a new HelperInfo instance.
+     * @param {Partial<HelperInfo>} [$$source = {}] - The source object to create the HelperInfo.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("app_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["app_version"] = "";
+        }
+        if (!("protocol_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["protocol_version"] = "";
+        }
+        if (!("pid" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["pid"] = 0;
+        }
+        if (!("started_at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["started_at"] = "";
+        }
+        if (!("start_mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["start_mode"] = "";
+        }
+        if (!("socket_path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["socket_path"] = "";
+        }
+        if (!("activation_reason" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["activation_reason"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Recovery is what the helper's startup crash recovery cleaned up
+             * (nil when nothing).
+             * @member
+             * @type {ipc$0.HelperRecovery | null | undefined}
+             */
+            this["recovery"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperInfo}
+     */
+    static createFrom($$source = {}) {
+        const $$createField8_0 = $$createType10;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recovery" in $$parsedSource) {
+            $$parsedSource["recovery"] = $$createField8_0($$parsedSource["recovery"]);
+        }
+        return new HelperInfo(/** @type {Partial<HelperInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * HistoryReconcile is one status event's input to history reconciliation.
+ * StartReasons / EndReasons come from the helper's last_change_reason and
+ * recent_disconnects (protocol minor 4; nil from older helpers). SSID is the
+ * GUI's current Wi-Fi network, recorded on sessions that open now.
+ */
+export class HistoryReconcile {
+    /**
+     * Creates a new HistoryReconcile instance.
+     * @param {Partial<HistoryReconcile>} [$$source = {}] - The source object to create the HistoryReconcile.
+     */
+    constructor($$source = {}) {
+        if (!("active" in $$source)) {
+            /**
+             * @member
+             * @type {string[]}
+             */
+            this["active"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: number } | undefined}
+             */
+            this["rx"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: number } | undefined}
+             */
+            this["tx"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["disappear_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["start_reasons"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["end_reasons"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryReconcile instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HistoryReconcile}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType4;
+        const $$createField1_0 = $$createType11;
+        const $$createField2_0 = $$createType11;
+        const $$createField4_0 = $$createType12;
+        const $$createField5_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("active" in $$parsedSource) {
+            $$parsedSource["active"] = $$createField0_0($$parsedSource["active"]);
+        }
+        if ("rx" in $$parsedSource) {
+            $$parsedSource["rx"] = $$createField1_0($$parsedSource["rx"]);
+        }
+        if ("tx" in $$parsedSource) {
+            $$parsedSource["tx"] = $$createField2_0($$parsedSource["tx"]);
+        }
+        if ("start_reasons" in $$parsedSource) {
+            $$parsedSource["start_reasons"] = $$createField4_0($$parsedSource["start_reasons"]);
+        }
+        if ("end_reasons" in $$parsedSource) {
+            $$parsedSource["end_reasons"] = $$createField5_0($$parsedSource["end_reasons"]);
+        }
+        return new HistoryReconcile(/** @type {Partial<HistoryReconcile>} */($$parsedSource));
+    }
+}
+
+/**
  * KnownSSIDs is the response shape for GetKnownSSIDs. The frontend uses
  * it to render a picker so users can tap saved networks instead of
  * retyping SSIDs they've already joined.
@@ -203,12 +731,103 @@ export class KnownSSIDs {
      * @returns {KnownSSIDs}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType2;
+        const $$createField1_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("known" in $$parsedSource) {
             $$parsedSource["known"] = $$createField1_0($$parsedSource["known"]);
         }
         return new KnownSSIDs(/** @type {Partial<KnownSSIDs>} */($$parsedSource));
+    }
+}
+
+/**
+ * ResolveResult mirrors diag.ResolveResult.
+ */
+export class ResolveResult {
+    /**
+     * Creates a new ResolveResult instance.
+     * @param {Partial<ResolveResult>} [$$source = {}] - The source object to create the ResolveResult.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["addrs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolver"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["match_domain"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["nxdomain"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["timed_out"] = undefined;
+        }
+        if (!("duration_ms" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["duration_ms"] = 0;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error_code"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResolveResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResolveResult}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("addrs" in $$parsedSource) {
+            $$parsedSource["addrs"] = $$createField1_0($$parsedSource["addrs"]);
+        }
+        return new ResolveResult(/** @type {Partial<ResolveResult>} */($$parsedSource));
     }
 }
 
@@ -325,6 +944,32 @@ export class TunnelInfo {
              */
             this["last_used_unix"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * DNSMode is the intended DNS behaviour from the config: "global"
+             * (replaces system DNS), "split" (only DNSDomains) or "none".
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_domains"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Warnings carries non-blocking lint findings (currently the
+             * cross-tunnel duplicate-Address warning) from ImportConfig so the UI
+             * can surface them after a successful import.
+             * @member
+             * @type {config$0.Diagnostic[] | undefined}
+             */
+            this["warnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -335,8 +980,63 @@ export class TunnelInfo {
      * @returns {TunnelInfo}
      */
     static createFrom($$source = {}) {
+        const $$createField8_0 = $$createType4;
+        const $$createField9_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("dns_domains" in $$parsedSource) {
+            $$parsedSource["dns_domains"] = $$createField8_0($$parsedSource["dns_domains"]);
+        }
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField9_0($$parsedSource["warnings"]);
+        }
         return new TunnelInfo(/** @type {Partial<TunnelInfo>} */($$parsedSource));
+    }
+}
+
+/**
+ * URLAction is a validated request parsed from a wireguide:// URL.
+ */
+export class URLAction {
+    /**
+     * Creates a new URLAction instance.
+     * @param {Partial<URLAction>} [$$source = {}] - The source object to create the URLAction.
+     */
+    constructor($$source = {}) {
+        if (!("kind" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["tunnel"] = undefined;
+        }
+        if (!("confirm" in $$source)) {
+            /**
+             * Confirm is true when the user must approve the action in the window
+             * before it runs (the app was not frontmost when the URL arrived).
+             * @member
+             * @type {boolean}
+             */
+            this["confirm"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new URLAction instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {URLAction}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new URLAction(/** @type {Partial<URLAction>} */($$parsedSource));
     }
 }
 
@@ -404,6 +1104,32 @@ export class UpdateState {
              */
             this["auto_enabled"] = false;
         }
+        if (!("last_error_unix" in $$source)) {
+            /**
+             * LastErrorUnix / ConsecutiveErrors come from update.json: the time of
+             * the most recent failed check and how many failed in a row since the
+             * last success (0 = healthy). RepoURL is the project the About links
+             * and update checks target (a build-time constant: fork builds point
+             * at their own repo).
+             * @member
+             * @type {number}
+             */
+            this["last_error_unix"] = 0;
+        }
+        if (!("consecutive_errors" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["consecutive_errors"] = 0;
+        }
+        if (!("repo_url" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["repo_url"] = "";
+        }
 
         Object.assign(this, $$source);
     }
@@ -414,12 +1140,90 @@ export class UpdateState {
      * @returns {UpdateState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType2;
+        const $$createField3_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dismissed_versions" in $$parsedSource) {
             $$parsedSource["dismissed_versions"] = $$createField3_0($$parsedSource["dismissed_versions"]);
         }
         return new UpdateState(/** @type {Partial<UpdateState>} */($$parsedSource));
+    }
+}
+
+/**
+ * VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+ */
+export class VerifyRow {
+    /**
+     * Creates a new VerifyRow instance.
+     * @param {Partial<VerifyRow>} [$$source = {}] - The source object to create the VerifyRow.
+     */
+    constructor($$source = {}) {
+        if (!("check" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["check"] = "";
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+        if (!("detail" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["detail"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+             * @member
+             * @type {string | undefined}
+             */
+            this["detail_key"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["detail_params"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint_key"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VerifyRow instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VerifyRow}
+     */
+    static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("detail_params" in $$parsedSource) {
+            $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
+        }
+        return new VerifyRow(/** @type {Partial<VerifyRow>} */($$parsedSource));
     }
 }
 
@@ -446,6 +1250,14 @@ export class ZipImportResult {
              */
             this["error"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Warnings are non-blocking import findings (e.g. a duplicate Address).
+             * @member
+             * @type {config$0.Diagnostic[] | undefined}
+             */
+            this["warnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -456,12 +1268,28 @@ export class ZipImportResult {
      * @returns {ZipImportResult}
      */
     static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField2_0($$parsedSource["warnings"]);
+        }
         return new ZipImportResult(/** @type {Partial<ZipImportResult>} */($$parsedSource));
     }
 }
 
 // Private type creation functions
-const $$createType0 = DNSServer.createFrom;
+const $$createType0 = AutomationVerdict.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
+const $$createType2 = DNSServer.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = DomainCheck.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = ipc$0.FirewallStatusResponse.createFrom;
+const $$createType8 = $Create.Nullable($$createType7);
+const $$createType9 = ipc$0.HelperRecovery.createFrom;
+const $$createType10 = $Create.Nullable($$createType9);
+const $$createType11 = $Create.Map($Create.Any, $Create.Any);
+const $$createType12 = $Create.Map($Create.Any, $Create.Any);
+const $$createType13 = config$0.Diagnostic.createFrom;
+const $$createType14 = $Create.Array($$createType13);

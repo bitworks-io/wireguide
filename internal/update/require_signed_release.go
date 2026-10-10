@@ -27,7 +27,7 @@ const requireSignedUpdates = true
 // to miss in journalctl / Console / EventViewer.
 func init() {
 	if expectedPublicKey == "" {
-		slog.Error("PRODUCTION BUILD WITHOUT SIGNING KEY — auto-updates will refuse to install. " +
+		slog.Warn("PRODUCTION BUILD WITHOUT SIGNING KEY — auto-updates will refuse to install. " +
 			"Rebuild with -ldflags '-X .../update.expectedPublicKey=<HEX>'.")
 	}
 }

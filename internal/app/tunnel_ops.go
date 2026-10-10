@@ -53,6 +53,7 @@ func (s *TunnelService) ListTunnelsLocal() ([]TunnelInfo, error) {
 		if created == 0 {
 			created = s.tunnelStore.ModTimeUnix(name)
 		}
+		dnsMode := diag.DNSModeOf(cfg.Interface.DNS)
 		result = append(result, TunnelInfo{
 			Name:               name,
 			Endpoint:           endpoint,
@@ -60,6 +61,8 @@ func (s *TunnelService) ListTunnelsLocal() ([]TunnelInfo, error) {
 			LatencyProbeTarget: latencyProbeTarget,
 			CreatedAtUnix:      created,
 			LastUsedUnix:       lastUsed[name],
+			DNSMode:            dnsMode.Mode,
+			DNSDomains:         dnsMode.Domains,
 		})
 	}
 	return result, nil
@@ -164,6 +167,7 @@ func (s *TunnelService) ListTunnels() ([]TunnelInfo, error) {
 		if created == 0 {
 			created = s.tunnelStore.ModTimeUnix(name)
 		}
+		dnsMode := diag.DNSModeOf(cfg.Interface.DNS)
 		result = append(result, TunnelInfo{
 			Name:               name,
 			IsConnected:        name == active.Value,
@@ -172,6 +176,8 @@ func (s *TunnelService) ListTunnels() ([]TunnelInfo, error) {
 			LatencyProbeTarget: latencyProbeTarget,
 			CreatedAtUnix:      created,
 			LastUsedUnix:       lastUsed[name],
+			DNSMode:            dnsMode.Mode,
+			DNSDomains:         dnsMode.Domains,
 		})
 	}
 	return result, nil
@@ -194,9 +200,33 @@ func (s *TunnelService) CheckConflicts(name string) ([]diag.ConflictInfo, error)
 	if err != nil {
 		slog.Warn("conflict check failed", "tunnel", name, "error", err)
 		// Non-fatal — don't block connect if the scan itself fails.
-		return nil, nil
+		conflicts = nil
 	}
-	return conflicts, nil
+	// Another CONNECTED tunnel with the same interface Address is a latent
+	// routing ambiguity; surface it through the same dialog.
+	return append(conflicts, s.addressConflicts(name, cfg)...), nil
+}
+
+// addressConflicts returns an "address" conflict for every currently
+// connected tunnel (other than `name`) that shares an Address IP with cfg.
+func (s *TunnelService) addressConflicts(name string, cfg *config.WireGuardConfig) []diag.ConflictInfo {
+	if len(cfg.Interface.Address) == 0 {
+		return nil
+	}
+	var resp ipc.ActiveTunnelsResponse
+	if err := s.call(ipc.MethodActiveTunnels, nil, &resp); err != nil {
+		return nil
+	}
+	connected := make(map[string][]string)
+	for _, n := range resp.Names {
+		if n == name {
+			continue
+		}
+		if c, err := s.tunnelStore.Load(n); err == nil {
+			connected[n] = c.Interface.Address
+		}
+	}
+	return diag.AddressConflicts(cfg.Interface.Address, connected)
 }
 
 // Connect loads a tunnel config from local storage and asks the helper to
@@ -219,8 +249,11 @@ func (s *TunnelService) Connect(name string) error {
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()
 
+	s.userActions.Begin(name, true)
+	defer s.userActions.End(name, true)
 	return s.callLong(ipc.MethodConnect, ipc.ConnectRequest{
-		Config: cfg,
+		Config:      cfg,
+		HealthCheck: s.tunnelHealthCheckForConnect(name),
 	}, nil)
 }
 
@@ -238,6 +271,15 @@ func (s *TunnelService) Connect(name string) error {
 func (s *TunnelService) Disconnect() error {
 	name, rx, tx := s.snapshotActiveStats("")
 	s.markUserDisconnect(name, rx, tx)
+
+	// Empty name = "whatever is active" — mark the wildcard so a status
+	// diff for any tunnel in this window counts as user-initiated.
+	actionName := name
+	if actionName == "" {
+		actionName = AnyTunnel
+	}
+	s.userActions.Begin(actionName, false)
+	defer s.userActions.End(actionName, false)
 
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()
@@ -263,6 +305,8 @@ func (s *TunnelService) Disconnect() error {
 func (s *TunnelService) DisconnectTunnel(name string) error {
 	_, rx, tx := s.snapshotActiveStats(name)
 	s.markUserDisconnect(name, rx, tx)
+	s.userActions.Begin(name, false)
+	defer s.userActions.End(name, false)
 
 	s.clients.MarkInflight()
 	defer s.clients.UnmarkInflight()
@@ -288,11 +332,12 @@ func (s *TunnelService) markUserDisconnect(name string, snapRx, snapTx int64) {
 	}
 	if cached, ok := s.lastKnownStats.Load(name); ok {
 		if st, ok := cached.(lastKnownTunnelStats); ok {
-			s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: st.rx, tx: st.tx, reason: "user"})
+			st.reason = "user"
+			s.lastKnownStats.Store(name, st)
 			return
 		}
 	}
-	s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: snapRx, tx: snapTx, reason: "user"})
+	s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: snapRx, tx: snapTx, rawRx: snapRx, rawTx: snapTx, reason: "user"})
 }
 
 // clearUserDisconnect removes the "user" reason hint after a failed
@@ -304,7 +349,8 @@ func (s *TunnelService) clearUserDisconnect(name string) {
 	}
 	if cached, ok := s.lastKnownStats.Load(name); ok {
 		if st, ok := cached.(lastKnownTunnelStats); ok && st.reason == "user" {
-			s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: st.rx, tx: st.tx, reason: ""})
+			st.reason = ""
+			s.lastKnownStats.Store(name, st)
 		}
 	}
 }
@@ -360,6 +406,31 @@ func (s *TunnelService) snapshotActiveStats(wantName string) (string, int64, int
 // open-session loop. The stats cache still gets updated so the eventual
 // disappear-close uses fresh counters.
 func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTunnel, txByTunnel map[string]int64, disappearReason string) {
+	s.ReconcileHistory(HistoryReconcile{
+		Active: activeNames, Rx: rxByTunnel, Tx: txByTunnel, DisappearReason: disappearReason,
+	})
+}
+
+// HistoryReconcile is one status event's input to history reconciliation.
+// StartReasons / EndReasons come from the helper's last_change_reason and
+// recent_disconnects (protocol minor 4; nil from older helpers). SSID is the
+// GUI's current Wi-Fi network, recorded on sessions that open now.
+type HistoryReconcile struct {
+	Active          []string          `json:"active"`
+	Rx              map[string]int64  `json:"rx,omitempty"`
+	Tx              map[string]int64  `json:"tx,omitempty"`
+	DisappearReason string            `json:"disappear_reason,omitempty"`
+	StartReasons    map[string]string `json:"start_reasons,omitempty"`
+	EndReasons      map[string]string `json:"end_reasons,omitempty"`
+	SSID            string            `json:"ssid,omitempty"`
+}
+
+// ReconcileHistory is ReconcileHistoryFromStatus with per-tunnel start/end
+// reasons and the SSID at session start. A session's end reason is, in
+// order: the GUI's own "user" hint, the helper's recorded end reason, then
+// DisappearReason ("reconnect" by default).
+func (s *TunnelService) ReconcileHistory(in HistoryReconcile) {
+	activeNames, rxByTunnel, txByTunnel, disappearReason := in.Active, in.Rx, in.Tx, in.DisappearReason
 	if s.historyStore == nil {
 		return
 	}
@@ -385,13 +456,14 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		if txByTunnel != nil {
 			tx = txByTunnel[name]
 		}
-		reason := ""
+		// Fold the reading into the session totals instead of overwriting:
+		// a Connecting/Disconnecting tunnel reports 0/0 while still active,
+		// which used to wipe the real counters one tick before the close.
+		var prev lastKnownTunnelStats
 		if cached, ok := s.lastKnownStats.Load(name); ok {
-			if st, ok := cached.(lastKnownTunnelStats); ok {
-				reason = st.reason
-			}
+			prev, _ = cached.(lastKnownTunnelStats)
 		}
-		s.lastKnownStats.Store(name, lastKnownTunnelStats{rx: rx, tx: tx, reason: reason})
+		s.lastKnownStats.Store(name, prev.merge(rx, tx))
 	}
 
 	// Build a stable signature of the active set and compare to the prior
@@ -419,6 +491,9 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 			// Prefer cached last-seen counters and reason — the current event's
 			// maps don't include this tunnel since it just disappeared, and a
 			// pre-set reason from user Disconnect overrides the default.
+			if r := in.EndReasons[name]; r != "" {
+				reason = r
+			}
 			if cached, ok := s.lastKnownStats.LoadAndDelete(name); ok {
 				if st, ok := cached.(lastKnownTunnelStats); ok {
 					rx = st.rx
@@ -441,7 +516,7 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		if _, exists := s.activeSessions.Load(name); exists {
 			continue
 		}
-		id := s.historyStore.RecordConnect(name)
+		id := s.historyStore.RecordConnectDetail(name, in.StartReasons[name], in.SSID)
 		s.activeSessions.Store(name, id)
 	}
 }
@@ -509,11 +584,13 @@ func (s *TunnelService) CloseHistorySessions(reason string) {
 			// Fall back to last-known cache when the helper status
 			// didn't include this tunnel (e.g. helper already torn
 			// down the interface but the GUI's session map is fresh).
-			if rx == 0 && tx == 0 {
-				if cached, ok := s.lastKnownStats.Load(name); ok {
-					if st, ok := cached.(lastKnownTunnelStats); ok {
-						rx, tx = st.rx, st.tx
-					}
+			// Merge rather than only fall back on zero: a status taken
+			// mid-teardown can report small non-zero counters from a fresh
+			// device that are below what the session already transferred.
+			if cached, ok := s.lastKnownStats.Load(name); ok {
+				if st, ok := cached.(lastKnownTunnelStats); ok {
+					m := st.merge(rx, tx)
+					rx, tx = m.rx, m.tx
 				}
 			}
 			s.historyStore.RecordDisconnect(id, rx, tx, reason)

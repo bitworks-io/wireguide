@@ -22,9 +22,25 @@ import (
 // (treating a CLI client as a control connection, i.e. the pre-1.1
 // behaviour) and answers RequestQuit with method-not-found, which the
 // CLI reports as "this helper is too old to stop from the CLI".
+// Minor 2 added PingResponse.GUIAttached. With launchd socket activation a
+// successful dial no longer proves the app is running (the dial itself starts
+// the helper), so the CLI needs the helper to say whether a GUI is attached.
+// Minor 3 added Firewall.Status, Network.ResetDNS, Helper.Info and the
+// read-only Diag.Snapshot (pf anchor dump for the diagnostics bundle), the
+// event.recovery notification, per-tunnel dns_mode/dns_servers/dns_protected/
+// routes_skipped status fields and CriticalErrorPayload.Code/Action. All
+// additive: an older helper answers the new methods with method-not-found
+// (callers treat that as "unknown" / record the bundle section as
+// unavailable), and an older GUI ignores the new fields.
+// Minor 4 added the event.automation notification, per-tunnel
+// last_change_reason/last_change_at status fields plus the top-level
+// recent_disconnects map, and ConnectRequest.HealthCheck (per-tunnel
+// handshake health-check override). All additive and omitempty: an older
+// GUI ignores them, and a GUI talking to an older helper falls back to its
+// previous generic notification / history reasons.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 1
+	ProtocolMinor = 4
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -38,6 +54,24 @@ var ProtocolVersion = fmt.Sprintf("%d.%d", ProtocolMajor, ProtocolMinor)
 // (backward-compatible with the legacy "1" wire format from old helpers).
 func MajorVersionMatches(a, b string) bool {
 	return majorOf(a) == majorOf(b)
+}
+
+// MinorOf returns the numeric minor of a "major.minor" version string, or 0
+// when there is none (legacy "1" wire format) or it is not a number.
+func MinorOf(v string) int {
+	for i := 0; i < len(v); i++ {
+		if v[i] == '.' {
+			n := 0
+			for _, c := range v[i+1:] {
+				if c < '0' || c > '9' {
+					break
+				}
+				n = n*10 + int(c-'0')
+			}
+			return n
+		}
+	}
+	return 0
 }
 
 func majorOf(v string) string {
@@ -93,13 +127,13 @@ const (
 	ErrCodeMethodNotFound = -32601
 	ErrCodeInvalidParams  = -32602
 	ErrCodeInternalError  = -32603
-	ErrCodeAppError = -32000
+	ErrCodeAppError       = -32000
 )
 
 // RPC method names
 const (
-	MethodPing             = "Helper.Ping"
-	MethodShutdown         = "Helper.Shutdown"
+	MethodPing     = "Helper.Ping"
+	MethodShutdown = "Helper.Shutdown"
 	// MethodForceShutdown is the escalation when MethodShutdown is ignored
 	// or replied to with an error. The helper handler immediately
 	// terminates the process (os.Exit) without running the graceful
@@ -107,15 +141,15 @@ const (
 	// must be cleared. The GUI cannot kill the helper from outside
 	// because the helper runs as root/SYSTEM and the GUI is a normal
 	// user, so cross-privilege kill is the helper's job.
-	MethodForceShutdown    = "Helper.ForceShutdown"
-	MethodSubscribe        = "Helper.Subscribe"
-	MethodSetLogLevel      = "Helper.SetLogLevel"
-	MethodConnect          = "Tunnel.Connect"
-	MethodDisconnect       = "Tunnel.Disconnect"
-	MethodStatus           = "Tunnel.Status"
-	MethodIsConnected      = "Tunnel.IsConnected"
-	MethodActiveName       = "Tunnel.ActiveName"
-	MethodActiveTunnels    = "Tunnel.ActiveTunnels"
+	MethodForceShutdown = "Helper.ForceShutdown"
+	MethodSubscribe     = "Helper.Subscribe"
+	MethodSetLogLevel   = "Helper.SetLogLevel"
+	MethodConnect       = "Tunnel.Connect"
+	MethodDisconnect    = "Tunnel.Disconnect"
+	MethodStatus        = "Tunnel.Status"
+	MethodIsConnected   = "Tunnel.IsConnected"
+	MethodActiveName    = "Tunnel.ActiveName"
+	MethodActiveTunnels = "Tunnel.ActiveTunnels"
 	// MethodRename runs inside the helper because it has to take connectMu
 	// to make "is the tunnel active?" + file rename atomic with respect to
 	// Connect / Disconnect / wifi-rule auto-connect. Splitting it into
@@ -123,7 +157,7 @@ const (
 	// window the helper-only design avoids. The architectural cost
 	// (helper imports storage) is accepted; the helper's storage usage is
 	// confined to this single method + read-only Load for wifi rules.
-	MethodRename = "Tunnel.Rename"
+	MethodRename           = "Tunnel.Rename"
 	MethodSetKillSwitch    = "Firewall.SetKillSwitch"
 	MethodSetDNSProtection = "Firewall.SetDNSProtection"
 	MethodSetHealthCheck   = "Monitor.SetHealthCheck"
@@ -133,15 +167,29 @@ const (
 	// current Automation rules against the current network context and
 	// returns each tunnel's decision WITHOUT connecting/disconnecting.
 	MethodAutomationPreview = "Automation.Preview"
+	// MethodDiagSnapshot is a read-only dump of root-only diagnostics (the
+	// WireGuide pf anchors) for the diagnostics bundle. It takes no
+	// parameters and changes nothing.
+	MethodDiagSnapshot = "Diag.Snapshot"
 	// MethodRequestQuit asks the helper to bring the WHOLE app down —
 	// this is `wireguide ctl stop`. It is deliberately NOT the same as
 	// MethodShutdown: shutting the helper down while the GUI is still
-	// running just makes the GUI's health monitor respawn it (and prompt
-	// for an admin password on macOS). Instead the helper broadcasts
+	// running just makes the GUI's health monitor bring it back (on macOS
+	// the reconnect itself re-activates it via launchd). Instead the helper broadcasts
 	// EventQuit so a connected GUI terminates itself, and the GUI's own
 	// shutdown path then stops the helper. With no GUI attached the
 	// helper simply shuts itself down.
 	MethodRequestQuit = "Helper.RequestQuit"
+	// MethodFirewallStatus is a read-only report of the firewall state the
+	// helper wants and what is actually loaded (pf read-back on macOS).
+	MethodFirewallStatus = "Firewall.Status"
+	// MethodResetDNS flushes WireGuide's firewall rules, split-DNS keys and
+	// restores DNS from the recovery journal, returning a report of each
+	// step. Refuses while a tunnel is connected unless Force is set.
+	MethodResetDNS = "Network.ResetDNS"
+	// MethodHelperInfo is a read-only description of the running helper
+	// (version, start mode, socket, pid, start time, startup recovery).
+	MethodHelperInfo = "Helper.Info"
 )
 
 // Event names (server → client notifications)
@@ -167,6 +215,15 @@ const (
 	// value so a running GUI can update its toggle without racing a
 	// re-read of config.json.
 	EventSettingsChanged = "event.settings_changed"
+	// EventRecovery is broadcast once per helper start, to the first GUI that
+	// subscribes, when startup crash recovery restored DNS or flushed stale
+	// firewall rules. The same data stays available from Helper.Info.
+	EventRecovery = "event.recovery"
+	// EventAutomation reports an Automation decision: every executed
+	// rule-driven connect/disconnect (success or failure), and a
+	// held/latched/skipped_overlap decision when it changes for a tunnel.
+	// Protocol minor >= 4.
+	EventAutomation = "event.automation"
 )
 
 // CodedError is an error that carries a specific JSON-RPC error code.

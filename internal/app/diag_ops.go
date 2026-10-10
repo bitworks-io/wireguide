@@ -1,7 +1,14 @@
 package app
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
 	"github.com/korjwl1/wireguide/internal/diag"
+	"github.com/korjwl1/wireguide/internal/diagbundle"
+	"github.com/korjwl1/wireguide/internal/ipc"
 )
 
 // DNSLeakResult mirrors diag.DNSLeakResult for Wails JSON serialisation.
@@ -10,6 +17,42 @@ type DNSLeakResult struct {
 	DNSServers []DNSServer `json:"dns_servers"`
 	TestDomain string      `json:"test_domain"`
 	Error      string      `json:"error,omitempty"`
+
+	SplitMode           bool          `json:"split_mode,omitempty"`
+	MissingMatchDomains []string      `json:"missing_match_domains,omitempty"`
+	Domains             []DomainCheck `json:"domains,omitempty"`
+}
+
+// DomainCheck mirrors diag.DomainCheck.
+type DomainCheck struct {
+	Domain     string `json:"domain"`
+	Resolver   string `json:"resolver,omitempty"`
+	Registered bool   `json:"registered"`
+}
+
+// VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+type VerifyRow struct {
+	Check  string `json:"check"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	// DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+	DetailKey    string            `json:"detail_key,omitempty"`
+	DetailParams map[string]string `json:"detail_params,omitempty"`
+	Hint         string            `json:"hint,omitempty"`
+	HintKey      string            `json:"hint_key,omitempty"`
+}
+
+// ResolveResult mirrors diag.ResolveResult.
+type ResolveResult struct {
+	Name        string   `json:"name"`
+	Addrs       []string `json:"addrs,omitempty"`
+	Resolver    string   `json:"resolver,omitempty"`
+	MatchDomain string   `json:"match_domain,omitempty"`
+	NXDomain    bool     `json:"nxdomain,omitempty"`
+	TimedOut    bool     `json:"timed_out,omitempty"`
+	DurationMs  float64  `json:"duration_ms"`
+	Error       string   `json:"error,omitempty"`
+	ErrorCode   string   `json:"error_code,omitempty"`
 }
 
 // DNSServer mirrors diag.DNSServer.
@@ -35,10 +78,15 @@ func (s *TunnelService) RunDNSLeakTest() (*DNSLeakResult, error) {
 	// are expected to be in use. Ignore IPC errors — an empty expected set is
 	// still a valid (conservative) test.
 	var expectedDNS []string
-	if status, err := s.GetStatus(); err == nil && status != nil && status.TunnelName != "" {
-		if cfg, err := s.tunnelStore.Load(status.TunnelName); err == nil && cfg != nil {
-			expectedDNS = cfg.Interface.DNS
+	var resp ipc.ActiveTunnelsResponse
+	if err := s.call(ipc.MethodActiveTunnels, nil, &resp); err == nil {
+		var perTunnel [][]string
+		for _, name := range resp.Names {
+			if cfg, err := s.tunnelStore.Load(name); err == nil && cfg != nil {
+				perTunnel = append(perTunnel, cfg.Interface.DNS)
+			}
 		}
+		expectedDNS = diag.ExpectedDNSForTunnels(perTunnel)
 	}
 
 	r := diag.RunDNSLeakTest(expectedDNS)
@@ -46,6 +94,12 @@ func (s *TunnelService) RunDNSLeakTest() (*DNSLeakResult, error) {
 		Leaked:     r.Leaked,
 		TestDomain: r.TestDomain,
 		Error:      r.Error,
+
+		SplitMode:           r.SplitMode,
+		MissingMatchDomains: r.MissingMatchDomains,
+	}
+	for _, d := range r.Domains {
+		out.Domains = append(out.Domains, DomainCheck{Domain: d.Domain, Resolver: d.Resolver, Registered: d.Registered})
 	}
 	for _, srv := range r.DNSServers {
 		out.DNSServers = append(out.DNSServers, DNSServer{
@@ -73,4 +127,107 @@ func (s *TunnelService) GetRoutingTable() ([]RouteEntry, error) {
 		})
 	}
 	return out, nil
+}
+
+// ResolveHost resolves name through the system resolver path (getaddrinfo),
+// the same one browsers use, and reports which resolver answered. Unlike
+// dig/nslookup it honours split-DNS supplemental resolvers. Bounded by 3 s.
+func (s *TunnelService) ResolveHost(name string) *ResolveResult {
+	r := diag.Resolve(context.Background(), name)
+	return &ResolveResult{
+		Name: r.Name, Addrs: r.Addrs, Resolver: r.Resolver, MatchDomain: r.MatchDomain,
+		NXDomain: r.NXDomain, TimedOut: r.TimedOut, DurationMs: r.DurationMs, Error: r.Error, ErrorCode: r.ErrorCode,
+	}
+}
+
+// Verify runs the manual post-connect checks for a tunnel: handshake, route
+// per AllowedIPs, split-DNS resolver registration and, when given, a ping of
+// pingHost and a resolve of resolveName. Read-only; every probe is bounded by
+// 3 s. The frontend only calls it on an explicit user click.
+func (s *TunnelService) Verify(tunnelName, pingHost, resolveName string) ([]VerifyRow, error) {
+	cfg, err := s.tunnelStore.Load(tunnelName)
+	if err != nil {
+		return nil, fmt.Errorf("load tunnel: %w", err)
+	}
+	in := diag.VerifyInput{
+		Tunnel:      tunnelName,
+		DNS:         cfg.Interface.DNS,
+		Table:       cfg.Interface.Table,
+		PingHost:    pingHost,
+		ResolveName: resolveName,
+	}
+	for _, p := range cfg.Peers {
+		in.AllowedIPs = append(in.AllowedIPs, p.AllowedIPs...)
+	}
+	st, err := s.GetStatus()
+	if err != nil {
+		return nil, err
+	}
+	rows := st.Tunnels
+	if len(rows) == 0 {
+		rows = []ConnectionStatus{*st}
+	}
+	for _, r := range rows {
+		if r.TunnelName == tunnelName && r.State == "connected" {
+			in.Connected = true
+			in.Interface = r.InterfaceName
+			in.LastHandshake = r.LastHandshake
+		}
+	}
+	res := diag.Verify(context.Background(), in)
+	out := make([]VerifyRow, 0, len(res))
+	for _, r := range res {
+		out = append(out, VerifyRow(r))
+	}
+	return out, nil
+}
+
+// helperCaller adapts the service's reconnecting client holder to the
+// diagnostics bundle's Caller.
+type helperCaller struct{ s *TunnelService }
+
+func (h helperCaller) Call(method string, params, result interface{}) error {
+	return h.s.call(method, params, result)
+}
+
+// ExportDiagnostics shows a native save dialog and writes the diagnostics
+// zip (helper log tail, redacted configs, DNS/route/pf state, versions).
+// Private keys are never included. Returns the saved path, or "" if the user
+// cancelled.
+func (s *TunnelService) ExportDiagnostics() (string, error) {
+	if s.app == nil {
+		return "", fmt.Errorf("app not initialized")
+	}
+	path, err := s.app.Dialog.SaveFile().
+		SetFilename(fmt.Sprintf("wireguide-diagnostics-%s.zip", time.Now().Format("20060102-150405"))).
+		AddFilter("Zip archive", "*.zip").
+		PromptForSingleSelection()
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil // user cancelled
+	}
+	var caller diagbundle.Caller
+	if s.clients != nil && s.clients.Get() != nil {
+		caller = helperCaller{s}
+	}
+	src, err := diagbundle.DefaultSources(caller)
+	if err != nil {
+		return "", err
+	}
+	return path, writeDiagnostics(path, src)
+}
+
+func writeDiagnostics(path string, src diagbundle.Sources) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := diagbundle.Build(f, src); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	return f.Close()
 }

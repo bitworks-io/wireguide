@@ -23,9 +23,13 @@ type FirewallCleaner interface {
 // ActiveTunnelState is persisted to disk while a tunnel is active.
 // On startup, if this file exists, a previous crash is detected.
 type ActiveTunnelState struct {
-	TunnelName     string   `json:"tunnel_name"`
-	InterfaceName  string   `json:"interface_name"`
-	DNSServers     []string `json:"dns_servers_original"`
+	TunnelName    string   `json:"tunnel_name"`
+	InterfaceName string   `json:"interface_name"`
+	DNSServers    []string `json:"dns_servers_original"`
+	// DNSMode records how the tunnel handled DNS: DNSModeGlobal (system DNS
+	// overridden), DNSModeSplit (supplemental resolver only) or "" (DNS
+	// untouched). Recovery only resets system DNS for global tunnels.
+	DNSMode        string   `json:"dns_mode,omitempty"`
 	FullTunnel     bool     `json:"full_tunnel"`
 	Table          string   `json:"table,omitempty"`
 	FwMark         string   `json:"fwmark,omitempty"`
@@ -41,6 +45,35 @@ type ActiveTunnelState struct {
 	// which is the correct behaviour for the common no-custom-domains
 	// setup and strictly better than leaking tunnel domains.
 	PreModSearch map[string][]string `json:"pre_mod_search,omitempty"`
+}
+
+// DNS modes recorded in ActiveTunnelState.DNSMode.
+const (
+	DNSModeGlobal = "global"
+	DNSModeSplit  = "split"
+)
+
+// newRecoveryManager builds the platform manager used by crash recovery. It
+// is a var so tests do not drive the host's real network configuration.
+var newRecoveryManager = network.NewPlatformManager
+
+// cleanupStaleSplitDNS is a var for the same reason: it talks to the system
+// dynamic store.
+var cleanupStaleSplitDNS = network.CleanupStaleSplitDNS
+
+// needsDNSReset reports whether recovery must fall back to the blunt
+// ResetDNSToSystemDefault for a journal without a pre-modification snapshot.
+// Split-DNS and DNS-less tunnels never touched system DNS, so resetting it
+// would wipe the user's own settings. Journals from before DNSMode existed
+// are treated as global when they recorded DNS servers.
+func needsDNSReset(state *ActiveTunnelState) bool {
+	switch state.DNSMode {
+	case DNSModeGlobal:
+		return true
+	case "":
+		return len(state.DNSServers) > 0
+	}
+	return false
 }
 
 // Legacy single-tunnel state file (kept for backward-compatible migration).
@@ -150,9 +183,36 @@ func LoadActiveState(dataDir string) []*ActiveTunnelState {
 // savedDNSInterface/Servers) consistent with what the post-recovery
 // helper code expects. A nil fw is treated as "no firewall cleanup".
 func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
+	return RecoverFromCrashReport(dataDir, fw).Tunnels
+}
+
+// RecoveryReport says what a crash-recovery pass cleaned up. It is purely
+// descriptive; RecoverFromCrash returns its Tunnels field unchanged.
+type RecoveryReport struct {
+	// Tunnels are the journals found (and processed).
+	Tunnels []string
+	// DNSRestored are the tunnels whose system DNS overrides were put back
+	// (precise snapshot restore or the global-DNS reset fallback).
+	DNSRestored []string
+	// SplitDNSSweepErr is the error of the split-DNS dynamic-store sweep
+	// (nil on success or off macOS).
+	SplitDNSSweepErr error
+}
+
+// RecoverFromCrashReport is RecoverFromCrash that also reports what it did.
+func RecoverFromCrashReport(dataDir string, fw FirewallCleaner) RecoveryReport {
+	var report RecoveryReport
+	// Split-DNS dynamic-store keys outlive a crashed helper and are not
+	// tied to a journal, so sweep them whether or not one exists. No
+	// tunnels from the dead process remain, so this cannot hit a live one.
+	if err := cleanupStaleSplitDNS(); err != nil {
+		slog.Warn("crash recovery: split DNS sweep failed", "error", err)
+		report.SplitDNSSweepErr = err
+	}
+
 	states := LoadActiveState(dataDir)
 	if len(states) == 0 {
-		return nil
+		return report
 	}
 
 	var recovered []string
@@ -168,11 +228,12 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 		// the next (the previous shared-manager pattern accumulated
 		// per-tunnel state across iterations and double-restored
 		// overlapping services).
-		mgr := network.NewPlatformManager()
+		mgr := newRecoveryManager()
 		if setter, mok := mgr.(network.PersistentStateDirSetter); mok {
 			setter.SetPersistentStateDir(dataDir)
 		}
 		ok := true
+		dnsRestored := false
 
 		// Restore routing state (table/fwmark) from persisted values so that
 		// cleanup uses the correct table instead of hardcoded defaults.
@@ -193,20 +254,30 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 					slog.Warn("crash recovery: precise DNS restore failed, falling back to reset", "error", err)
 					if err := mgr.ResetDNSToSystemDefault(); err != nil {
 						ok = false
+					} else {
+						dnsRestored = true
 					}
 				} else {
 					slog.Info("crash recovery: DNS restored from pre-modification snapshot")
+					dnsRestored = true
 				}
 			} else {
 				if err := mgr.ResetDNSToSystemDefault(); err != nil {
 					ok = false
+				} else {
+					dnsRestored = true
 				}
 			}
-		} else {
+		} else if needsDNSReset(state) {
 			if err := mgr.ResetDNSToSystemDefault(); err != nil {
 				slog.Warn("crash recovery: DNS reset failed", "error", err)
 				ok = false
+			} else {
+				dnsRestored = true
 			}
+		} else {
+			slog.Info("crash recovery: tunnel did not override system DNS; leaving it untouched",
+				"tunnel", state.TunnelName, "dns_mode", state.DNSMode)
 		}
 
 		// Routes: Cleanup knows how to walk the route table to find stale entries
@@ -231,6 +302,9 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 		}
 
 		recovered = append(recovered, state.TunnelName)
+		if dnsRestored {
+			report.DNSRestored = append(report.DNSRestored, state.TunnelName)
+		}
 		if ok {
 			fullySucceeded = append(fullySucceeded, state.TunnelName)
 		}
@@ -255,5 +329,6 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 	}
 	os.Remove(filepath.Join(dataDir, activeTunnelFile)) // legacy cleanup
 
-	return recovered
+	report.Tunnels = recovered
+	return report
 }
