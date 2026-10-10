@@ -75,12 +75,54 @@ New persisted intent file `<dataDir>/desired-tunnels.json`
   tunnels died with a previous power cycle — clear instead of restore. After
   a reboot the user's expectation is "off".
 - **Failure-tolerant**: a restore connect that fails (no network yet right
-  after a crash-restart) keeps its entry, and two paths can retry it later:
+  after a crash-restart) goes into `pendingDesired`, which every later write
+  still includes, so an unrelated connect/disconnect can't drop it. Retry:
   - `Monitor.shouldTriggerReconnect` now also fires wake/network triggers
     when the desired-state file is non-empty even with nothing active
-    (`SetDesiredActiveFn`, wired in `Run`), and
-  - `reconnectFn`'s all-tunnels path rebuilds its config cache from the
-    file + tunnel store when `activeCfgs` is empty.
+    (`SetDesiredActiveFn`, wired in `Run`). With nothing up, the monitor
+    skips the pre-reconnect `Disconnect()` (which would fail with
+    not-connected and back off forever) and the firewall suspend (whose
+    resume can't re-enable a no-tunnel kill switch).
+  - `reconnectFn` connects pending tunnels through `doConnectHeld` +
+    post-connect firewall, re-checking under `connectMu` that the user
+    hasn't disconnected them meanwhile.
+  - A Disconnect (named or all) withdraws pending entries; rename re-keys
+    them. `cleanup()` clears the file under `desiredMu`, and writes after
+    shutdown begins are skipped, so a connect finishing during Quit can't
+    resurrect the file.
+  - A helper with a pending restore does not idle-exit (`armShutdownTimer`
+    treats it like an active tunnel), or cleanup would clear the file and
+    nothing would retry until the GUI next started the helper.
+- **Firewall intent restored with the tunnels**: kill switch and DNS
+  protection live only in helper memory (the GUI re-sends them after its own
+  connects via `applyFirewallSettings`), and crash recovery removes the pf
+  rules. The file records both flags (using the pre-suspend values while a
+  reconnect has the firewall suspended). Restore re-installs the kill switch
+  BEFORE reconnecting — a restore that fails keeps the blockade instead of
+  leaking — and DNS protection after each connect, then broadcasts
+  `EventAutoConnect` so a running GUI refreshes and re-applies its settings.
+- **Automation rules win**: restore holds `reevalMu` (order
+  reevalMu → connectMu, same as automation) and skips tunnels whose rule says
+  off on the current network; pending retries check the same, and a rule
+  pass that says off withdraws a pending entry. Unknown SSID gives no
+  verdict, matching the startup rule pass.
+
+### Pre-existing bugs fixed alongside
+
+- Wake with several tunnels up: the all-tunnels path called
+  `manager.Disconnect()`, which drops only the first tunnel, so reconnecting
+  all of them hit `ErrAlreadyConnected` and the retry looped. It now
+  disconnects every connected tunnel, and `reconnectFn` treats
+  `ErrAlreadyConnected` as success.
+- `resumeFirewall` re-enabled the kill switch for one interface only, so
+  after a wake other tunnels were fenced out; with no tunnel back up it
+  logged and left the kill switch off. It now rebuilds from all active
+  tunnels via `enableKillSwitchForActiveTunnels`, which installs the base
+  blockade when none are up. A later attempt then finds nothing up and skips
+  the suspend, so `reconnectFn` connects cached tunnels through
+  `doConnectHeld` whenever the blockade is up — a bare connect under it
+  would fail (DNS/UDP blocked) or come up with the interface never
+  permitted.
 
 ### Exit-path semantics
 
@@ -88,9 +130,18 @@ New persisted intent file `<dataDir>/desired-tunnels.json`
 |---|---|---|
 | crash / `kill -9` mid-session | yes | same boot, file fresh |
 | crash while machine asleep | yes | launchd restarts mid-sleep, or the wake trigger acts on the file |
-| upgrade `ForceShutdown` (no teardown) | yes | tunnel continuity across app updates |
+| upgrade `ForceShutdown` (no teardown) | macOS only | tunnel continuity across app updates; Windows/Linux relaunch is a fresh start |
 | clean Quit / `ctl stop` | no | cleanup cleared the file |
 | reboot / power loss | no | file predates current boot |
+| Windows logoff / Fast Startup shutdown | no | helper (a plain elevated process, not a service) dies with the session; the next GUI launch is a fresh start |
+
+Restart source differs by platform: on macOS launchd restarts a crashed
+helper (`KeepAlive`), so restore runs on startup subject to the boot-time
+check. On Windows/Linux nothing restarts the helper but the GUI's background
+recovery, which passes `--restore-desired`; any other start clears the file.
+Boot time alone can't gate Windows: a Fast Startup shutdown keeps it.
+On Windows/Linux an in-app update is also a fresh start, so tunnels don't
+carry across it there (unchanged from before this branch).
 
 ## Not addressed here
 

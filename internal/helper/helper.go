@@ -22,6 +22,7 @@ package helper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -138,6 +139,18 @@ type Helper struct {
 	mu         sync.Mutex
 	activeCfgs map[string]*domain.WireGuardConfig // cached for reconnect, keyed by tunnel name
 
+	// pendingDesired holds tunnels that are still wanted but not up: the
+	// desired-state restore tried and failed to connect them (issue #44).
+	// They live outside activeCfgs so status, health and firewall paths never
+	// mistake them for running tunnels, but persistDesiredState writes them
+	// back so the next wake/network trigger can retry. Guarded by mu.
+	pendingDesired map[string]struct{}
+
+	// desiredMu orders desired-state file writes against cleanup()'s clear,
+	// so a connect finishing during shutdown can't rewrite the file after
+	// a clean quit removed it (issue #44).
+	desiredMu sync.Mutex
+
 	// Firewall state saved during reconnect suspend/resume cycle.
 	// These track what was active before suspend so resume can restore it.
 	fwSavedKillSwitch    bool
@@ -198,6 +211,13 @@ type Helper struct {
 	// every call (issue #44).
 	dataDir string
 
+	// restoreOnStart allows the startup desired-state restore. False on
+	// Windows/Linux unless the GUI respawned this helper after watching
+	// the previous one die: there the previous helper also dies at logoff
+	// (and at a Fast Startup shutdown, which keeps the boot time), and a
+	// fresh session must start with tunnels off (issue #44).
+	restoreOnStart bool
+
 	done        chan struct{}
 	cleanupOnce sync.Once
 }
@@ -207,7 +227,7 @@ type Helper struct {
 // ownerSID: spawning user's SID (Windows only, "" on Unix) — scopes the
 // pipe ACL and per-connection peer checks to that user (issue #20).
 // dataDir: persistent data dir for crash recovery state.
-func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
+func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired bool) error {
 	// wireguard-go allocates sizeable per-Device transient buffer pools. With
 	// the runtime default GOGC=100, repeated connect/disconnect on a long-lived
 	// helper retained hundreds of MiB of reclaimable heap before GC caught up
@@ -239,12 +259,17 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string) error {
 		manager:         manager,
 		firewall:        fw,
 		activeCfgs:      make(map[string]*domain.WireGuardConfig),
+		pendingDesired:  make(map[string]struct{}),
 		latencyByTunnel: make(map[string]float64),
 		autoConnectedBy: make(map[string]string),
 		logLevel:        new(slog.LevelVar), // defaults to Info
 		done:            make(chan struct{}),
 	}
 	h.dataDir = dataDir
+	// launchd restarts a crashed macOS helper on its own, so there the
+	// boot-time check alone decides. Elsewhere only the GUI respawns the
+	// helper, and only its mid-session recovery passes --restore-desired.
+	h.restoreOnStart = runtime.GOOS == "darwin" || restoreDesired
 
 	// Derive the user's Application Support dir from the uid the
 	// LaunchDaemon plist passed in (`--uid=501` typically). Helper
@@ -477,18 +502,18 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	h.mu.Lock()
 	cfgs := h.copyActiveCfgs()
 	h.mu.Unlock()
-	if len(cfgs) == 0 {
-		// Empty in-memory cache on the all-tunnels path means the helper
-		// restarted since these tunnels were last up (crash-restart whose
-		// startup restore failed). Rebuild from the persisted desired
-		// state + the user's tunnel store so wake/network-change triggers
-		// can still recover them (issue #44).
-		cfgs = h.loadDesiredCfgs()
-	}
+	// Tunnels that are wanted but not up because the helper restarted and
+	// its startup restore failed (issue #44). They go through the full
+	// connect path, not a bare manager connect: nothing about them is in
+	// the firewall yet, and success must move them into activeCfgs.
+	pending := h.pendingDesiredCfgs()
 
 	if name != "" {
 		cfg, ok := cfgs[name]
 		if !ok {
+			if pcfg, isPending := pending[name]; isPending {
+				return h.connectPendingDesired(ctx, pcfg)
+			}
 			return fmt.Errorf("no cached config for tunnel %q", name)
 		}
 		if err := ctx.Err(); err != nil {
@@ -501,7 +526,7 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	}
 
 	// Legacy path: reconnect all tunnels.
-	if len(cfgs) == 0 {
+	if len(cfgs) == 0 && len(pending) == 0 {
 		return fmt.Errorf("no cached config for reconnect")
 	}
 	var lastErr error
@@ -510,9 +535,30 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 			return fmt.Errorf("reconnect-all cancelled mid-loop: %w", err)
 		}
 		h.connectMu.Lock()
-		err := h.manager.ConnectWithContext(ctx, cfg)
+		var err error
+		if h.firewall.IsKillSwitchEnabled() {
+			// The monitor did not suspend the firewall this attempt (nothing
+			// was up — e.g. the previous attempt failed and resume put the
+			// base blockade back). A bare connect would run under the
+			// blockade, which drops DNS and WireGuard UDP, and nothing
+			// would ever permit the new interface. doConnectHeld lifts the
+			// blockade for the connect and rebuilds it with this tunnel.
+			err = connectUnderKillSwitch(h, cfg)
+		} else {
+			err = h.manager.ConnectWithContext(ctx, cfg)
+		}
 		h.connectMu.Unlock()
+		// Already up (a GUI connect raced the retry) is the goal state.
+		var te *tunnel.TunnelError
+		if errors.As(err, &te) && te.Kind == tunnel.ErrAlreadyConnected {
+			err = nil
+		}
 		if err != nil {
+			lastErr = err
+		}
+	}
+	for _, cfg := range pending {
+		if err := h.connectPendingDesired(ctx, cfg); err != nil {
 			lastErr = err
 		}
 	}
@@ -564,6 +610,11 @@ func (h *Helper) armShutdownTimer(grace time.Duration, reason string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	// A tunnel waiting on a restore retry is still wanted (issue #44): exit
+	// now and nothing retries it until the GUI next starts the helper.
+	if active == "" && len(h.pendingDesired) > 0 {
+		active = "(pending restore)"
+	}
 	if active != "" {
 		slog.Info("tunnel is active — helper stays alive (wg-quick semantics)",
 			"reason", reason, "active_tunnel", active)
@@ -590,8 +641,14 @@ func (h *Helper) armShutdownTimer(grace time.Duration, reason string) {
 		// down right after a GUI attached.
 		h.mu.Lock()
 		current := h.shutdownTimer
+		pending := len(h.pendingDesired)
 		h.mu.Unlock()
 		if current != t {
+			return
+		}
+		if pending > 0 {
+			slog.Info("shutdown timer fired but a restore is pending — aborting shutdown",
+				"pending", pending)
 			return
 		}
 		// Double-check at fire time: a tunnel may have been activated between
@@ -725,10 +782,6 @@ func (h *Helper) resumeFirewall() error {
 	restoreKS := h.fwSavedKillSwitch
 	restoreDNS := h.fwSavedDNSProtection
 	savedDNSServers := h.fwSavedDNSServers
-	var ifaceAddresses []string
-	for _, cfg := range h.activeCfgs {
-		ifaceAddresses = append(ifaceAddresses, cfg.Interface.Address...)
-	}
 	// Clear saved state so a second resume is a no-op.
 	h.fwSavedKillSwitch = false
 	h.fwSavedDNSProtection = false
@@ -751,18 +804,18 @@ func (h *Helper) resumeFirewall() error {
 		"new_interface", ifaceName)
 
 	if restoreKS {
-		if ifaceName == "" {
-			slog.Warn("resumeFirewall: no interface name available, cannot re-enable kill switch")
-		} else {
-			endpoints := h.manager.ResolvedEndpoints()
-			if len(endpoints) == 0 {
-				slog.Warn("resumeFirewall: no resolved endpoints, cannot re-enable kill switch")
-			} else {
-				if err := h.firewall.EnableKillSwitch(ifaceName, ifaceAddresses, endpoints); err != nil {
-					slog.Error("resumeFirewall: failed to re-enable kill switch", "error", err)
-					return fmt.Errorf("resumeFirewall: enable kill switch: %w", err)
-				}
-			}
+		// Rebuild from every active tunnel, not just the first one: with
+		// several tunnels up, a single-interface EnableKillSwitch left the
+		// others fenced out after every wake. With none up (reconnect
+		// failed) this installs the base blockade, keeping the kill switch
+		// on instead of silently dropping it. The rebuild reads manager
+		// state, so hold connectMu like every other caller.
+		h.connectMu.Lock()
+		err := h.enableKillSwitchForActiveTunnels()
+		h.connectMu.Unlock()
+		if err != nil {
+			slog.Error("resumeFirewall: failed to re-enable kill switch", "error", err)
+			return fmt.Errorf("resumeFirewall: enable kill switch: %w", err)
 		}
 	}
 
@@ -791,8 +844,11 @@ func (h *Helper) cleanup() {
 		// Clean shutdown means every tunnel is about to be torn down by
 		// user intent — the desired-state file must not survive to
 		// resurrect them on the next helper start (issue #44 semantics:
-		// restore is for crashes, not for clean quits).
+		// restore is for crashes, not for clean quits). persistDesiredState
+		// checks h.done under desiredMu, so no write can land after this.
+		h.desiredMu.Lock()
 		clearDesiredState(h.dataDir)
+		h.desiredMu.Unlock()
 		h.mu.Lock()
 		t := h.shutdownTimer
 		h.shutdownTimer = nil

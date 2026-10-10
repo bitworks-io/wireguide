@@ -188,11 +188,15 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		}
 		h.activeCfgs[req.NewName] = cfg
 	}
+	if _, ok := h.pendingDesired[req.OldName]; ok {
+		delete(h.pendingDesired, req.OldName)
+		h.pendingDesired[req.NewName] = struct{}{}
+	}
 	h.mu.Unlock()
 
-	// Sync autoConnectedBy under h.wifiMu — separate from h.mu to preserve
-	// lock ordering: wifiMu is acquired before connectMu inside handleSSIDChange,
-	// so we must NOT hold both simultaneously here.
+	// Sync autoConnectedBy under h.wifiMu, released before the next lock
+	// (connectMu is held throughout; the order everywhere is connectMu →
+	// wifiMu).
 	h.wifiMu.Lock()
 	if owner, ok := h.autoConnectedBy[req.OldName]; ok {
 		delete(h.autoConnectedBy, req.OldName)
@@ -210,9 +214,8 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 	}
 	h.latencyMu.Unlock()
 
-	// Keep the desired-state key in sync (issue #44). Renames of active
-	// tunnels are rejected above, so this is belt-and-braces for the same
-	// map re-key performed on activeCfgs.
+	// Keep the desired-state key in sync (issue #44). Active tunnels can't
+	// be renamed, but a pending (restore-failed) one can.
 	h.persistDesiredState()
 	return ipc.Empty{}, nil
 }
@@ -276,6 +279,9 @@ func (h *Helper) doConnectHeld(cfg *domain.WireGuardConfig) error {
 	// (issue #44 desired state). The failure paths above need no write —
 	// they roll activeCfgs back to the pre-call state the file already
 	// records.
+	h.mu.Lock()
+	delete(h.pendingDesired, cfg.Name)
+	h.mu.Unlock()
 	h.persistDesiredState()
 	return nil
 }
@@ -444,6 +450,24 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 		// If unmarshal fails (e.g. empty params), disconnect first tunnel (backward compat).
 	}
 
+	// A disconnect also withdraws any pending restore for the same
+	// tunnel(s), even if it isn't up — otherwise the next wake trigger
+	// would bring back a tunnel the user just turned off (issue #44).
+	h.mu.Lock()
+	withdrew := len(h.pendingDesired) > 0
+	if tunnelName != "" {
+		_, withdrew = h.pendingDesired[tunnelName]
+		delete(h.pendingDesired, tunnelName)
+	} else {
+		clear(h.pendingDesired)
+	}
+	h.mu.Unlock()
+	if withdrew {
+		// Persist now: a pending tunnel isn't up, so the teardown below
+		// fails with not-connected and returns before the later persist.
+		h.persistDesiredState()
+	}
+
 	// Cancel only the in-flight reconnect for the tunnel(s) being
 	// torn down — a per-tunnel disconnect of A must not abort a
 	// healthy retry for B.
@@ -514,13 +538,16 @@ func (h *Helper) handleDisconnect(params json.RawMessage) (interface{}, error) {
 			h.latencyMu.Unlock()
 		}
 		if firstErr != nil {
+			// Record the tunnels that did go down; the failed ones are
+			// still in activeCfgs and stay listed.
+			h.persistDesiredState()
 			return nil, firstErr
 		}
 	}
 
 	// User intent: the torn-down tunnels are no longer wanted. Failed
 	// teardowns returned early above, so this snapshot exactly matches
-	// what remains active (issue #44 desired state).
+	// what remains wanted (issue #44 desired state).
 	h.persistDesiredState()
 
 	// Strip the just-torn-down tunnels from the kill-switch filter set.
@@ -576,6 +603,8 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 			return nil, err
 		}
 	}
+	// The firewall intent is part of what a crash-restore must bring back.
+	h.persistDesiredState()
 	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{KillSwitch: &req.Enabled})
 	return ipc.Empty{}, nil
 }
@@ -611,6 +640,7 @@ func (h *Helper) handleSetDNSProtection(params json.RawMessage) (interface{}, er
 			return nil, err
 		}
 	}
+	h.persistDesiredState()
 	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{DNSProtection: &req.Enabled})
 	return ipc.Empty{}, nil
 }

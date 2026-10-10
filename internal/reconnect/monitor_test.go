@@ -3,6 +3,7 @@ package reconnect
 import (
 	"context"
 	"errors"
+	"github.com/korjwl1/wireguide/internal/domain"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -209,6 +210,14 @@ func TestSleepWake_TriggersReconnect_WhenOnlyDesiredStateActive(t *testing.T) {
 	mon, mgr, sd := newTestMonitor(testConfig(), reconnectFn)
 	// Nothing connected — the manager alone would fail the old guard.
 	mgr.setConnected(false, "")
+	// Like the real Manager, Disconnect fails when nothing is up; the
+	// monitor must not call it (or back off on it) in this state.
+	var disconnectCalls, suspendCalls atomic.Int32
+	mgr.disconnectFn = func() error {
+		disconnectCalls.Add(1)
+		return errors.New("no tunnel is connected")
+	}
+	mon.SetFirewallCallbacks(func() error { suspendCalls.Add(1); return nil }, func() error { return nil })
 	mon.SetDesiredActiveFn(func() bool { return true })
 
 	mon.Start()
@@ -219,6 +228,12 @@ func TestSleepWake_TriggersReconnect_WhenOnlyDesiredStateActive(t *testing.T) {
 	waitFor(t, 2*time.Second, "reconnectFn called after wake via desired state", func() bool {
 		return reconnectCalls.Load() > 0
 	})
+	if n := disconnectCalls.Load(); n != 0 {
+		t.Fatalf("Disconnect called %d times with nothing up", n)
+	}
+	if n := suspendCalls.Load(); n != 0 {
+		t.Fatalf("firewall suspended %d times with nothing up; resume can't restore a no-tunnel kill switch", n)
+	}
 }
 
 // The desired-state fallback must not manufacture reconnects when it reports
@@ -1053,5 +1068,32 @@ func TestPingSettingsChangeDuringDisconnectRestoresFirewall(t *testing.T) {
 	waitFor(t, time.Second, "firewall restored", func() bool { return resumed.Load() == 1 })
 	if mon.GetState().Reconnecting {
 		t.Fatal("invalid retry retained")
+	}
+}
+
+// With several tunnels up, the all-tunnels wake path must take all of them
+// down before reconnecting; Disconnect() alone dropped only the first.
+func TestSleepWake_DisconnectsEveryTunnel(t *testing.T) {
+	var reconnectCalls atomic.Int32
+	reconnectFn := func(_ context.Context, name string) error {
+		reconnectCalls.Add(1)
+		return nil
+	}
+	mon, mgr, sd := newTestMonitor(testConfig(), reconnectFn)
+	mgr.setConnected(true, "alpha")
+	mgr.allStatuses = []*tunnel.ConnectionStatus{
+		{TunnelName: "alpha", State: domain.StateConnected},
+		{TunnelName: "bravo", State: domain.StateConnected},
+	}
+	var disconnects atomic.Int32
+	mgr.disconnectFn = func() error { disconnects.Add(1); return nil }
+
+	mon.Start()
+	defer mon.Stop()
+	sd.sendWake()
+
+	waitFor(t, 2*time.Second, "reconnect after wake", func() bool { return reconnectCalls.Load() > 0 })
+	if n := disconnects.Load(); n != 2 {
+		t.Fatalf("disconnected %d tunnels before reconnect, want 2", n)
 	}
 }

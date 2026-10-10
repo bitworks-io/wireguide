@@ -33,6 +33,13 @@ type Args struct {
 	// reinstalls the binary + restarts the daemon. Used when the GUI
 	// detects a helper version mismatch after an app update.
 	ForceReinstall bool
+	// RestoreDesired is passed as --restore-desired (Windows/Linux only)
+	// when the GUI respawns a helper it saw die mid-session. Only then may
+	// the new helper restore the tunnels the dead one had (issue #44); a
+	// fresh GUI launch — after logoff, Fast Startup, or a relaunch — must
+	// not. macOS doesn't need it: launchd restarts a crashed helper by
+	// itself and the boot-time check covers reboots.
+	RestoreDesired bool
 }
 
 // SelfPath returns the absolute path of the current executable.

@@ -34,6 +34,9 @@ func SpawnHelper(ctx context.Context, args Args) error {
 		// users (issue #20).
 		argList += fmt.Sprintf(`,'--owner-sid=%s'`, psEscape(args.SocketSID))
 	}
+	if args.RestoreDesired {
+		argList += `,'--restore-desired'`
+	}
 	ps := fmt.Sprintf(
 		`Start-Process '%s' -ArgumentList %s -Verb RunAs -WindowStyle Hidden`,
 		psEscape(exe), argList,

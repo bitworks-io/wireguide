@@ -1,7 +1,9 @@
 package helper
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +11,8 @@ import (
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/domain"
+	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/wifi"
 )
 
 // Desired tunnel state — the set of tunnels that SHOULD be active, persisted
@@ -16,8 +20,8 @@ import (
 // VPN (issue #44).
 //
 // Background: the tunnel (utun/wintun) lives inside the helper process, so a
-// helper crash kills every tunnel with it. After launchd (or the service
-// manager) restarts the helper, every reconnect source was in-memory:
+// helper crash kills every tunnel with it. After launchd (macOS) or the GUI's
+// recovery (Windows/Linux) restarts the helper, every reconnect source was in-memory:
 // activeCfgs started empty, the crash journal in internal/tunnel/recovery.go
 // only restores system state (DNS, firewall, routes), and the reconnect
 // monitor's wake/network triggers skip when the manager reports nothing
@@ -38,18 +42,35 @@ import (
 //     the user's tunnel store and reconnected. A file older than the current
 //     boot means the tunnels died with a previous power cycle — after a
 //     reboot the user's expectation is "off", so the file is cleared.
+//   - Firewall intent rides along: the file also records whether the kill
+//     switch and DNS protection were on. Both live only in the helper's
+//     memory (the GUI re-sends them after its own connects), so without
+//     this a restored tunnel would come back unprotected. Restore puts the
+//     kill switch back BEFORE reconnecting, so a restore that fails keeps
+//     the blockade the user had instead of leaking.
+//   - Automation rules win: restore runs under reevalMu and skips a tunnel
+//     whose rule says "off" on the current network, and a rule-driven
+//     disconnect withdraws a pending entry.
 //   - Restore failures (e.g. no network yet right after a crash-restart)
-//     keep their entry so the existing wake/network-change triggers retry
-//     them; reconnectFn rebuilds its config cache from this file when the
-//     in-memory one is empty.
+//     are kept in pendingDesired, so every later write still lists them and
+//     the existing wake/network-change triggers retry them; reconnectFn
+//     connects them through the full connect path. Retries come from that
+//     set only, never from file entries a concurrent Disconnect just
+//     dropped. A Disconnect of the same
+//     tunnel withdraws the pending entry.
 //
 // Semantics by exit path:
 //
-//	helper crash / kill -9 mid-session   → restore (same boot, file fresh)
+//	helper crash / kill -9 mid-session   → restore (macOS: launchd restart;
+//	                                       Windows/Linux: GUI respawn with
+//	                                       --restore-desired)
 //	crash while the machine is asleep    → restore on launchd restart / wake
-//	upgrade ForceShutdown (no teardown)  → restore (tunnel continuity across updates)
+//	upgrade ForceShutdown (no teardown)  → macOS: restore; Windows/Linux: the
+//	                                       relaunched GUI is a fresh start, so no
 //	clean Quit / `wireguide ctl stop`    → no restore (cleanup cleared the file)
 //	reboot / power loss                  → no restore (file predates current boot)
+//	Windows logoff / Fast Startup        → no restore (fresh GUI start; boot
+//	                                       time alone can't tell)
 
 const desiredStateFile = "desired-tunnels.json"
 
@@ -61,7 +82,9 @@ const desiredStateFile = "desired-tunnels.json"
 const bootTimeSlack = 2 * time.Second
 
 type desiredStateJSON struct {
-	Tunnels []string `json:"tunnels"`
+	Tunnels       []string `json:"tunnels"`
+	KillSwitch    bool     `json:"kill_switch,omitempty"`
+	DNSProtection bool     `json:"dns_protection,omitempty"`
 }
 
 func desiredStatePath(dataDir string) string {
@@ -69,35 +92,46 @@ func desiredStatePath(dataDir string) string {
 }
 
 // loadDesiredState returns the persisted tunnel names, or nil when absent.
-// A missing file is the common case (nothing wanted), not an error; neither
-// is a corrupt file — both mean "nothing to restore".
 func loadDesiredState(dataDir string) []string {
+	return loadDesiredIntent(dataDir).Tunnels
+}
+
+// loadDesiredIntent returns the whole persisted intent. A missing file is the
+// common case (nothing wanted), not an error; neither is a corrupt file —
+// both mean "nothing to restore".
+func loadDesiredIntent(dataDir string) desiredStateJSON {
 	if dataDir == "" {
-		return nil
+		return desiredStateJSON{}
 	}
 	data, err := os.ReadFile(desiredStatePath(dataDir))
 	if err != nil {
-		return nil
+		return desiredStateJSON{}
 	}
 	var st desiredStateJSON
 	if err := json.Unmarshal(data, &st); err != nil {
-		return nil
+		return desiredStateJSON{}
 	}
-	return st.Tunnels
+	return st
 }
 
-// saveDesiredState writes sorted, de-duplicated names atomically (temp file
-// + rename). An empty list removes the file entirely.
+// saveDesiredState writes names with no firewall intent.
 func saveDesiredState(dataDir string, names []string) error {
+	return saveDesiredIntent(dataDir, desiredStateJSON{Tunnels: names})
+}
+
+// saveDesiredIntent writes sorted, de-duplicated names plus the firewall
+// intent atomically (temp file + rename). No tunnels removes the file
+// entirely: firewall intent is only restored together with tunnels.
+func saveDesiredIntent(dataDir string, st desiredStateJSON) error {
 	if dataDir == "" {
 		return nil
 	}
-	sorted := normalizeTunnelNames(names)
-	if len(sorted) == 0 {
+	st.Tunnels = normalizeTunnelNames(st.Tunnels)
+	if len(st.Tunnels) == 0 {
 		clearDesiredState(dataDir)
 		return nil
 	}
-	data, err := json.MarshalIndent(desiredStateJSON{Tunnels: sorted}, "", "  ")
+	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -160,21 +194,40 @@ func desiredStatePredatesBoot(modTime, bootTime time.Time) bool {
 	return modTime.Add(bootTimeSlack).Before(bootTime)
 }
 
-// persistDesiredState snapshots activeCfgs into the desired-state file.
-// Called on user-intent transitions (connect success, disconnect, rename).
-// An empty snapshot removes the file, so a helper that cleanly ends with no
-// tunnels leaves nothing to restore on its next start.
+// persistDesiredState snapshots activeCfgs plus pendingDesired into the
+// desired-state file. Called on user-intent transitions (connect success,
+// disconnect, rename). An empty snapshot removes the file, so a helper that
+// cleanly ends with no tunnels leaves nothing to restore on its next start.
 func (h *Helper) persistDesiredState() {
 	if h.dataDir == "" {
 		return
 	}
-	h.mu.Lock()
-	names := make([]string, 0, len(h.activeCfgs))
-	for name := range h.activeCfgs {
-		names = append(names, name)
+	var st desiredStateJSON
+	if h.firewall != nil {
+		st.KillSwitch = h.firewall.IsKillSwitchEnabled()
+		st.DNSProtection = h.firewall.IsDNSProtectionEnabled()
 	}
+	h.mu.Lock()
+	for name := range h.activeCfgs {
+		st.Tunnels = append(st.Tunnels, name)
+	}
+	for name := range h.pendingDesired {
+		st.Tunnels = append(st.Tunnels, name)
+	}
+	// A reconnect suspends the firewall and remembers what was on; record
+	// that, not the momentary "off" (issue #44).
+	st.KillSwitch = st.KillSwitch || h.fwSavedKillSwitch
+	st.DNSProtection = st.DNSProtection || h.fwSavedDNSProtection
 	h.mu.Unlock()
-	if err := saveDesiredState(h.dataDir, names); err != nil {
+	h.desiredMu.Lock()
+	defer h.desiredMu.Unlock()
+	select {
+	case <-h.done:
+		// Shutdown began: cleanup() owns the file now (it clears it).
+		return
+	default:
+	}
+	if err := saveDesiredIntent(h.dataDir, st); err != nil {
 		slog.Warn("desired-state: save failed", "error", err)
 	}
 }
@@ -188,42 +241,148 @@ func (h *Helper) desiredActiveFn() bool {
 	return len(loadDesiredState(h.dataDir)) > 0
 }
 
-// loadDesiredCfgs rebuilds a config set from the desired-state file plus the
-// user's tunnel store, priming activeCfgs so per-tunnel reconnect paths also
-// find their configs. Used by reconnectFn when the in-memory cache is empty
-// (fresh helper after a crash-restart whose startup restore failed).
-func (h *Helper) loadDesiredCfgs() map[string]*domain.WireGuardConfig {
-	names := loadDesiredState(h.dataDir)
-	if len(names) == 0 || h.userTunnelStore == nil {
+// pendingDesiredCfgs loads configs for pendingDesired — tunnels a restore
+// tried and failed to bring up. It reads the set, not the file: the file can
+// briefly list a tunnel a concurrent Disconnect just dropped from
+// activeCfgs, and adopting that as pending would undo the Disconnect.
+// Pending tunnels whose config is gone from the tunnel store are dropped.
+func (h *Helper) pendingDesiredCfgs() map[string]*domain.WireGuardConfig {
+	h.mu.Lock()
+	candidates := make([]string, 0, len(h.pendingDesired))
+	for name := range h.pendingDesired {
+		if _, active := h.activeCfgs[name]; !active {
+			candidates = append(candidates, name)
+		}
+	}
+	h.mu.Unlock()
+	if len(candidates) == 0 || h.userTunnelStore == nil {
 		return nil
 	}
-	cfgs := make(map[string]*domain.WireGuardConfig, len(names))
-	var loaded []string
-	for _, name := range names {
+
+	cfgs := make(map[string]*domain.WireGuardConfig, len(candidates))
+	var dropped []string
+	for _, name := range candidates {
 		cfg, err := h.userTunnelStore.Load(name)
 		if err != nil {
 			slog.Warn("desired-state: config no longer loadable, dropping",
 				"tunnel", name, "error", err)
+			dropped = append(dropped, name)
 			continue
 		}
 		cfgs[name] = cfg
-		loaded = append(loaded, name)
 	}
-	if len(loaded) != len(names) {
-		// Some listed tunnels vanished from disk — rewrite the file so the
-		// same failures aren't re-logged on every trigger.
-		if err := saveDesiredState(h.dataDir, loaded); err != nil {
-			slog.Warn("desired-state: save after drop failed", "error", err)
+	if len(dropped) > 0 {
+		h.mu.Lock()
+		for _, name := range dropped {
+			delete(h.pendingDesired, name)
 		}
+		h.mu.Unlock()
+		// Rewrite so the same failures aren't re-logged on every trigger.
+		h.persistDesiredState()
 	}
-	h.mu.Lock()
-	for name, cfg := range cfgs {
-		if _, exists := h.activeCfgs[name]; !exists {
-			h.activeCfgs[name] = cfg
-		}
-	}
-	h.mu.Unlock()
 	return cfgs
+}
+
+// withdrawPendingDesired drops a pending (restore-failed) tunnel that an
+// Automation rule now wants off, so a later wake retry won't bring it back.
+func (h *Helper) withdrawPendingDesired(name string) {
+	h.mu.Lock()
+	_, ok := h.pendingDesired[name]
+	delete(h.pendingDesired, name)
+	h.mu.Unlock()
+	if ok {
+		slog.Info("automation: rule says off, withdrawing pending restore", "tunnel", name)
+		h.persistDesiredState()
+	}
+}
+
+// connectPendingDesired connects one pending tunnel through the same path as
+// a restore. It re-checks under connectMu that the tunnel is still pending: a
+// user Disconnect may have withdrawn it, or a manual Connect brought it up,
+// while this retry waited.
+func (h *Helper) connectPendingDesired(ctx context.Context, cfg *domain.WireGuardConfig) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("reconnect %q cancelled before Connect: %w", cfg.Name, err)
+	}
+	// Checked before connectMu, as in restore: the network lookup shells out.
+	if restoreRuleSaysOff(h, cfg.Name) {
+		h.withdrawPendingDesired(cfg.Name)
+		return nil
+	}
+	h.connectMu.Lock()
+	defer h.connectMu.Unlock()
+	h.mu.Lock()
+	_, stillPending := h.pendingDesired[cfg.Name]
+	h.mu.Unlock()
+	if !stillPending {
+		return nil
+	}
+	return restoreConnect(h, cfg)
+}
+
+// restoreConnect connects one restored or pending tunnel. It runs the same
+// firewall follow-up a manual/automation connect gets — a headless restore
+// must not skip DNS protection / kill-switch permits (parity with issue #12)
+// — then puts DNS protection back if it was on, and tells the GUI the same
+// way automation does so it refreshes and re-applies its firewall settings.
+// A package var so tests can exercise restore without a real tunnel.
+// Caller MUST hold h.connectMu.
+var restoreConnect = func(h *Helper, cfg *domain.WireGuardConfig) error {
+	if err := h.doConnectHeld(cfg); err != nil {
+		return err
+	}
+	h.applyPostConnectFirewall(cfg)
+	if loadDesiredIntent(h.dataDir).DNSProtection && !h.firewall.IsDNSProtectionEnabled() {
+		h.restoreDNSProtection(cfg)
+	}
+	h.server.Broadcast(ipc.EventAutoConnect, ipc.AutoConnectPayload{TunnelName: cfg.Name})
+	return nil
+}
+
+// restoreDNSProtection re-enables DNS protection on cfg's interface with its
+// DNS servers, mirroring what the GUI's SetDNSProtection(true) does after a
+// manual connect. Best-effort: a failure is logged, the tunnel stays up.
+func (h *Helper) restoreDNSProtection(cfg *domain.WireGuardConfig) {
+	if len(cfg.Interface.DNS) == 0 {
+		return
+	}
+	for _, st := range h.manager.AllStatuses() {
+		if st == nil || st.TunnelName != cfg.Name || st.InterfaceName == "" {
+			continue
+		}
+		if err := h.firewall.EnableDNSProtection(st.InterfaceName, cfg.Interface.DNS); err != nil {
+			slog.Warn("desired-state: restore DNS protection failed", "tunnel", cfg.Name, "error", err)
+		}
+		return
+	}
+}
+
+// restoreRuleSaysOff reports whether an Automation rule wants name OFF on the
+// current network. Unknown SSID counts as "no verdict", the same guard the
+// startup rule pass uses: a none_match rule would otherwise disconnect a
+// tunnel before we know which network we're on. A package var for tests.
+var restoreRuleSaysOff = func(h *Helper, name string) bool {
+	settings, err := h.loadUserSettings()
+	if err != nil {
+		return false
+	}
+	settings.EnsureAutomation()
+	auto := settings.Automation
+	if auto == nil || len(auto.PerTunnel[name]) == 0 {
+		return false
+	}
+	ctx := h.currentNetworkContext()
+	if ctx.SSID == "" {
+		return false
+	}
+	return wifi.Evaluate(auto.PerTunnel[name], ctx) == wifi.StateDisconnect
+}
+
+// connectUnderKillSwitch is reconnectFn's connect for a cached tunnel while
+// the kill switch blockade is up. A package var so tests can observe the
+// choice without a real tunnel. Caller MUST hold h.connectMu.
+var connectUnderKillSwitch = func(h *Helper, cfg *domain.WireGuardConfig) error {
+	return h.doConnectHeld(cfg)
 }
 
 // systemBootTimeNow is a test seam over the platform-specific boot-time
@@ -241,6 +400,13 @@ var systemBootTimeNow = systemBootTime
 func (h *Helper) restoreDesiredTunnels() {
 	names := loadDesiredState(h.dataDir)
 	if len(names) == 0 {
+		return
+	}
+
+	if !h.restoreOnStart {
+		slog.Info("desired-state: fresh helper start (not a crash respawn); clearing",
+			"tunnels", names)
+		clearDesiredState(h.dataDir)
 		return
 	}
 
@@ -268,11 +434,32 @@ func (h *Helper) restoreDesiredTunnels() {
 		return
 	}
 
-	restored, failed, missing := 0, 0, 0
-	remaining := make([]string, 0, len(names))
+	restored, failed, missing, ruledOff := 0, 0, 0, 0
+	intent := loadDesiredIntent(h.dataDir)
 
+	// Same lock order as automation (reevalMu → connectMu): no rule pass
+	// can interleave with the restore, and one that ran before it already
+	// saw these tunnels down, so restore checks the rules itself below.
+	h.reevalMu.Lock()
+	defer h.reevalMu.Unlock()
+	// Rule verdicts are read before connectMu: the network context shells
+	// out (gateway MAC, interface IPs), and a GUI Connect/Disconnect must
+	// not wait on that.
+	ruleOff := make(map[string]bool, len(names))
+	for _, name := range names {
+		ruleOff[name] = restoreRuleSaysOff(h, name)
+	}
 	h.connectMu.Lock()
 	defer h.connectMu.Unlock()
+
+	// Kill switch first: the user had the blockade up, and the crash
+	// recovery above removed it. doConnectHeld handles connecting under it.
+	if intent.KillSwitch && !h.firewall.IsKillSwitchEnabled() {
+		if err := h.enableKillSwitchForActiveTunnels(); err != nil {
+			slog.Error("desired-state: restore kill switch failed", "error", err)
+		}
+	}
+
 	for _, name := range names {
 		// Bounded shutdown: cleanup() closes h.done before DisconnectAll;
 		// stop restoring so we don't fight the teardown.
@@ -285,7 +472,6 @@ func (h *Helper) restoreDesiredTunnels() {
 		// while earlier restores were in flight — don't double-connect.
 		if h.tunnelActive(name) {
 			restored++
-			remaining = append(remaining, name)
 			continue
 		}
 		cfg, err := h.userTunnelStore.Load(name)
@@ -295,37 +481,41 @@ func (h *Helper) restoreDesiredTunnels() {
 				"tunnel", name, "error", err)
 			continue
 		}
-		if err := h.doConnectHeld(cfg); err != nil {
+		if ruleOff[name] {
+			ruledOff++
+			slog.Info("desired-state: automation rule says off on this network, not restoring",
+				"tunnel", name)
+			continue
+		}
+		if err := restoreConnect(h, cfg); err != nil {
 			failed++
 			slog.Warn("desired-state: restore connect failed; keeping entry for reconnect triggers",
 				"tunnel", name, "error", err)
-			remaining = append(remaining, name)
+			h.mu.Lock()
+			if h.pendingDesired == nil {
+				h.pendingDesired = make(map[string]struct{})
+			}
+			h.pendingDesired[name] = struct{}{}
+			h.mu.Unlock()
 			continue
 		}
-		// Same firewall follow-up a manual/automation connect gets — a
-		// headless restore must not skip DNS protection / kill-switch
-		// permits (parity with issue #12).
-		h.applyPostConnectFirewall(cfg)
 		restored++
-		remaining = append(remaining, name)
 	}
 
-	// Rewrite the file from what should STILL be wanted: restored tunnels
-	// plus failed ones (so wake/network triggers retry them), minus tunnels
-	// whose configs no longer exist. doConnectHeld's own persists wrote
-	// intermediate snapshots without the failed entries; this final write
-	// restores them. Skipped when shutdown began mid-restore — cleanup's
+	// Rewrite the file from what should STILL be wanted: active tunnels
+	// plus pending (failed) ones, minus tunnels whose configs no longer
+	// exist. Needed even when nothing connected, to drop missing configs.
+	// Skipped when shutdown began mid-restore — cleanup's
 	// clearDesiredState then has the last word.
 	select {
 	case <-h.done:
 		return
 	default:
 	}
-	if err := saveDesiredState(h.dataDir, remaining); err != nil {
-		slog.Warn("desired-state: final save failed", "error", err)
-	}
+	h.persistDesiredState()
 	slog.Info("desired-state restore complete",
-		"restored", restored, "failed", failed, "missing_configs", missing, "total", len(names))
+		"restored", restored, "failed", failed, "missing_configs", missing,
+		"ruled_off", ruledOff, "total", len(names))
 }
 
 // tunnelActive reports whether the manager currently has name connected.

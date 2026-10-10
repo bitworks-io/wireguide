@@ -21,15 +21,18 @@ import (
 // ensureHelper connects to an existing helper (via socket) or spawns a new
 // one with privilege elevation. Authorization time is excluded from the
 // 30-second readiness timeout; ctx can still cancel recovery during shutdown.
-func ensureHelper(ctx context.Context, dataDir string) (*ipc.Client, error) {
+// restoreDesired is true only for the background recovery of a helper that
+// died while this GUI was running; see elevate.Args.RestoreDesired.
+func ensureHelper(ctx context.Context, dataDir string, restoreDesired bool) (*ipc.Client, error) {
 	addr := ipc.DefaultSocketPath()
 	forceReinstall := false
 	args := elevate.Args{
 		SocketPath: addr,
 		// -1 on Windows — the SID below is the owner identity there.
-		SocketUID: os.Getuid(),
-		SocketSID: elevate.CurrentUserSID(),
-		DataDir:   dataDir,
+		SocketUID:      os.Getuid(),
+		SocketSID:      elevate.CurrentUserSID(),
+		DataDir:        dataDir,
+		RestoreDesired: restoreDesired,
 	}
 
 	// Try an existing helper first (survives GUI restarts).
@@ -302,7 +305,7 @@ func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir strin
 	if runtime.GOOS == "darwin" {
 		newClient, err = reconnectHelper(ctx, ipc.DefaultSocketPath())
 	} else {
-		newClient, err = ensureHelper(ctx, dataDir)
+		newClient, err = ensureHelper(ctx, dataDir, true)
 	}
 	if err != nil {
 		slog.Debug("helper recovery attempt failed", "error", err)

@@ -100,7 +100,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		// ensureHelper starts its readiness timeout after authorization.
 		helperCtx, helperCancel := context.WithCancel(context.Background())
 		var err error
-		initialClient, err = ensureHelper(helperCtx, dataDir)
+		initialClient, err = ensureHelper(helperCtx, dataDir, false)
 		helperCancel()
 		if err == nil {
 			break

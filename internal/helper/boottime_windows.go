@@ -18,9 +18,10 @@ import (
 var procGetTickCount64 = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount64")
 
 // systemBootTime returns the time of the last Windows boot, derived from
-// GetTickCount64. Note the counter wraps after ~49.7 days of uptime; in the
-// wrap window the computed boot time lands one wrap too late, making restore
-// more conservative (skip) — never more aggressive.
+// GetTickCount64 (64-bit, so no 49.7-day wrap). A Fast Startup "shutdown"
+// hibernates the kernel instead of rebooting, so this carries over it; the
+// helper (a plain elevated process, not a service) still dies at logoff, so
+// restore on Windows is additionally gated on the GUI's --restore-desired.
 func systemBootTime() (time.Time, error) {
 	tick, _, err := procGetTickCount64.Call()
 	if tick == 0 {

@@ -512,6 +512,31 @@ func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, still
 	}()
 }
 
+// disconnectAll tears down every connected tunnel for the all-tunnels path.
+// manager.Disconnect() only takes down the first one, so with several up the
+// follow-up reconnect of all of them hit ErrAlreadyConnected on the rest and
+// the wake retry looped. Falls back to Disconnect() when the manager reports
+// a connection but no per-tunnel status (older managers and test doubles).
+func (m *Monitor) disconnectAll() error {
+	var names []string
+	for _, st := range m.manager.AllStatuses() {
+		if st != nil && st.TunnelName != "" &&
+			(st.State == domain.StateConnected || st.State == domain.StateConnecting) {
+			names = append(names, st.TunnelName)
+		}
+	}
+	if len(names) == 0 {
+		return m.manager.Disconnect()
+	}
+	var firstErr error
+	for _, name := range names {
+		if err := m.manager.DisconnectTunnel(name); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // reconnectWithBackoff retries reconnection with exponential backoff.
 // If tunnelName is non-empty, only that specific tunnel is disconnected and
 // reconnected. If tunnelName is empty, the legacy Disconnect()/reconnectFn("")
@@ -580,11 +605,21 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 			return
 		}
 
+		// All-tunnels trigger with nothing up: only the desired-state
+		// fallback starts this (issue #44 — helper restarted, tunnels
+		// wanted but down). There is no old tunnel to tear down, and
+		// Disconnect() would fail with not-connected on every attempt, so
+		// go straight to reconnectFn. Skip the firewall suspend too: with
+		// no tunnel, resume cannot re-enable a kill switch and would drop
+		// a deliberate no-tunnel blockade. reconnectFn connects under an
+		// enabled kill switch through the path that lifts and rebuilds it.
+		nothingUp := tunnelName == "" && !m.manager.IsConnected() && m.manager.ActiveTunnel() == ""
+
 		// Suspend firewall rules before disconnect so old pf rules (which
 		// reference the old utun interface name) don't block the new
 		// connection's traffic when the interface name changes.
 		firewallWasSuspended := false
-		if m.fwSuspendFn != nil {
+		if m.fwSuspendFn != nil && !nothingUp {
 			if err := m.fwSuspendFn(); err != nil {
 				slog.Warn("failed to suspend firewall for reconnect", "error", err)
 			} else {
@@ -597,10 +632,11 @@ func (m *Monitor) reconnectWithBackoff(ctx context.Context, tunnelName string, e
 		// otherwise the next reconnectFn hits ErrAlreadyConnected and we
 		// loop forever with no recovery.
 		var disconnectErr error
-		if tunnelName != "" {
+		switch {
+		case tunnelName != "":
 			disconnectErr = m.manager.DisconnectTunnel(tunnelName)
-		} else {
-			disconnectErr = m.manager.Disconnect()
+		case !nothingUp:
+			disconnectErr = m.disconnectAll()
 		}
 		if disconnectErr != nil {
 			slog.Warn("pre-reconnect disconnect failed; will retry after backoff",

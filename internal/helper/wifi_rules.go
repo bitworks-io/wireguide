@@ -123,6 +123,8 @@ func (h *Helper) reevaluateAutomation(reason string) {
 			if active[name] {
 				slog.Info("automation: rule disconnect", "tunnel", name, "reason", reason, "ssid", ctx.SSID)
 				h.disconnectAutoManaged(name)
+			} else {
+				h.withdrawPendingDesired(name)
 			}
 		}
 	}
@@ -246,6 +248,7 @@ func (h *Helper) disconnectAutoManaged(name string) {
 	}
 	h.mu.Lock()
 	delete(h.activeCfgs, name)
+	delete(h.pendingDesired, name)
 	h.mu.Unlock()
 	h.wifiMu.Lock()
 	delete(h.autoConnectedBy, name)
