@@ -12,6 +12,15 @@ import (
 // ImportConfig parses, validates, and saves a tunnel config under the given
 // name. Returns a TunnelInfo for optimistic UI display.
 func (s *TunnelService) ImportConfig(name, content string) (*TunnelInfo, error) {
+	return s.importConfig(name, content, nil)
+}
+
+// importConfig is ImportConfig with an optional snapshot of the saved tunnels
+// for the duplicate-Address check. A non-nil saved is owned by the caller and
+// is updated with the imported tunnel, so a batch import loads the store once
+// and later entries are checked against earlier ones. A nil saved is loaded
+// on demand.
+func (s *TunnelService) importConfig(name, content string, saved map[string]*config.WireGuardConfig) (*TunnelInfo, error) {
 	cfg, err := s.tunnelStore.ImportFromContent(name, content)
 	if err != nil {
 		return nil, err
@@ -25,13 +34,29 @@ func (s *TunnelService) ImportConfig(name, content string) (*TunnelInfo, error) 
 		Endpoint: endpoint,
 	}
 	// Non-blocking: surface a duplicate-Address warning against the other
-	// saved tunnels. The import has already succeeded.
-	for _, d := range safeLint(cfg, s.otherTunnelConfigs(cfg.Name)) {
-		if d.Code == "address_shared" {
-			info.Warnings = append(info.Warnings, d)
-		}
+	// saved tunnels. The import has already succeeded, so a failure here must
+	// not fail it.
+	others := saved
+	if others == nil {
+		others = s.otherTunnelConfigs(cfg.Name)
+	}
+	delete(others, cfg.Name) // an overwritten tunnel is not its own duplicate
+	info.Warnings = safeDuplicateAddress(cfg, others)
+	if saved != nil {
+		saved[cfg.Name] = cfg
 	}
 	return info, nil
+}
+
+// safeDuplicateAddress runs config.DuplicateAddressDiagnostics but never lets a
+// panic escape.
+func safeDuplicateAddress(cfg *config.WireGuardConfig, others map[string]*config.WireGuardConfig) (ds []config.Diagnostic) {
+	defer func() {
+		if r := recover(); r != nil {
+			ds = nil
+		}
+	}()
+	return config.DuplicateAddressDiagnostics(cfg, others)
 }
 
 // BaseName extracts the filename without extension from a path.

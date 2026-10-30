@@ -115,6 +115,29 @@ func TestImportZipWarnsOnSharedAddress(t *testing.T) {
 	}
 }
 
+func TestImportZipWarnsOnAddressSharedWithEarlierEntry(t *testing.T) {
+	s := &TunnelService{tunnelStore: storage.NewTunnelStore(t.TempDir())}
+	data := buildZip(t, map[string]string{
+		"a-vpn.conf": lintTestConf("10.66.66.2/32"),
+		"b-vpn.conf": lintTestConf("10.66.66.2/32"),
+	})
+	results, err := s.ImportZipData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warned := 0
+	for _, r := range results {
+		if r.Error != "" {
+			t.Fatalf("%s: %s", r.Name, r.Error)
+		}
+		warned += len(r.Warnings)
+	}
+	// Whichever entry is imported second is flagged against the first.
+	if warned != 1 {
+		t.Fatalf("expected exactly one warning across the zip, got %d: %+v", warned, results)
+	}
+}
+
 func buildZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
