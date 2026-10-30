@@ -139,7 +139,7 @@ func Lint(cfg *WireGuardConfig, others map[string]*WireGuardConfig) []Diagnostic
 	}
 
 	// Warning: another saved tunnel uses the same interface Address.
-	out = append(out, duplicateAddressDiagnostics(cfg, others)...)
+	out = append(out, DuplicateAddressDiagnostics(cfg, others)...)
 
 	// Info: MTU above the recommended maximum.
 	if cfg.Interface.MTU > mtuRecommendedMax {
@@ -189,7 +189,10 @@ func Lint(cfg *WireGuardConfig, others map[string]*WireGuardConfig) []Diagnostic
 	return out
 }
 
-func duplicateAddressDiagnostics(cfg *WireGuardConfig, others map[string]*WireGuardConfig) []Diagnostic {
+// DuplicateAddressDiagnostics returns one address_shared warning per entry of
+// others whose interface Address shares an IP with cfg (prefix length
+// ignored), sorted by tunnel name. others must not contain cfg itself.
+func DuplicateAddressDiagnostics(cfg *WireGuardConfig, others map[string]*WireGuardConfig) []Diagnostic {
 	if len(others) == 0 || len(cfg.Interface.Address) == 0 {
 		return nil
 	}

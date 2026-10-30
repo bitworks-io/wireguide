@@ -61,7 +61,14 @@ export function importedMessage(name, diagnostics, tr) {
     : tr('app.imported', { name });
 }
 
-/** True when a DisconnectTunnel error only means "already disconnected". */
+/**
+ * True when a DisconnectTunnel error only means "already disconnected".
+ *
+ * The IPC layer has no dedicated error code for this case, so this matches the
+ * helper's message text, "tunnel %q is not connected" (internal/tunnel
+ * manager.go, ErrNotConnected). TestDisconnectNotConnectedMessage pins that
+ * text; change both together.
+ */
 export function isNotConnectedError(message) {
   return /is not connected/i.test(message || '');
 }

@@ -112,6 +112,12 @@ func (s *TunnelService) importZipReader(r *zip.Reader) ([]ZipImportResult, error
 		}
 		declared += f.UncompressedSize64
 	}
+	// Load the saved tunnels once for the duplicate-Address check; importConfig
+	// adds each imported tunnel so later entries are checked against earlier ones.
+	saved := s.otherTunnelConfigs("")
+	if saved == nil {
+		saved = map[string]*config.WireGuardConfig{}
+	}
 	var results []ZipImportResult
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() || !strings.HasSuffix(strings.ToLower(f.Name), ".conf") {
@@ -142,7 +148,7 @@ func (s *TunnelService) importZipReader(r *zip.Reader) ([]ZipImportResult, error
 			results = append(results, ZipImportResult{Name: baseName, Error: err.Error()})
 			continue
 		}
-		if info, err := s.ImportConfig(name, string(data)); err != nil {
+		if info, err := s.importConfig(name, string(data), saved); err != nil {
 			results = append(results, ZipImportResult{Name: baseName, Error: err.Error()})
 		} else {
 			results = append(results, ZipImportResult{Name: name, Warnings: info.Warnings})
