@@ -90,6 +90,11 @@ var errResetDNSTooOld = errors.New("the helper is too old to reset DNS — updat
 // not push it back on.
 func (s *TunnelService) ResetDNS(force, killSwitchOff bool) (*ipc.ResetDNSResponse, error) {
 	var resp ipc.ResetDNSResponse
+	// A forced reset disconnects tunnels at the user's request: record it
+	// like Disconnect so the notifier does not report those tunnels as
+	// disconnected outside the app.
+	s.userActions.Begin(AnyTunnel, false)
+	defer s.userActions.End(AnyTunnel, false)
 	// A forced reset can tear tunnels down (seconds each): mark the RPC in
 	// flight so the health monitor does not take the busy helper for dead.
 	s.clients.MarkInflight()
