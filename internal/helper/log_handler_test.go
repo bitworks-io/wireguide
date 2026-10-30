@@ -128,3 +128,44 @@ func TestHelperLogFile(t *testing.T) {
 		}
 	}
 }
+
+// Identical warnings from different tunnel interfaces are independent.
+func TestBroadcastHandlerRateLimitsPerInterface(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, &buf))
+	for _, iface := range []string{"utun4", "utun5"} {
+		for i := 0; i < 5; i++ {
+			l.Warn("[wg:" + iface + "] Failed to send: network is unreachable")
+		}
+	}
+	out := buf.String()
+	for _, iface := range []string{"utun4", "utun5"} {
+		if n := strings.Count(out, "[wg:"+iface+"]"); n != 1 {
+			t.Errorf("%s warning logged %d times, want 1:\n%s", iface, n, out)
+		}
+	}
+}
+
+// An unrelated record arriving first after the window flushes the summary but
+// must not delay the real warning by another window.
+func TestBroadcastHandlerWarningRepeatsAfterSummaryFlush(t *testing.T) {
+	var buf bytes.Buffer
+	h := newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, &buf)
+	now := time.Unix(1000, 0)
+	h.clock = func() time.Time { return now }
+	l := slog.New(h)
+	for i := 0; i < 3; i++ {
+		l.Warn("[wg:utun4] Failed to send: network is unreachable")
+	}
+	now = now.Add(2 * time.Minute)
+	l.Info("unrelated line")
+	if !strings.Contains(buf.String(), "suppressed repeated engine warnings") {
+		t.Fatalf("summary missing:\n%s", buf.String())
+	}
+	now = now.Add(time.Second)
+	buf.Reset()
+	l.Warn("[wg:utun4] Failed to send: network is unreachable")
+	if n := strings.Count(buf.String(), "Failed to send"); n != 1 {
+		t.Errorf("real warning logged %d times right after the summary, want 1:\n%s", n, buf.String())
+	}
+}
