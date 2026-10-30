@@ -13,3 +13,10 @@ type NetworkChangeDetector interface {
 	Stop()
 	ChangeChan() <-chan struct{}
 }
+
+// OnlineReporter is optionally implemented by a NetworkChangeDetector that
+// knows whether the machine currently has a primary network interface. A
+// detector without it (or no detector) is treated as always online.
+type OnlineReporter interface {
+	Online() bool
+}

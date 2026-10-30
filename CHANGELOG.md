@@ -4,8 +4,12 @@ All notable changes to WireGuide will be documented in this file.
 
 ## Unreleased
 
+### Added
+- **Per-tunnel handshake health check** - each tunnel can override the global handshake health check (use Settings / on / off) from its detail page. The choice is stored in the tunnel's metadata file and applies without reconnecting.
+
 ### Fixed
 - **Connection history byte totals** - sessions no longer record 0 B (or only the bytes since the last reconnect) when a tunnel briefly reports zeroed counters while connecting or disconnecting, or when a reconnect restarts the counters.
+- **Handshake health check after sleep** - time spent asleep (or offline, on macOS) no longer counts as a dead handshake. The check pauses for 90 seconds after a wake, measures handshake age from the wake when the last handshake predates it, skips while macOS reports no primary network interface, and no longer starts a per-tunnel reconnect while a wake or network-change reconnect (or an earlier retry for that tunnel) is still in progress, so DNS protection and the kill switch are not suspended by overlapping retries.
 
 ## [0.6.1] - 2026-10-26
 

@@ -95,7 +95,12 @@
     "sort_added_old": "古い順",
     "rename": "名前を変更",
     "clear_search": "検索をクリア",
-    "resize_hint": "ドラッグで幅を変更 · ダブルクリックで既定の幅に戻す"
+    "resize_hint": "ドラッグで幅を変更 · ダブルクリックで既定の幅に戻す",
+    "health_check_override": "ハンドシェイクのヘルスチェック",
+    "health_check_inherit": "設定に従う",
+    "health_check_on": "オン",
+    "health_check_off": "オフ",
+    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。ハンドシェイクが180秒以上古くなるとトンネルを再接続します。スリープ中やオフラインの時間は数えません。"
   },
   "import": {
     "zip_result_title": "インポート結果",
@@ -137,7 +142,7 @@
     "dns_protection": "DNS 保護",
     "dns_protection_hint": "接続中のトンネルに指定されていない DNS サーバーへのリクエストをブロックします。Windows のフルトンネル接続には自動的に適用します。",
     "health_check": "接続確認と再接続",
-    "health_check_hint": "180 秒間新しいハンドシェイクがない場合に再接続します。PersistentKeepalive を設定したトンネルに推奨します。",
+    "health_check_hint": "180 秒間新しいハンドシェイクがない場合に再接続します。PersistentKeepalive を設定したトンネルに推奨します。スリープ中の時間は数えず、スリープ解除後 90 秒間と、macOS でネットワークに接続していない間はチェックを一時停止します。",
     "pin_interface": "VPN サーバーへの経路を固定",
     "pin_interface_hint": "VPN サーバーへの経路を現在のネットワークアダプターに固定します。",
     "tunnel_backend": "WireGuard エンジン",

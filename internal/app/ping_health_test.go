@@ -57,3 +57,37 @@ func TestPingHealthMetadataLifecycle(t *testing.T) {
 		t.Fatal("saved deleted tunnel")
 	}
 }
+
+func TestTunnelHealthCheckOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "tunnels")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store := storage.NewTunnelStore(dir)
+	cfg := &config.WireGuardConfig{Name: "first"}
+	cfg.Interface.PrivateKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	cfg.Interface.Address = []string{"10.0.0.2/24"}
+	cfg.Peers = []config.PeerConfig{{PublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", AllowedIPs: []string{"10.0.0.0/24"}}}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	service := &TunnelService{tunnelStore: store}
+	if v, err := service.GetTunnelHealthCheck("first"); err != nil || v != "inherit" {
+		t.Fatalf("default = %q %v", v, err)
+	}
+	if err := service.SetTunnelHealthCheck("first", "bogus"); err == nil {
+		t.Fatal("invalid value accepted")
+	}
+	for _, v := range []string{"on", "off", "inherit"} {
+		if err := service.SetTunnelHealthCheck("first", v); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := service.GetTunnelHealthCheck("first"); err != nil || got != v {
+			t.Fatalf("after set %q got %q %v", v, got, err)
+		}
+	}
+	meta, _ := store.LoadMeta("first")
+	if meta.HealthCheck != "" {
+		t.Fatalf("inherit must be stored as absent, got %q", meta.HealthCheck)
+	}
+}
