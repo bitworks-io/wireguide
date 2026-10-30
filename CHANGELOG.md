@@ -2,6 +2,13 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Verify** - a manual "Run checks" panel on a connected tunnel (and `wireguide ctl verify <name>`) that checks the last handshake, that each AllowedIPs prefix is routed through the tunnel interface, and that every split-DNS / search domain has the tunnel's resolver registered, plus an optional ping and name lookup. Read-only, runs only on request, every probe capped at 3 s. A prefix that overlaps your LAN is still checked and carries an amber note.
+- **Per-domain split-DNS rows and "Try a name"** - the DNS leak test lists each `~domain` with the resolver the system routes it to (from the same check that reports missing domains), and can resolve a name through the system resolver path so supplemental resolvers are honoured. A short note explains that dig/nslookup bypass them on macOS.
+- **DNS-mode chips** - the tunnel header and list rows show whether a tunnel replaces system DNS, uses split DNS or only sets search domains; `ctl status` prints `dns=`, and the tray tooltip appends the mode.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added

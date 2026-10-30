@@ -12,11 +12,15 @@ export {
     CurrentNetwork,
     DNSLeakResult,
     DNSServer,
+    DomainCheck,
     KnownSSIDs,
     ProfileMutationResult,
+    ResolveResult,
     RouteEntry,
     SettingsPatch,
     TunnelInfo,
     UpdateState,
+    VerifyOptions,
+    VerifyRow,
     ZipImportResult
 } from "./models.js";

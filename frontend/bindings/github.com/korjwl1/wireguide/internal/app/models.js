@@ -116,6 +116,13 @@ export class DNSLeakResult {
              */
             this["missing_match_domains"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {DomainCheck[] | undefined}
+             */
+            this["domains"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -128,12 +135,16 @@ export class DNSLeakResult {
     static createFrom($$source = {}) {
         const $$createField1_0 = $$createType1;
         const $$createField5_0 = $$createType2;
+        const $$createField6_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_servers" in $$parsedSource) {
             $$parsedSource["dns_servers"] = $$createField1_0($$parsedSource["dns_servers"]);
         }
         if ("missing_match_domains" in $$parsedSource) {
             $$parsedSource["missing_match_domains"] = $$createField5_0($$parsedSource["missing_match_domains"]);
+        }
+        if ("domains" in $$parsedSource) {
+            $$parsedSource["domains"] = $$createField6_0($$parsedSource["domains"]);
         }
         return new DNSLeakResult(/** @type {Partial<DNSLeakResult>} */($$parsedSource));
     }
@@ -195,6 +206,58 @@ export class DNSServer {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new DNSServer(/** @type {Partial<DNSServer>} */($$parsedSource));
+    }
+}
+
+/**
+ * DomainCheck mirrors diag.DomainCheck.
+ */
+export class DomainCheck {
+    /**
+     * Creates a new DomainCheck instance.
+     * @param {Partial<DomainCheck>} [$$source = {}] - The source object to create the DomainCheck.
+     */
+    constructor($$source = {}) {
+        if (!("domain" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["domain"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolver"] = undefined;
+        }
+        if (!("registered" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["registered"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["search"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DomainCheck instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DomainCheck}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DomainCheck(/** @type {Partial<DomainCheck>} */($$parsedSource));
     }
 }
 
@@ -273,6 +336,97 @@ export class ProfileMutationResult {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ProfileMutationResult(/** @type {Partial<ProfileMutationResult>} */($$parsedSource));
+    }
+}
+
+/**
+ * ResolveResult mirrors diag.ResolveResult.
+ */
+export class ResolveResult {
+    /**
+     * Creates a new ResolveResult instance.
+     * @param {Partial<ResolveResult>} [$$source = {}] - The source object to create the ResolveResult.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["addrs"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolver"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["match_domain"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["nxdomain"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["timed_out"] = undefined;
+        }
+        if (!("duration_ms" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["duration_ms"] = 0;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error_code"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResolveResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResolveResult}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("addrs" in $$parsedSource) {
+            $$parsedSource["addrs"] = $$createField1_0($$parsedSource["addrs"]);
+        }
+        return new ResolveResult(/** @type {Partial<ResolveResult>} */($$parsedSource));
     }
 }
 
@@ -519,6 +673,23 @@ export class TunnelInfo {
              */
             this["last_used_unix"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * DNSMode is the intended DNS behaviour from the config: "global"
+             * (replaces system DNS), "split" (only DNSDomains), "search" (search
+             * domains only) or "none". Intent, not read back from the OS.
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_domains"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -529,7 +700,11 @@ export class TunnelInfo {
      * @returns {TunnelInfo}
      */
     static createFrom($$source = {}) {
+        const $$createField8_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("dns_domains" in $$parsedSource) {
+            $$parsedSource["dns_domains"] = $$createField8_0($$parsedSource["dns_domains"]);
+        }
         return new TunnelInfo(/** @type {Partial<TunnelInfo>} */($$parsedSource));
     }
 }
@@ -618,6 +793,122 @@ export class UpdateState {
 }
 
 /**
+ * VerifyOptions are the optional user-chosen probes of Verify.
+ */
+export class VerifyOptions {
+    /**
+     * Creates a new VerifyOptions instance.
+     * @param {Partial<VerifyOptions>} [$$source = {}] - The source object to create the VerifyOptions.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ping_host"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolve_name"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VerifyOptions instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VerifyOptions}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new VerifyOptions(/** @type {Partial<VerifyOptions>} */($$parsedSource));
+    }
+}
+
+/**
+ * VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+ */
+export class VerifyRow {
+    /**
+     * Creates a new VerifyRow instance.
+     * @param {Partial<VerifyRow>} [$$source = {}] - The source object to create the VerifyRow.
+     */
+    constructor($$source = {}) {
+        if (!("check" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["check"] = "";
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+        if (!("detail" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["detail"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+             * @member
+             * @type {string | undefined}
+             */
+            this["detail_key"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["detail_params"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint_key"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VerifyRow instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VerifyRow}
+     */
+    static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType5;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("detail_params" in $$parsedSource) {
+            $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
+        }
+        return new VerifyRow(/** @type {Partial<VerifyRow>} */($$parsedSource));
+    }
+}
+
+/**
  * ZipImportResult holds the outcome of importing one .conf entry from a zip.
  */
 export class ZipImportResult {
@@ -659,3 +950,6 @@ export class ZipImportResult {
 const $$createType0 = DNSServer.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = DomainCheck.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $Create.Map($Create.Any, $Create.Any);

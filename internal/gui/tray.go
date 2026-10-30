@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"math"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/icons"
 	"golang.org/x/image/draw"
@@ -427,7 +429,12 @@ type trayManager struct {
 	mu            sync.Mutex
 	activeTunnels map[string]bool // cached from status events
 	hasHandshake  map[string]bool // per-tunnel handshake status
-	rebuildTimer  *time.Timer     // debounce timer for rebuildMenu
+	// dnsSuffix caches each tunnel's tooltip DNS annotation (" (split
+	// DNS)" / " (replaces DNS)" / " (search domains)"), filled by
+	// rebuildMenu from the stored configs so setIconState stays free of
+	// disk I/O.
+	dnsSuffix    map[string]string
+	rebuildTimer *time.Timer // debounce timer for rebuildMenu
 	// menu is the ONE Menu object backing the tray for the app's whole
 	// lifetime. rebuildMenu clears and refills it in place instead of
 	// creating a fresh Menu: Wails reuses the same NSMenu instance on
@@ -518,6 +525,7 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 	prev := t.activeTunnels
 	prevHandshake := t.hasHandshake
 	prevAnyConnected := len(prev) > 0
+	suffix := t.dnsSuffix
 	t.activeTunnels = newSet
 	t.hasHandshake = handshakeMap
 	t.mu.Unlock()
@@ -554,8 +562,7 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 			} else {
 				t.tray.SetIcon(onIcon)
 			}
-			tooltip := "WireGuide — " + strings.Join(activeNames, ", ")
-			t.setTooltip(tooltip)
+			t.setTooltip(connectedTooltip(activeNames, suffix))
 		} else {
 			if runtime.GOOS == "darwin" || ((runtime.GOOS == "windows" || runtime.GOOS == "linux") && len(offIcon) > 0) {
 				if runtime.GOOS == "darwin" {
@@ -576,8 +583,7 @@ func (t *trayManager) setIconState(activeNames []string, handshakeMap map[string
 	} else if anyConnected {
 		// Active names may have reordered without count changing.
 		// Refresh tooltip only when names differ from last broadcast.
-		newTooltip := "WireGuide — " + strings.Join(activeNames, ", ")
-		t.setTooltip(newTooltip)
+		t.setTooltip(connectedTooltip(activeNames, suffix))
 	}
 
 	// Rebuild menu if active set changed OR if handshake state changed for
@@ -617,6 +623,16 @@ func (t *trayManager) scheduleRebuild() {
 	})
 }
 
+// connectedTooltip renders the connected-state tray tooltip, appending each
+// tunnel's DNS-mode annotation from the cache (unknown tunnels get none).
+func connectedTooltip(activeNames []string, suffix map[string]string) string {
+	parts := make([]string, len(activeNames))
+	for i, n := range activeNames {
+		parts[i] = n + suffix[n]
+	}
+	return "WireGuide — " + strings.Join(parts, ", ")
+}
+
 // rebuildMenu reconstructs the whole tray menu: tunnel list, Show Window,
 // Quit. Uses ListTunnelsLocal (disk only, no IPC) + the cached activeTunnel
 // for connected-state glyphs. Safe to invoke from any goroutine.
@@ -643,10 +659,30 @@ func (t *trayManager) rebuildMenu() {
 	// concurrent setIconState was previously able to swap activeTunnels
 	// between the two reads, leading to "connected but no handshake
 	// glyph" flickers.
+	suffix := make(map[string]string, len(tunnels))
+	for _, tun := range tunnels {
+		suffix[tun.Name] = diag.DNSMode{Mode: tun.DNSMode, Domains: tun.DNSDomains}.TooltipSuffix()
+	}
+	// indicatorMu (outer, as in setIconState) keeps the tooltip write below
+	// ordered with setIconState's, so a stale snapshot cannot overwrite it.
+	t.indicatorMu.Lock()
 	t.mu.Lock()
 	activeSet := t.activeTunnels
 	hsMap := t.hasHandshake
+	t.dnsSuffix = suffix
 	t.mu.Unlock()
+	// The tooltip may have been set before the DNS modes were cached;
+	// setIconState only touches it on active-set changes. Refresh it from the
+	// current active set (a stale name here would overwrite "WireGuide").
+	if len(activeSet) > 0 {
+		names := make([]string, 0, len(activeSet))
+		for n := range activeSet {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		t.setTooltip(connectedTooltip(names, suffix))
+	}
+	t.indicatorMu.Unlock()
 
 	if runtime.GOOS == "darwin" {
 		rows := []nativeTrayItem{{Title: "WireGuide"}, {Separator: true}}
