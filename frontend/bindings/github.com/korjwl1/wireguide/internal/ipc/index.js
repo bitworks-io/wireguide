@@ -4,6 +4,8 @@
 
 export {
     AutomationEventPayload,
+    FirewallPermit,
+    FirewallStatusResponse,
     LogEntry,
     RecoveryWarningPayload,
     SettingsChangedPayload

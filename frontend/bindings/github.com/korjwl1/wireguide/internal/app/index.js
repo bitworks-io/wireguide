@@ -8,16 +8,25 @@ export {
 };
 
 export {
+    AutomationPreview,
+    AutomationVerdict,
     ConnectionStatus,
     CurrentNetwork,
     DNSLeakResult,
     DNSServer,
+    DomainCheck,
+    FirewallStatus,
     HelperInfo,
     KnownSSIDs,
+    LANOverlap,
     ProfileMutationResult,
+    ResolveResult,
     RouteEntry,
     SettingsPatch,
     TunnelInfo,
+    URLAction,
     UpdateState,
+    VerifyOptions,
+    VerifyRow,
     ZipImportResult
 } from "./models.js";

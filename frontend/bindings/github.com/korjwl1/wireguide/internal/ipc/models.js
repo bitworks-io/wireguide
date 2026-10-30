@@ -92,6 +92,175 @@ export class AutomationEventPayload {
 }
 
 /**
+ * FirewallPermit is one resolver the DNS rules let through. Interface is ""
+ * for "any interface" (normal routing). Tunnel names the connected tunnel the
+ * resolver belongs to ("" when none matches).
+ */
+export class FirewallPermit {
+    /**
+     * Creates a new FirewallPermit instance.
+     * @param {Partial<FirewallPermit>} [$$source = {}] - The source object to create the FirewallPermit.
+     */
+    constructor($$source = {}) {
+        if (!("interface" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["interface"] = "";
+        }
+        if (!("server" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["server"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["tunnel"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallPermit instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallPermit}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FirewallPermit(/** @type {Partial<FirewallPermit>} */($$parsedSource));
+    }
+}
+
+/**
+ * FirewallStatusResponse is the read-only result of Firewall.Status.
+ */
+export class FirewallStatusResponse {
+    /**
+     * Creates a new FirewallStatusResponse instance.
+     * @param {Partial<FirewallStatusResponse>} [$$source = {}] - The source object to create the FirewallStatusResponse.
+     */
+    constructor($$source = {}) {
+        if (!("dns_protection_wanted" in $$source)) {
+            /**
+             * DNSProtectionWanted is the user's DNS protection setting.
+             * @member
+             * @type {boolean}
+             */
+            this["dns_protection_wanted"] = false;
+        }
+        if (!("dns_protection_active" in $$source)) {
+            /**
+             * DNSProtectionActive is read back from pf on macOS (Source "pf"); on
+             * other platforms, or when the read-back failed, it is the helper's view
+             * of its last successful apply (Source "cached").
+             * @member
+             * @type {boolean}
+             */
+            this["dns_protection_active"] = false;
+        }
+        if (!("source" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["source"] = "";
+        }
+        if (!("permits" in $$source)) {
+            /**
+             * @member
+             * @type {FirewallPermit[]}
+             */
+            this["permits"] = [];
+        }
+        if (!("kill_switch_wanted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["kill_switch_wanted"] = false;
+        }
+        if (!("kill_switch_active" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["kill_switch_active"] = false;
+        }
+        if (!("suspended" in $$source)) {
+            /**
+             * Suspended is true while a reconnect has the rules lifted on purpose;
+             * the resume reapplies them.
+             * @member
+             * @type {boolean}
+             */
+            this["suspended"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * LastReconcileError is the most recent failed apply (DNS or kill
+             * switch); DNSReconcileError only the DNS protection step's.
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_reconcile_error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_reconcile_error"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * RFC3339
+             * @member
+             * @type {string | undefined}
+             */
+            this["last_reconcile_at"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * ReconcileFailures counts consecutive failed applies (DNS + kill switch).
+             * @member
+             * @type {number | undefined}
+             */
+            this["reconcile_failures"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["read_back_error"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallStatusResponse instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallStatusResponse}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("permits" in $$parsedSource) {
+            $$parsedSource["permits"] = $$createField3_0($$parsedSource["permits"]);
+        }
+        return new FirewallStatusResponse(/** @type {Partial<FirewallStatusResponse>} */($$parsedSource));
+    }
+}
+
+/**
  * LogEntry is a single structured log record forwarded from the helper
  * to the GUI (and from the GUI to the frontend LogViewer). We keep it flat
  * — no nested attrs — because the viewer just renders a one-line per entry.
@@ -254,3 +423,7 @@ export class SettingsChangedPayload {
         return new SettingsChangedPayload(/** @type {Partial<SettingsChangedPayload>} */($$parsedSource));
     }
 }
+
+// Private type creation functions
+const $$createType0 = FirewallPermit.createFrom;
+const $$createType1 = $Create.Array($$createType0);
