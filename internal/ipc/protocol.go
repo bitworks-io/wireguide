@@ -35,10 +35,14 @@ import (
 // Minor 8 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
 // for the diagnostics bundle); an older helper answers method-not-found and
 // the bundle records the section as unavailable.
+// Minor 9 adds the read-only Helper.Info method and the optional code/action
+// fields on event.critical_error, so the GUI can offer a user-initiated
+// "Repair helper" instead of telling the user to quit and reopen.
 // Minor 10 adds the read-only Firewall.Status method, the per-tunnel
-// dns_mode / dns_servers / dns_protected status fields and
-// CriticalErrorPayload.Code. An older helper answers Firewall.Status with
-// method-not-found and omits the fields, which the GUI reports as unknown.
+// dns_mode / dns_servers / dns_protected status fields and the
+// dns_protection_failing critical-error code. An older helper answers
+// Firewall.Status with method-not-found and omits the fields, which the GUI
+// reports as unknown.
 const (
 	ProtocolMajor = 1
 	ProtocolMinor = 10
@@ -180,6 +184,10 @@ const (
 	// shutdown path then stops the helper. With no GUI attached the
 	// helper simply shuts itself down.
 	MethodRequestQuit = "Helper.RequestQuit"
+	// MethodHelperInfo is a read-only description of the running helper
+	// (version, how it was started, socket, pid) for the Settings status
+	// card. Minor 9; an older helper answers method-not-found.
+	MethodHelperInfo = "Helper.Info"
 )
 
 // Event names (server → client notifications)

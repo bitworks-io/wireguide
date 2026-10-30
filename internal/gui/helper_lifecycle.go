@@ -9,7 +9,9 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/elevate"
@@ -353,10 +355,18 @@ func startHelperHealthMonitor(app *application.App, clients *ipc.ClientHolder, d
 				app.Event.Emit("helper", HelperEvent{Alive: true})
 				wasAlive = true
 			}
+			if helperRepairing.Load() {
+				// The administrator prompt of a user-requested repair takes
+				// longer than the outage window; do not announce an outage
+				// the user is in the middle of fixing.
+				outageStarted = time.Now()
+			}
 			if !wasAlive && !outageReported && time.Since(outageStarted) >= 10*time.Second {
 				app.Event.Emit("critical_error", ipc.CriticalErrorPayload{
 					Where:  "Helper connection",
-					Detail: "The VPN helper is unavailable. Quit and reopen WireGuide to retry helper setup.",
+					Detail: "The VPN helper is unavailable. Use Repair helper (Settings > Advanced) to reinstall it.",
+					Code:   "helper_unavailable",
+					Action: "repair_helper",
 				})
 				outageReported = true
 			}
@@ -373,6 +383,10 @@ var recoveryDial = func(ctx context.Context, dataDir string) (*ipc.Client, error
 // true if a new client is now in place. Best-effort — caller decides whether
 // to retry on the next tick.
 func recoverHelper(clients *ipc.ClientHolder, bridge *eventBridge, dataDir string, done <-chan struct{}) bool {
+	// A user-requested repair owns the client holder while it runs.
+	if helperRepairing.Load() {
+		return false
+	}
 	// Quitting: never touch the helper socket again (on macOS a connect would
 	// start the helper right after the user quit).
 	select {
@@ -483,4 +497,121 @@ func connectInitialHelper(dataDir string) (*ipc.Client, error) {
 		return nil, fmt.Errorf("helper connection failed after 3 attempts: %w", err)
 	}
 	return initialClient, nil
+}
+
+// helperRepairing is true while repairHelper runs, so the background health
+// monitor does not race it for the client holder while the helper is down.
+var helperRepairing atomic.Bool
+
+// ErrHelperRepairBusy is returned (wrapped) when a repair is refused because
+// a tunnel is connected, wanted or pending restore. The "helper_repair_busy"
+// prefix of its message is a stable token the frontend maps to a translated
+// explanation.
+var ErrHelperRepairBusy = errors.New("helper_repair_busy")
+
+// repairProbe finds the running helper, if any, and reports every tunnel that
+// a reinstall would drop: connected ones and the ones the helper still wants
+// (pending restore or backoff). The second return is the client that answered
+// and whether the caller owns (must close) it. reachable is false when no
+// helper answers, which is exactly the case repair exists for.
+func repairProbe(ctx context.Context, clients *ipc.ClientHolder, addr string) (c *ipc.Client, owned bool, resp ipc.PingResponse, busy []string, reachable bool) {
+	ping := func(c *ipc.Client, budget time.Duration) bool {
+		pctx, cancel := context.WithTimeout(ctx, budget)
+		defer cancel()
+		return c.CallWithContext(pctx, ipc.MethodPing, nil, &resp) == nil
+	}
+	if cur := clients.Get(); cur != nil && ping(cur, activatedContactBudget) {
+		c = cur
+	} else if addr != "" {
+		// The holder's client may be a stale connection to a helper that
+		// launchd has since restarted; ask the socket directly.
+		dctx, cancel := context.WithTimeout(ctx, plainContactBudget)
+		fresh, err := ipc.NewClientContext(dctx, addr)
+		cancel()
+		if err != nil {
+			return nil, false, resp, nil, false
+		}
+		if !ping(fresh, activatedContactBudget) {
+			fresh.Close()
+			return nil, false, resp, nil, false
+		}
+		c, owned = fresh, true
+	} else {
+		return nil, false, resp, nil, false
+	}
+
+	seen := map[string]bool{}
+	if ipc.MinorOf(resp.Version) >= 3 {
+		for _, n := range resp.WantedTunnels {
+			seen[n] = true
+		}
+	}
+	var active ipc.ActiveTunnelsResponse
+	actx, cancel := context.WithTimeout(ctx, plainContactBudget)
+	if err := c.CallWithContext(actx, ipc.MethodActiveTunnels, nil, &active); err == nil {
+		for _, n := range active.Names {
+			seen[n] = true
+		}
+	}
+	cancel()
+	for n := range seen {
+		busy = append(busy, n)
+	}
+	sort.Strings(busy)
+	return c, owned, resp, busy, true
+}
+
+// repairHelper is the user-requested "Repair helper" action.
+func repairHelper(ctx context.Context, clients *ipc.ClientHolder, bridge *eventBridge, dataDir string) error {
+	args := elevate.Args{
+		SocketPath:     ipc.DefaultSocketPath(),
+		SocketUID:      os.Getuid(),
+		SocketSID:      elevate.CurrentUserSID(),
+		DataDir:        dataDir,
+		ForceReinstall: true,
+	}
+	return repairHelperWith(ctx, clients, bridge, args, elevate.SpawnHelper)
+}
+
+// repairHelperWith runs the same install/repair path as an upgrade
+// (ForceReinstall makes SpawnHelper skip the "already running" shortcut and
+// reinstall the binary and launchd plist), which is the only step that
+// prompts; the explanation dialog and the single administrator prompt come
+// from that path. It refuses, before touching anything, while a tunnel is
+// connected, wanted or pending restore: replacing the helper would drop it.
+// It never deletes the data dir (desired-state and journal files), so what the
+// new helper restores is unchanged. A running old helper is shut down through
+// its own graceful Shutdown first so the installer's bootout never kills it.
+// spawn is a parameter so tests never open an administrator prompt.
+func repairHelperWith(ctx context.Context, clients *ipc.ClientHolder, bridge *eventBridge, args elevate.Args, spawn func(context.Context, elevate.Args) error) error {
+	if !helperRepairing.CompareAndSwap(false, true) {
+		return errors.New("a helper repair is already running")
+	}
+	defer helperRepairing.Store(false)
+
+	old, owned, resp, busy, reachable := repairProbe(ctx, clients, args.SocketPath)
+	if reachable {
+		if len(busy) > 0 {
+			if owned {
+				old.Close()
+			}
+			return fmt.Errorf("%w: disconnect all tunnels and cancel pending reconnects before repairing the helper (in use: %v)",
+				ErrHelperRepairBusy, busy)
+		}
+		slog.Warn("repair: stopping the running helper before reinstall", "pid", resp.PID)
+		// shutdownStaleHelper closes the client it is given. The holder
+		// replaces its client below.
+		shutdownStaleHelper(old, resp.PID, args.SocketPath)
+	}
+	newClient, err := spawnAndConnectHelper(ctx, args, spawn, 30*time.Second)
+	if err != nil {
+		return err
+	}
+	clients.Set(newClient)
+	if bridge != nil {
+		bridge.Resubscribe()
+	}
+	ResendSSIDToHelper(clients)
+	slog.Info("helper repaired")
+	return nil
 }

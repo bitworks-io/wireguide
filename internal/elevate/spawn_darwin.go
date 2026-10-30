@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/launchd"
 	"github.com/korjwl1/wireguide/internal/logrotate"
 	"github.com/korjwl1/wireguide/internal/version"
 )
@@ -85,6 +86,12 @@ func generatePlistContent(exe string, args Args) string {
 <dict>
     <key>Label</key>
     <string>%s</string>
+    <!-- Ties this background item to the WireGuide app in System Settings
+         (Login Items and Extensions). -->
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>%s</string>
+    </array>
     <key>ProgramArguments</key>
     <array>
         <string>%s</string>
@@ -149,7 +156,7 @@ func generatePlistContent(exe string, args Args) string {
     <string>%s</string>
 </dict>
 </plist>
-`, daemonLabel, daemonBinary, args.SocketPath, uid, args.DataDir, ipc.DarwinSocketPath, uid,
+`, daemonLabel, launchd.AppBundleID, daemonBinary, args.SocketPath, uid, args.DataDir, ipc.DarwinSocketPath, uid,
 		logrotate.HelperLogPath, logrotate.HelperStderrPath, logrotate.HelperStderrPath)
 }
 
@@ -324,9 +331,15 @@ func daemonLoadedFromPrint(out []byte, err error) error {
 }
 
 func runDaemonAuthorization(shellScript string) error {
+	// Explain BEFORE the password prompt, and only here: this runs solely
+	// when an install or repair really needs administrator rights, never on
+	// the passive no-prompt start path.
+	if err := showAuthorizationNotice(); err != nil {
+		return err
+	}
 	escaped := strings.ReplaceAll(shellScript, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	script := fmt.Sprintf(`do shell script "%s" with administrator privileges with prompt "WireGuide needs administrator access to start or repair its VPN helper service."`, escaped)
+	script := fmt.Sprintf(`do shell script "%s" with administrator privileges with prompt "%s"`, escaped, currentAuthNotice().Prompt)
 	slog.Info("starting LaunchDaemon (administrator authorization)")
 	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
 	if err != nil {

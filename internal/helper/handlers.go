@@ -20,6 +20,7 @@ import (
 // testable — `handler := &Helper{manager: mockMgr}; handler.handleConnect(...)`.
 func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodPing, h.handlePing)
+	h.server.Handle(ipc.MethodHelperInfo, h.handleHelperInfo)
 	h.server.Handle(ipc.MethodShutdown, h.handleShutdown)
 	h.server.Handle(ipc.MethodForceShutdown, h.handleForceShutdown)
 	h.server.Handle(ipc.MethodRequestQuit, h.handleRequestQuit)
@@ -74,6 +75,36 @@ func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) 
 func (h *Helper) handlePing(params json.RawMessage) (interface{}, error) {
 	return ipc.PingResponse{Version: ipc.ProtocolVersion, AppVersion: version.Current, GUIAttached: h.server != nil && h.server.HasControlConn(),
 		PID: os.Getpid(), WantedTunnels: h.wantedTunnelNames()}, nil
+}
+
+// handleHelperInfo reports how this helper process came to be running. It is
+// read-only and takes no locks beyond the server's own.
+func (h *Helper) handleHelperInfo(params json.RawMessage) (interface{}, error) {
+	resp := ipc.HelperInfoResponse{
+		AppVersion:       version.Current,
+		ProtocolVersion:  ipc.ProtocolVersion,
+		PID:              os.Getpid(),
+		StartMode:        h.startMode,
+		SocketPath:       h.socketPath,
+		ActivationReason: h.activationReason,
+		GUIAttached:      h.server != nil && h.server.HasControlConn(),
+	}
+	if !h.startedAt.IsZero() {
+		resp.StartedAt = h.startedAt.UTC().Format(time.RFC3339)
+	}
+	return resp, nil
+}
+
+// describeStart names how this helper was started. goos is a parameter so the
+// three outcomes are testable on one machine.
+func describeStart(activated bool, goos string) (mode, reason string) {
+	switch {
+	case activated:
+		return "launchd-socket", "Started by launchd (socket-activated job)"
+	case goos == "darwin":
+		return "legacy", "Not socket-activated: launchd did not hand over a socket, so the helper listens on its own"
+	}
+	return "direct", "Started directly, without launchd"
 }
 
 func (h *Helper) handleShutdown(params json.RawMessage) (interface{}, error) {
