@@ -2,6 +2,12 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Changed
+- **macOS login items** - the helper LaunchDaemon and the auto-start LaunchAgent now declare WireGuide as their app (`AssociatedBundleIdentifiers`), so System Settings > Login Items & Extensions attributes them to WireGuide instead of an unidentified developer. An existing auto-start entry is refreshed at launch (only if it still points at this app); the helper plist change causes one reinstall alongside the next update.
+- **macOS administrator prompt** - a short dialog now explains why the password is needed (installing or repairing the VPN helper) just before macOS asks for it, in English, Korean, Japanese or Simplified Chinese. Cancel behaves like cancelling the password prompt.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added
