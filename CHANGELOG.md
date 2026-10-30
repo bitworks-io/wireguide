@@ -5,7 +5,7 @@ All notable changes to WireGuide will be documented in this file.
 ## Unreleased
 
 ### Fixed
-- **Connection history byte totals** - sessions no longer record 0 B (or only the bytes since the last reconnect) when a tunnel briefly reports zeroed counters while connecting or disconnecting, or when a reconnect restarts the counters.
+- **Connection history byte totals** - sessions no longer record 0 B (or only the bytes since the last reconnect) when a tunnel briefly reports zeroed counters while connecting or disconnecting, or when a reconnect restarts the counters. A stale snapshot from a tunnel that never opened a session is no longer added to its next session.
 
 ## [0.6.1] - 2026-10-26
 

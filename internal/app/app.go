@@ -78,9 +78,8 @@ type TunnelService struct {
 // from the helper. They differ because the helper's per-device counters are
 // not monotonic over a session: a tunnel in the Connecting/Disconnecting
 // state reports 0/0 while still listed as active, and a reconnect builds a
-// fresh WireGuard device whose counters restart from zero. Storing the raw
-// reading blindly zeroed the cache one tick before the session closed, which
-// is how most history rows ended up with 0 B rx/tx.
+// fresh WireGuard device whose counters restart from zero. The cache therefore
+// folds each raw reading into the totals (see merge) rather than storing it.
 type lastKnownTunnelStats struct {
 	rx     int64
 	tx     int64
@@ -99,12 +98,12 @@ func (st lastKnownTunnelStats) merge(rawRx, rawTx int64) lastKnownTunnelStats {
 	if rawRx == 0 && rawTx == 0 {
 		return st
 	}
+	// A new device resets both directions together, so a drop in either
+	// counter means both bases must carry the totals counted so far.
+	reset := rawRx < st.rawRx || rawTx < st.rawTx
 	baseRx, baseTx := st.rx-st.rawRx, st.tx-st.rawTx
-	if rawRx < st.rawRx {
-		baseRx = st.rx
-	}
-	if rawTx < st.rawTx {
-		baseTx = st.tx
+	if reset {
+		baseRx, baseTx = st.rx, st.tx
 	}
 	return lastKnownTunnelStats{
 		rx: baseRx + rawRx, tx: baseTx + rawTx,
