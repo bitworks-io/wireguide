@@ -14,3 +14,8 @@ func DefaultRoute() (gateway, iface string) {
 // IsWiFiInterface is unknown on Windows; answering true makes an empty SSID
 // hold rather than count as "no SSID".
 func IsWiFiInterface(string) bool { return true }
+
+// InterfaceMedium is unknown on Windows (DefaultRoute does not resolve the
+// interface), so connection-type rules never match there and negated ones
+// hold.
+func InterfaceMedium(string) string { return "" }

@@ -4,6 +4,7 @@
 
 export {
     AutomationBackupStatus,
+    AutomationV3BackupStatus,
     Session,
     Settings
 } from "./models.js";

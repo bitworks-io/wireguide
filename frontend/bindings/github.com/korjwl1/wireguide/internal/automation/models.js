@@ -53,7 +53,7 @@ export class Condition {
         }
         if (/** @type {any} */(false)) {
             /**
-             * Negate inverts an ssid/subnet/network condition ("is not"). A negated
+             * Negate inverts an ssid/subnet/network/medium condition ("is not"). A negated
              * rule matches only when its input is KNOWN and different; when the input
              * is unknown (blank SSID during a roam, unsettled network) Evaluate holds
              * instead of falling through. Not valid on none_match.
@@ -68,6 +68,18 @@ export class Condition {
              * @type {string | undefined}
              */
             this["ssid"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * SSIDs extends an ssid condition to a set: it matches any of
+             * {SSID} ∪ SSIDs (case-insensitive); negated, none of them. Writers use
+             * SSID for a single network and SSIDs (SSID empty) for several. A rule
+             * list using SSIDs is stored under per_tunnel_rules_v3 (see
+             * automation_json.go) so older readers never see it.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["ssids"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**
@@ -97,6 +109,15 @@ export class Condition {
              */
             this["label"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Medium is the connection type for a medium condition: wifi, wired or
+             * tethered.
+             * @member
+             * @type {string | undefined}
+             */
+            this["medium"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -107,7 +128,11 @@ export class Condition {
      * @returns {Condition}
      */
     static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("ssids" in $$parsedSource) {
+            $$parsedSource["ssids"] = $$createField3_0($$parsedSource["ssids"]);
+        }
         return new Condition(/** @type {Partial<Condition>} */($$parsedSource));
     }
 }
@@ -145,7 +170,7 @@ export class Rule {
      * @returns {Rule}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType0;
+        const $$createField0_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("when" in $$parsedSource) {
             $$parsedSource["when"] = $$createField0_0($$parsedSource["when"]);
@@ -192,7 +217,7 @@ export class Rules {
      * @returns {Rules}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType1;
+        const $$createField0_0 = $$createType0;
         const $$createField1_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("trusted_ssids" in $$parsedSource) {
@@ -233,7 +258,7 @@ export class TunnelSSIDs {
      * @returns {TunnelSSIDs}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType1;
+        const $$createField0_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("auto_connect_ssids" in $$parsedSource) {
             $$parsedSource["auto_connect_ssids"] = $$createField0_0($$parsedSource["auto_connect_ssids"]);
@@ -243,7 +268,7 @@ export class TunnelSSIDs {
 }
 
 // Private type creation functions
-const $$createType0 = Condition.createFrom;
-const $$createType1 = $Create.Array($Create.Any);
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = Condition.createFrom;
 const $$createType2 = TunnelSSIDs.createFrom;
 const $$createType3 = $Create.Map($Create.Any, $$createType2);

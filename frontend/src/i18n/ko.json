@@ -113,6 +113,9 @@
   "settings": {
     "automation_backup_recovery": "이전 자동화 규칙의 백업이 있습니다. 복원하려면 설정 폴더의 백업 파일을 확인하세요.",
     "automation_backup_error": "자동화 규칙을 백업하지 못했습니다. 이전 버전을 설치하기 전에 규칙을 별도로 보관하세요.",
+    "automation_v3_recoverable": "{names}의 규칙은 Wi-Fi 이름 목록 또는 연결 유형을 사용하며, 이전 버전의 WireGuide가 삭제했습니다. 백업이 있습니다.",
+    "automation_v3_restore": "규칙 복원",
+    "automation_v3_restore_failed": "규칙을 복원하지 못했습니다.",
     "title": "설정",
     "general": "일반",
     "auto_start": "로그인 시 WireGuide 실행",
@@ -276,7 +279,15 @@
     "is_not": "불일치",
     "negate": "일치 방식",
     "negated_hint": "조건값을 확인할 수 있고 입력값과 다를 때만 적용합니다. 네트워크를 확인하는 동안에는 규칙 평가를 보류합니다.",
-    "remove_rule": "규칙 삭제"
+    "remove_rule": "규칙 삭제",
+    "cond_medium": "연결 유형",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "유선 (이더넷)",
+    "medium_tethered": "테더링 (휴대폰 USB/블루투스)",
+    "ssid_add_placeholder": "추가…",
+    "ssid_tags_hint": "Wi-Fi 이름입니다. Enter 키나 쉼표로 더 추가할 수 있으며, 그중 하나와 일치하면 규칙이 적용됩니다.",
+    "remove_ssid": "{ssid} 제거",
+    "medium_windows_note": "Windows에서는 연결 유형을 감지할 수 없어 이 규칙이 적용되지 않습니다."
   },
   "ping_health": {
     "title": "응답이 없을 때 자동 재연결",

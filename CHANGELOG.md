@@ -2,6 +2,14 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Automation: Wi-Fi name lists and connection type** - a Wi-Fi name condition can list several networks ("is any of" / negated "is none of"), and a new connection-type condition matches Wi-Fi, wired or tethered (iPhone/iPad USB, Bluetooth PAN, RNDIS) uplinks. Negated connection-type rules wait for the network to settle like other negated rules. Connection type is detected on macOS and Linux; on Windows it is unknown, so these rules never match there. CLI: `ssid:A|B`, `not-ssid:A|B`, `medium:wired`, `not-medium:wifi`.
+
+### Upgrade notes
+- Rule lists that use Wi-Fi name lists or connection type are stored under `per_tunnel_rules_v3`, so 0.6.1 and earlier ignore them entirely instead of misreading part of a list. Because an older version drops them whenever it saves settings, they are also copied to a separate `config.json.automation-v3-backup` that older versions never read, change or remove. If an older version dropped them, Settings offers to restore them for tunnels that have no rules. The existing `.automation-v2-backup` for negated rules is unchanged.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added

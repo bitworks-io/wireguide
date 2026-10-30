@@ -2,13 +2,17 @@
  import { modal, backdrop } from './modal.js';
   // Ordered per-tunnel rules are saved through the scoped backend API.
   import { afterUpdate, onMount, onDestroy } from 'svelte';
-  import { Events } from '@wailsio/runtime';
+  import { Events, System } from '@wailsio/runtime';
   import Icon from './Icon.svelte';
   import ErrorNotice from './ErrorNotice.svelte';
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
   import SSIDPermissionBanner from './SSIDPermissionBanner.svelte';
   import { loadSettings } from '../stores/settings.js';
+  import {
+    MEDIUMS, DEFAULT_MEDIUM, macInvalid, macCanon, commitDraft, rowFromDisk, blankRow,
+    cleanedRule, rulesDiffer, rulesFor,
+  } from './automationRules.js';
 
   export let TunnelService;
   export let tunnelName = '';
@@ -32,6 +36,14 @@
   // loadGen tags each async load so a slow in-flight load(A) can't clobber
   // the rules after the user has already switched to load(B) (issue #12).
   let loadGen = 0;
+  // Windows can't tell the primary interface's connection type, so a
+  // connection-type rule never matches there (negated ones hold). The
+  // option is offered only on other platforms; an existing medium rule
+  // (synced from another machine) stays editable with a note.
+  // IsWindows reads the injected environment synchronously; onMount also
+  // asks the runtime, in case it was not populated when this script ran.
+  let isWindows = false;
+  try { isWindows = System.IsWindows(); } catch (_) {}
 
   // Reload whenever the modal opens for a (possibly different) tunnel.
   $: if (open && tunnelName && loadedFor !== tunnelName) {
@@ -53,23 +65,10 @@
     try {
       const s = await loadSettings(TunnelService);
       if (gen !== loadGen) return; // a newer load superseded this one
-      const per = { ...(s?.automation?.per_tunnel_rules || {}), ...(s?.automation?.per_tunnel_rules_v2 || {}) };
       // Deep-copy so edits don't mutate the fetched object before save.
-      rules = (per[name] || []).map(r => {
-        const row = {
-          _id: ++ruleId,
-          when: {
-            type: r.when?.type || 'network',
-            negate: !!r.when?.negate,
-            ssid: r.when?.ssid || '',
-            subnet: r.when?.subnet || '',
-            gateway_mac: r.when?.gateway_mac || '',
-            // Not editable here; carried through the round-trip so a GUI
-            // save never strips a label another writer attached.
-            label: r.when?.label || '',
-          },
-          do: r.do || 'connect',
-        };
+      // rulesFor reads all three storage tiers (legacy, _v2, _v3).
+      rules = rulesFor(s, name).map(r => {
+        const row = rowFromDisk(r, ++ruleId);
         // Seed the last-committed form so an existing rule that turns
         // incomplete mid-edit keeps its on-disk value (see persistSet).
         row._committed = cleanedRule(row);
@@ -105,7 +104,7 @@
     // No save() here: a blank draft is not a configuration change — it
     // becomes persistable on the first input that completes it. Saving
     // now would also manufacture a self-write config_changed echo.
-    rules = [...rules, { _id: ++ruleId, when: { type: 'network', negate: false, ssid: '', subnet: '', gateway_mac: '', label: '' }, do: 'connect' }];
+    rules = [...rules, blankRow(++ruleId)];
   }
 
   function removeRule(i) {
@@ -120,17 +119,50 @@
   // user can fix it. Empty is "incomplete", not "invalid".
   // A MAC is valid in any common style — colon, dash, or no separator —
   // as long as it reduces to exactly 12 hex digits. The engine compares
-  // canonically (separator/case-insensitive), and we normalise on commit.
-  function macHex(v) { return (v || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase(); }
-  function macInvalid(v) { const s = (v || '').trim(); return s !== '' && macHex(s).length !== 12; }
-  // Canonical form: lower-case, colon-separated (b0:38:6c:54:8b:ab).
-  function macCanon(v) {
-    const h = macHex(v);
-    if (h.length !== 12) return (v || '').trim(); // leave as-is so the user can keep fixing
-    return h.match(/.{2}/g).join(':');
-  }
+  // canonically (separator/case-insensitive), and we normalise on commit
+  // (macInvalid/macCanon live in automationRules.js).
   function onMacChange(rule) {
     rule.when.gateway_mac = macCanon(rule.when.gateway_mac);
+    rules = rules;
+    save();
+  }
+  // Switching to "connection type" needs a concrete medium, or the select
+  // would show one value while cleanedRule() treats the row as incomplete.
+  function onTypeChange(rule) {
+    if (rule.when.type === 'medium' && !MEDIUMS.includes(rule.when.medium)) rule.when.medium = DEFAULT_MEDIUM;
+    rules = rules;
+    save();
+  }
+
+  // SSID tags: typing a comma or pressing Enter commits the name as a tag;
+  // the remaining draft text still counts (see cleanedRule). One SSID is
+  // saved as `ssid`, several as `ssids`.
+  function onSSIDInput(rule) {
+    if ((rule.when.ssid || '').includes(',')) { commitDraft(rule.when, false); rules = rules; }
+    save();
+  }
+  function onSSIDKeydown(e, rule) {
+    // Never commit a half-composed IME (Hangul/Kana) name; WebKit may
+    // report that Enter as keyCode 229 without isComposing.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitDraft(rule.when, true);
+      rules = rules;
+      save();
+    } else if (e.key === 'Backspace' && !rule.when.ssid && rule.when.ssids.length) {
+      rule.when.ssids = rule.when.ssids.slice(0, -1);
+      rules = rules;
+      save();
+    }
+  }
+  function onSSIDChange(rule) {
+    commitDraft(rule.when, true);
+    rules = rules;
+    save();
+  }
+  function removeSSID(rule, j) {
+    rule.when.ssids = rule.when.ssids.filter((_, idx) => idx !== j);
     rules = rules;
     save();
   }
@@ -192,26 +224,13 @@
   }
   afterUpdate(updateScroll);
 
-  // cleanedRule returns the normalized persisted form of a row, or null
-  // while the row's condition is incomplete. persistSet() is what goes to
-  // disk: the latest complete form of every row (cached on r._committed).
-  // A row that turns incomplete mid-edit therefore keeps its last on-disk
-  // value instead of being transiently deleted (and lost on a crash); a
-  // never-completed draft contributes nothing. Rows leave the persisted
-  // set only via removeRule() or by abandoning a draft.
-  function cleanedRule(r) {
-    const t = r.when.type;
-    let when = null;
-    if (t === 'none_match') when = { type: 'none_match' };
-    else if (t === 'ssid' && r.when.ssid.trim() !== '') when = { type: 'ssid', ssid: r.when.ssid.trim() };
-    else if (t === 'subnet' && r.when.subnet.trim() !== '') when = { type: 'subnet', subnet: r.when.subnet.trim() };
-    else if (t === 'network' && r.when.gateway_mac.trim() !== '') when = { type: 'network', gateway_mac: macCanon(r.when.gateway_mac) };
-    if (!when) return null;
-    // "is not" only applies to concrete conditions; else can't be negated.
-    if (r.when.negate && t !== 'none_match') when.negate = true;
-    if (r.when.label) when.label = r.when.label;
-    return { when, do: r.do };
-  }
+  // cleanedRule (automationRules.js) returns the normalized persisted form
+  // of a row, or null while the row's condition is incomplete. persistSet()
+  // is what goes to disk: the latest complete form of every row (cached on
+  // r._committed). A row that turns incomplete mid-edit therefore keeps its
+  // last on-disk value instead of being transiently deleted (and lost on a
+  // crash); a never-completed draft contributes nothing. Rows leave the
+  // persisted set only via removeRule() or by abandoning a draft.
   function persistSet() {
     const out = [];
     for (const r of rules) {
@@ -300,33 +319,17 @@
   // actually disagrees with what we'd persist right now — a self-write
   // compares equal and is ignored; a real external edit differs and reloads.
   //
-  // normRule puts a disk rule and a persistSet() rule through the SAME
-  // normalization (load()'s type fallback, MAC canonicalization), so e.g.
-  // a dash-separated MAC written by `wireguide ctl` never reads as a
-  // difference from our colon form and forces a spurious reload.
-  function normRule(d) {
-    return {
-      do: d?.do || 'connect',
-      type: d?.when?.type || 'network',
-      negate: !!d?.when?.negate && d?.when?.type !== 'none_match',
-      ssid: (d?.when?.ssid || '').trim(),
-      subnet: (d?.when?.subnet || '').trim(),
-      mac: macCanon(d?.when?.gateway_mac || ''),
-      label: d?.when?.label || '',
-    };
-  }
+  // rulesDiffer (automationRules.js) puts a disk rule and a persistSet()
+  // rule through the SAME normalization (load()'s type fallback, MAC
+  // canonicalization, SSID set, medium case), so e.g. a dash-separated MAC
+  // written by `wireguide ctl` never reads as a difference from our colon
+  // form and forces a spurious reload. Positional compare: order is priority.
   function diskDiffers(disk) {
-    const local = persistSet();
-    if (disk.length !== local.length) return true;
-    // Positional compare is intentional: order is rule priority.
-    return disk.some((d, i) => {
-      const a = normRule(d), b = normRule(local[i]);
-      return a.do !== b.do || a.type !== b.type || a.negate !== b.negate || a.ssid !== b.ssid ||
-        a.subnet !== b.subnet || a.mac !== b.mac || a.label !== b.label;
-    });
+    return rulesDiffer(disk, persistSet());
   }
   let cfgChangedUnsub = null;
   onMount(() => {
+    System.Environment().then(env => { if (env?.OS) isWindows = env.OS === 'windows'; }).catch(() => {});
     cfgChangedUnsub = Events.On('config_changed', async () => {
       // Capture the tunnel so a switch mid-await can't compare or load
       // across tunnels; busy() bundles every reason to leave the user's
@@ -340,7 +343,7 @@
         await saveChain; // let an in-flight persist settle before comparing
         const s = await loadSettings(TunnelService);
         if (busy()) return; // state moved while we awaited
-        const disk = ({ ...(s?.automation?.per_tunnel_rules || {}), ...(s?.automation?.per_tunnel_rules_v2 || {}) })[name] || [];
+        const disk = rulesFor(s, name);
         if (!diskDiffers(disk)) return;
       } catch (e) {
         // Can't tell what's on disk — keep the user's in-progress state
@@ -393,10 +396,13 @@
                 <option value="disconnect">{$t('automation.disconnect')}</option>
               </select>
               <span class="am-when">{$t('automation.when')}</span>
-              <select class="am-type" bind:value={rule.when.type} on:change={save} aria-label={$t('automation.condition')}>
+              <select class="am-type" bind:value={rule.when.type} on:change={() => onTypeChange(rule)} aria-label={$t('automation.condition')}>
                 <option value="network">{$t('automation.cond_network')}</option>
                 <option value="subnet">{$t('automation.cond_subnet')}</option>
                 <option value="ssid">{$t('automation.cond_ssid')}</option>
+                {#if !isWindows || rule.when.type === 'medium'}
+                  <option value="medium">{$t('automation.cond_medium')}</option>
+                {/if}
                 <option value="none_match">{$t('automation.cond_none')}</option>
               </select>
               {#if rule.when.type !== 'none_match'}
@@ -423,12 +429,28 @@
                   bind:value={rule.when.subnet}
                   on:input={save} on:change={save} />
               {:else if rule.when.type === 'ssid'}
-                <input
-                  class="am-val"
-                  list="am-ssid-list"
-                  placeholder={currentSSID || $t('automation.ssid_placeholder')}
-                  bind:value={rule.when.ssid}
-                  on:input={save} on:change={save} />
+                <div class="am-val am-tags" title={$t('automation.ssid_tags_hint')}>
+                  {#each rule.when.ssids as tag, j}
+                    <span class="am-tag">{tag}<button class="am-tag-x" type="button"
+                      on:click={() => removeSSID(rule, j)}
+                      aria-label={$t('automation.remove_ssid', { ssid: tag })}><Icon name="x" size={9} strokeWidth={2.5} /></button></span>
+                  {/each}
+                  <input
+                    class="am-tag-input"
+                    list="am-ssid-list"
+                    placeholder={rule.when.ssids.length ? $t('automation.ssid_add_placeholder') : (currentSSID || $t('automation.ssid_placeholder'))}
+                    aria-label={$t('automation.ssid_tags_hint')}
+                    bind:value={rule.when.ssid}
+                    on:input={() => onSSIDInput(rule)}
+                    on:keydown={(e) => onSSIDKeydown(e, rule)}
+                    on:change={() => onSSIDChange(rule)} />
+                </div>
+              {:else if rule.when.type === 'medium'}
+                <select class="am-val am-medium" bind:value={rule.when.medium} on:change={save} aria-label={$t('automation.cond_medium')}
+                  title={isWindows ? $t('automation.medium_windows_note') : ''}>
+                  {#each MEDIUMS as m}<option value={m}>{$t(`automation.medium_${m}`)}</option>{/each}
+                </select>
+                {#if isWindows}<span class="am-note">{$t('automation.medium_windows_note')}</span>{/if}
               {:else}
                 <span class="am-val am-val-none">{$t('automation.cond_none_desc')}</span>
               {/if}
@@ -565,6 +587,28 @@
   .am-when { font: 400 11px var(--font-sans); color: var(--text-muted); }
   .am-val { flex: 1; min-width: 120px; }
   .am-val-none { color: var(--text-muted); border: 0 !important; background: transparent !important; }
+  .am-note { flex-basis: 100%; font: 400 11px/1.4 var(--font-sans); color: var(--text-muted); padding-left: 52px; }
+  .am-tags {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: 7px; padding: 3px 4px;
+  }
+  .am-tags:focus-within { border-color: var(--accent); }
+  .am-tag {
+    display: inline-flex; align-items: center; gap: 2px;
+    font: 500 11px var(--font-sans); color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-radius: 5px; padding: 2px 3px 2px 6px; max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .am-tag-x {
+    display: inline-flex; background: transparent; border: 0; padding: 2px;
+    color: var(--text-muted); cursor: pointer; border-radius: 4px;
+  }
+  .am-tag-x:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-muted) 20%, transparent); }
+  .am-rule .am-tags input.am-tag-input {
+    flex: 1; min-width: 80px; border: 0; background: transparent; padding: 2px 3px; outline: none;
+  }
   .am-rule input.am-invalid {
     border-color: var(--error-text, #ff453a);
     background: color-mix(in srgb, var(--error-text, #ff453a) 8%, var(--bg-primary));

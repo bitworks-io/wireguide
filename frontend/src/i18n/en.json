@@ -113,6 +113,9 @@
   "settings": {
     "automation_backup_recovery": "A backup of earlier automation rules is available in the settings folder. Review it before restoring rules.",
     "automation_backup_error": "Automation rules could not be backed up. Save a copy before installing an older version.",
+    "automation_v3_recoverable": "Rules for {names} use Wi-Fi name lists or connection type and were removed by an older version of WireGuide. A backup is available.",
+    "automation_v3_restore": "Restore rules",
+    "automation_v3_restore_failed": "Could not restore rules.",
     "title": "Settings",
     "general": "General",
     "auto_start": "Launch WireGuide at login",
@@ -276,7 +279,15 @@
     "is_not": "is not",
     "negate": "Match mode",
     "negated_hint": "Apply only when the condition is known and differs from this value. Rule evaluation pauses while the network is being identified.",
-    "remove_rule": "Delete rule"
+    "remove_rule": "Delete rule",
+    "cond_medium": "Connection type",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "Wired (Ethernet)",
+    "medium_tethered": "Tethered (phone USB/Bluetooth)",
+    "ssid_add_placeholder": "Add another…",
+    "ssid_tags_hint": "Wi-Fi names. Press Enter or type a comma to add another; the rule matches any of them.",
+    "remove_ssid": "Remove {ssid}",
+    "medium_windows_note": "Windows can’t detect the connection type, so this rule never applies here."
   },
   "ping_health": {
     "title": "Reconnect when unresponsive",

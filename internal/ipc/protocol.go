@@ -29,9 +29,11 @@ import (
 // CLI status/disconnect/stop even when no GUI or transport is currently up.
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
+// Minor 6 adds AutomationPreviewResponse.Medium (connection type of the primary
+// interface) for connection-type automation rules.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 5
+	ProtocolMinor = 6
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in

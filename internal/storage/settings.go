@@ -255,6 +255,10 @@ func (s *SettingsStore) saveLocked(settings *Settings) error {
 	if err != nil {
 		return err
 	}
+	retireV3Backup, err := s.prepareV3Backup(settings)
+	if err != nil {
+		return err
+	}
 	// Ensure the config directory exists before writing (matches history's
 	// saveLocked). Without this, os.CreateTemp fails when EnsureDirs hasn't
 	// run or the directory was removed out from under us.
@@ -267,6 +271,11 @@ func (s *SettingsStore) saveLocked(settings *Settings) error {
 	if retireBackup {
 		if err := os.Remove(s.path + ".automation-v2-backup"); err != nil && !os.IsNotExist(err) {
 			slog.Warn("could not remove retired automation backup", "error", err)
+		}
+	}
+	if retireV3Backup {
+		if err := os.Remove(s.path + automationV3BackupSuffix); err != nil && !os.IsNotExist(err) {
+			slog.Warn("could not remove retired tier-3 automation backup", "error", err)
 		}
 	}
 	return nil

@@ -44,6 +44,14 @@ export class AutomationBackupStatus {
              */
             this["error"] = undefined;
         }
+        if (!("v3" in $$source)) {
+            /**
+             * V3 reports the separate tier-3 recovery copy (automation_backup_v3.go).
+             * @member
+             * @type {AutomationV3BackupStatus}
+             */
+            this["v3"] = (new AutomationV3BackupStatus());
+        }
 
         Object.assign(this, $$source);
     }
@@ -54,8 +62,65 @@ export class AutomationBackupStatus {
      * @returns {AutomationBackupStatus}
      */
     static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("v3" in $$parsedSource) {
+            $$parsedSource["v3"] = $$createField4_0($$parsedSource["v3"]);
+        }
         return new AutomationBackupStatus(/** @type {Partial<AutomationBackupStatus>} */($$parsedSource));
+    }
+}
+
+/**
+ * AutomationV3BackupStatus describes the tier-3 recovery copy.
+ */
+export class AutomationV3BackupStatus {
+    /**
+     * Creates a new AutomationV3BackupStatus instance.
+     * @param {Partial<AutomationV3BackupStatus>} [$$source = {}] - The source object to create the AutomationV3BackupStatus.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * Available is true when the v3 backup file exists.
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("recoverable" in $$source)) {
+            /**
+             * Recoverable lists the backed-up tunnels that have no rules at all in
+             * config.json, typically because an older version dropped them.
+             * RestoreAutomationV3Backup puts these back.
+             * @member
+             * @type {string[]}
+             */
+            this["recoverable"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationV3BackupStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationV3BackupStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recoverable" in $$parsedSource) {
+            $$parsedSource["recoverable"] = $$createField1_0($$parsedSource["recoverable"]);
+        }
+        return new AutomationV3BackupStatus(/** @type {Partial<AutomationV3BackupStatus>} */($$parsedSource));
     }
 }
 
@@ -312,7 +377,7 @@ export class Settings {
      * @returns {Settings}
      */
     static createFrom($$source = {}) {
-        const $$createField15_0 = $$createType0;
+        const $$createField15_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("wifi_rules" in $$parsedSource) {
             $$parsedSource["wifi_rules"] = $$createField15_0($$parsedSource["wifi_rules"]);
@@ -322,4 +387,6 @@ export class Settings {
 }
 
 // Private type creation functions
-const $$createType0 = automation$0.Rules.createFrom;
+const $$createType0 = AutomationV3BackupStatus.createFrom;
+const $$createType1 = $Create.Array($Create.Any);
+const $$createType2 = automation$0.Rules.createFrom;

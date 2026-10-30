@@ -492,3 +492,106 @@ func TestReconnectPreparationUsesRouteWaitOnlyForWakeAndRoam(t *testing.T) {
 		t.Fatal("wake/roam did not probe the default route")
 	}
 }
+
+func TestNetworkContextMedium(t *testing.T) {
+	p := wifiProbe()
+	p.Medium = automation.MediumWiFi
+	stubNetwork(t, p)
+	h, _ := newAutomationHelper(t, "CafeWiFi")
+	if st := h.currentNetworkState(); st.ctx.Medium != automation.MediumWiFi {
+		t.Fatalf("medium %q", st.ctx.Medium)
+	}
+	p.Iface, p.PrimaryIsWiFi, p.Medium = "en8", false, automation.MediumTethered
+	if st := h.currentNetworkState(); st.ctx.Medium != automation.MediumTethered {
+		t.Fatalf("medium %q", st.ctx.Medium)
+	}
+	// Unknown primary interface (or offline) => unknown medium, whatever the
+	// probe classified.
+	p.Iface = ""
+	if st := h.currentNetworkState(); st.ctx.Medium != "" {
+		t.Fatalf("unknown iface must be unknown medium, got %q", st.ctx.Medium)
+	}
+	p.Gateway = ""
+	if st := h.currentNetworkState(); st.ctx.Medium != "" || st.ctx.Online {
+		t.Fatalf("offline: %+v", st.ctx)
+	}
+}
+
+func TestAutomationPreviewCarriesMedium(t *testing.T) {
+	p := wifiProbe()
+	p.Iface, p.PrimaryIsWiFi, p.Medium = "en5", false, automation.MediumWired
+	stubNetwork(t, p)
+	h, _ := newAutomationHelper(t, "")
+	writeAutomation(t, h, map[string][]automation.Rule{
+		"wg": {{When: automation.Condition{Type: automation.CondMedium, Medium: automation.MediumWired}, Do: automation.ActionConnect}},
+	})
+	out, err := h.handleAutomationPreview(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := out.(ipc.AutomationPreviewResponse)
+	if resp.Medium != automation.MediumWired {
+		t.Fatalf("preview medium %q", resp.Medium)
+	}
+	if len(resp.Tunnels) != 1 || resp.Tunnels[0].Decision != "connect" {
+		t.Fatalf("positive medium rule must decide without settle wait: %+v", resp.Tunnels)
+	}
+}
+
+// A medium rule on an online primary interface whose medium is still
+// unknown (macOS: not yet in the hardware-port listing) arms a short
+// re-evaluation, bounded by mediumRetryBudget; a known medium doesn't.
+func TestUnknownMediumArmsBoundedRetry(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(50_000, 0)}
+
+	p := &netProbeResult{Gateway: "172.20.10.1", Iface: "en8", GatewayMAC: "aa:bb:cc:dd:ee:ff",
+		Subnets: []string{"172.20.10.0/28"}}
+	stubNetwork(t, p)
+	h, _ := newAutomationHelper(t, "")
+	h.done = make(chan struct{})
+	h.mediumRetryForce = true
+	h.mediumRetryClock = clk.Now
+	writeAutomation(t, h, map[string][]automation.Rule{
+		"T": {{When: automation.Condition{Type: automation.CondMedium, Medium: automation.MediumTethered}, Do: automation.ActionDisconnect}},
+	})
+	armed := func() bool {
+		h.settleMu.Lock()
+		defer h.settleMu.Unlock()
+		return h.settleTimer != nil
+	}
+
+	h.reevaluateAutomation("test")
+	if !armed() {
+		t.Fatal("unknown medium with a medium rule must arm a re-evaluation")
+	}
+
+	// Budget exhausted on the same interface: no further retry.
+	h.stopSettleTimer()
+	clk.Advance(mediumRetryBudget + time.Second)
+	h.reevaluateAutomation("test")
+	if armed() {
+		t.Error("retry must stop after mediumRetryBudget")
+	}
+
+	// Known medium: no retry, and the budget resets for the next episode.
+	p.Medium = automation.MediumTethered
+	h.reevaluateAutomation("test")
+	if armed() || h.mediumRetryIface != "" {
+		t.Error("known medium must not retry")
+	}
+	p.Medium = ""
+	h.reevaluateAutomation("test")
+	if !armed() {
+		t.Error("a new unknown episode must retry again")
+	}
+
+	// No medium rule: no retry.
+	h.stopSettleTimer()
+	writeAutomation(t, h, map[string][]automation.Rule{
+		"T": {{When: automation.Condition{Type: automation.CondSSID, SSID: "Cafe"}, Do: automation.ActionConnect}},
+	})
+	h.reevaluateAutomation("test")
+	if armed() {
+		t.Error("no medium rule => no retry")
+	}
+}

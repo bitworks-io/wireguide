@@ -114,6 +114,14 @@ func (s *TunnelService) GetAutomationBackupStatus() storage.AutomationBackupStat
 	return s.settingsStore.AutomationBackupStatus()
 }
 
+// RestoreAutomationV3Backup puts backed-up SSID-list and connection-type
+// rule lists back for tunnels that currently have no rules (an older
+// version drops them when it saves settings). Tunnels with rules are left
+// alone. Returns the restored tunnel names.
+func (s *TunnelService) RestoreAutomationV3Backup() ([]string, error) {
+	return s.settingsStore.RestoreAutomationV3Backup()
+}
+
 func (s *TunnelService) GetSettings() (*storage.Settings, error) {
 	settings, err := s.settingsStore.Load()
 	if err != nil {

@@ -113,6 +113,9 @@
   "settings": {
     "automation_backup_recovery": "以前の自動化ルールのバックアップが設定フォルダーにあります。復元する前に内容を確認してください。",
     "automation_backup_error": "自動化ルールをバックアップできませんでした。以前のバージョンをインストールする前にルールを保存してください。",
+    "automation_v3_recoverable": "{names} のルールは Wi-Fi 名のリストまたは接続の種類を使用しており、以前のバージョンの WireGuide によって削除されました。バックアップがあります。",
+    "automation_v3_restore": "ルールを復元",
+    "automation_v3_restore_failed": "ルールを復元できませんでした。",
     "title": "設定",
     "general": "一般",
     "auto_start": "ログイン時に WireGuide を起動",
@@ -276,7 +279,15 @@
     "is_not": "でない",
     "negate": "一致方法",
     "negated_hint": "条件の値が確認でき、入力値と異なる場合のみ適用します。ネットワークの確認中はルールの評価を保留します。",
-    "remove_rule": "ルールを削除"
+    "remove_rule": "ルールを削除",
+    "cond_medium": "接続の種類",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "有線 (イーサネット)",
+    "medium_tethered": "テザリング (スマートフォン USB/Bluetooth)",
+    "ssid_add_placeholder": "追加…",
+    "ssid_tags_hint": "Wi-Fi 名です。Enter キーまたはカンマで追加でき、いずれかに一致するとルールが適用されます。",
+    "remove_ssid": "{ssid} を削除",
+    "medium_windows_note": "Windows では接続の種類を検出できないため、このルールは適用されません。"
   },
   "ping_health": {
     "title": "応答がない場合に自動再接続",

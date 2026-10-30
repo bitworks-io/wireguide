@@ -518,6 +518,19 @@ export function RenameTunnel(oldName, newName) {
 }
 
 /**
+ * RestoreAutomationV3Backup puts backed-up SSID-list and connection-type
+ * rule lists back for tunnels that currently have no rules (an older
+ * version drops them when it saves settings). Tunnels with rules are left
+ * alone. Returns the restored tunnel names.
+ * @returns {$CancellablePromise<string[]>}
+ */
+export function RestoreAutomationV3Backup() {
+    return $Call.ByID(1446401055).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType11($result);
+    }));
+}
+
+/**
  * RunDNSLeakTest performs a DNS leak test using the currently active tunnel's
  * DNS servers as the expected (VPN) resolvers. If no tunnel is connected, the
  * expected set is empty — all detected resolvers will be flagged as leaks.
