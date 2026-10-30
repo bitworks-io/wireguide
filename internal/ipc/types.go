@@ -35,7 +35,7 @@ type HelperInfoResponse struct {
 	GUIAttached      bool   `json:"gui_attached"`
 }
 
-// ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 7).
+// ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 12).
 type ResetDNSRequest struct {
 	// Force disconnects every connected, wanted or pending-restore tunnel
 	// first, as an explicit user Off.
@@ -219,7 +219,7 @@ const (
 )
 
 // AutomationEventPayload is broadcast as EventAutomation (protocol minor
-// >= 6). RuleIndex is the deciding rule's position in the tunnel's rule
+// >= 7). RuleIndex is the deciding rule's position in the tunnel's rule
 // list, -1 when no single rule applies (a manual latch). RuleText is an
 // English description of that rule ("SSID is not Home"); GUIs localise
 // from the rule itself when they can. Error is set when an executed
