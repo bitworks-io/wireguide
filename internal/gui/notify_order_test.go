@@ -273,6 +273,46 @@ func TestNotifierReconnectFlapSilent(t *testing.T) {
 	}
 }
 
+// A slow reconnect (the tunnel comes back after the up hold-back but inside
+// the down hold-back) announces nothing.
+func TestNotifierSlowReconnectSilent(t *testing.T) {
+	n, c := testNotifier()
+	n.pendingDelay = 30 * time.Millisecond
+	n.downPendingDelay = 2 * time.Second
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)                    // down, held back for the long delay
+	time.Sleep(150 * time.Millisecond) // well past pendingDelay
+	if got := c.count(); got != 0 {
+		t.Fatalf("down must still be held back, got %v", c.all())
+	}
+	n.onStatus([]string{"Office"}) // back up
+	if got := pendingCount(n); got != 0 {
+		t.Fatalf("reconnect must leave nothing pending, pending=%d", got)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := c.count(); got != 0 {
+		t.Fatalf("slow reconnect must be silent, got %v", c.all())
+	}
+}
+
+// A tunnel that stays down is announced once, after the down hold-back.
+func TestNotifierDownWithoutUpAnnouncesOnce(t *testing.T) {
+	n, c := testNotifier()
+	n.pendingDelay = 30 * time.Millisecond
+	n.downPendingDelay = 300 * time.Millisecond
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)
+	time.Sleep(100 * time.Millisecond)
+	if got := c.count(); got != 0 {
+		t.Fatalf("down must not be announced before its delay, got %v", c.all())
+	}
+	waitForCount(t, c, 1)
+	time.Sleep(100 * time.Millisecond)
+	if msgs := c.all(); len(msgs) != 1 || msgs[0] != "“Office” disconnected outside the app." {
+		t.Fatalf("got %v", msgs)
+	}
+}
+
 // Once the held-back message has gone out, the reverse change is a new
 // change and is announced.
 func TestNotifierReverseAfterDeliveryNotifies(t *testing.T) {

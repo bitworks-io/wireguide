@@ -20,6 +20,15 @@ import (
 // event stream are independent, so either may arrive first.
 const pendingDelay = 1500 * time.Millisecond
 
+// downPendingDelay is the longer hold-back for a "disconnected outside the
+// app" message. A helper-driven reconnect (wake, network change, health
+// check) tears the tunnel down and rebuilds it, and the tunnel is absent from
+// the connected set while it is connecting, which usually outlasts
+// pendingDelay (endpoint resolution, routes, DNS). Holding the down message
+// back this long lets the matching up cancel both; a tunnel that stays down
+// is announced, just later.
+const downPendingDelay = 10 * time.Second
+
 // claimTTL is how long an auto_connected / forced_disconnect event claims
 // its tunnel: a status-diff notification for the same change inside this
 // window is skipped, whichever of the status tick and the event arrived
@@ -64,8 +73,11 @@ type notifier struct {
 	pending  map[string]*time.Timer // "up|name" / "down|name" -> hold-back timer
 	claimed  map[string]time.Time   // "up|name" / "down|name" -> when an event claimed it
 	quitting bool
-	// pendingDelay overrides the package default (tests).
-	pendingDelay time.Duration
+	// pendingDelay and downPendingDelay override the package defaults
+	// (tests). A zero downPendingDelay falls back to pendingDelay when that
+	// is set, so one override covers both directions.
+	pendingDelay     time.Duration
+	downPendingDelay time.Duration
 
 	// post delivers one notification; deliver in production, a stub in tests.
 	post func(title, body string)
@@ -213,8 +225,9 @@ func (n *notifier) onStatus(connected []string) {
 	}
 }
 
-// schedule holds a status-diff notification back for pendingDelay so a
-// helper event can claim the change first.
+// schedule holds a status-diff notification back (pendingDelay for up,
+// downPendingDelay for down) so a helper event can claim the change first and
+// a reconnect can cancel it.
 func (n *notifier) schedule(key string, kind msgKind, tunnel string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -224,7 +237,7 @@ func (n *notifier) schedule(key string, kind msgKind, tunnel string) {
 	if old, ok := n.pending[key]; ok {
 		old.Stop()
 	}
-	n.pending[key] = time.AfterFunc(n.delay(), func() {
+	n.pending[key] = time.AfterFunc(n.delay(kind), func() {
 		n.mu.Lock()
 		delete(n.pending, key)
 		skip := n.quitting || n.claimedLocked(key, time.Now())
@@ -236,7 +249,16 @@ func (n *notifier) schedule(key string, kind msgKind, tunnel string) {
 	})
 }
 
-func (n *notifier) delay() time.Duration {
+func (n *notifier) delay(kind msgKind) time.Duration {
+	if kind == msgDown {
+		if n.downPendingDelay > 0 {
+			return n.downPendingDelay
+		}
+		if n.pendingDelay > 0 {
+			return n.pendingDelay
+		}
+		return downPendingDelay
+	}
 	if n.pendingDelay > 0 {
 		return n.pendingDelay
 	}
