@@ -29,6 +29,7 @@ import (
 // CLI status/disconnect/stop even when no GUI or transport is currently up.
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
+// Minor 6 adds AutomationTunnelDecision.Blocked (loop-watchdog block) to Automation.Preview.
 // Minor 8 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
 // for the diagnostics bundle); an older helper answers method-not-found and
 // the bundle records the section as unavailable.

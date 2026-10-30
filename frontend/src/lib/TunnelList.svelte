@@ -6,6 +6,8 @@
   import { compactList, listSort, listActiveOnTop, saveListPrefs } from '../stores/ui.js';
   import { t } from '../i18n/index.js';
   import { dnsChip } from './dns-mode.js';
+  import { automationPreview } from '../stores/automation.js';
+  import { verdictFor, verdictText, verdictTone } from './automationLine.js';
 
   const dispatch = createEventDispatcher();
   let search = '';
@@ -136,6 +138,13 @@
             {#if dnsChip($t, tun.dns_mode, tun.dns_domains || [])}
               {@const chip = dnsChip($t, tun.dns_mode, tun.dns_domains || [])}
               <span class="tunnel-dns" title={chip.hint}>{chip.text}</span>
+            {/if}
+            {#if verdictFor($automationPreview, tun.name)}
+              {@const av = verdictFor($automationPreview, tun.name)}
+              {@const line = verdictText($t, av)}
+              {#if line}
+                <span class="tunnel-auto tunnel-auto-{verdictTone(av)}" title={line}>{line}</span>
+              {/if}
             {/if}
           </div>
         </button>
@@ -418,15 +427,19 @@
     padding: 4px 10px;
     margin-bottom: 1px;
   }
-  .tunnel-dns {
+  .tunnel-dns,
+  .tunnel-auto {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font: 400 11px/14px var(--font-sans);
     color: var(--text-muted);
   }
+  .tunnel-auto-warn { color: var(--orange, #FF9500); }
+
   .list-items.compact .tunnel-meta,
-  .list-items.compact .tunnel-dns {
+  .list-items.compact .tunnel-dns,
+  .list-items.compact .tunnel-auto {
     display: none;
   }
   .list-items.compact .tunnel-item.connected::before {
