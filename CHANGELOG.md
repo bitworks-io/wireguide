@@ -10,6 +10,7 @@ All notable changes to WireGuide will be documented in this file.
 
 ### Changed
 - The raw "Wi-Fi: name" toast on every SSID change is replaced by the strip.
+- The strip stops polling while the window is hidden to the tray and refreshes as soon as it is shown again.
 
 ## [0.6.1] - 2026-10-26
 

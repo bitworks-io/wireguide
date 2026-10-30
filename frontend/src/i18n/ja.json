@@ -282,7 +282,7 @@
     "remove_rule": "ルールを削除",
     "why": {
       "title": "自動化の状態",
-      "net_ssid": "ネットワーク: Wi-Fi: {ssid}",
+      "net_ssid": "ネットワーク: {ssid} (Wi-Fi)",
       "net_unknown": "Wi-Fi 名が不明 — 位置情報サービスがオフの可能性があります。「でない」ルールは保留されます",
       "net_no_wifi": "ネットワーク: Wi-Fi なし (イーサネット/テザリング)",
       "net_offline": "ネットワーク: オフライン",
