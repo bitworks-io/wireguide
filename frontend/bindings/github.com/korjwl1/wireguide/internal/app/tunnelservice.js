@@ -474,8 +474,14 @@ export function ReadFile(path) {
  *     both user-initiated Connect and helper-driven auto-reconnect / wifi
  *     rules engine / sleep-wake)
  *   - closes a session for any tracked tunnel that has disappeared (using
- *     cached rx/tx + cached reason from lastKnownStats; falls back to
- *     disappearReason — defaults to "reconnect")
+ *     cached rx/tx from lastKnownStats). The end reason is, in order: the
+ *     helper's recorded reason (endReasons, from the status's
+ *     recent_disconnects), the cached "user" hint, then disappearReason —
+ *     defaults to "reconnect"
+ * 
+ * New sessions record the helper's start reason (startReasons, from each
+ * tunnel's last_change_reason) and the GUI's current Wi-Fi SSID. All three
+ * are empty with an older helper / off Wi-Fi.
  * 
  * Stats cache is always refreshed for currently-active tunnels so disconnect
  * closes have ≤ 1 status-event-tick stale counters. Reason hints set by
@@ -490,10 +496,13 @@ export function ReadFile(path) {
  * @param {{ [_ in string]?: number }} rxByTunnel
  * @param {{ [_ in string]?: number }} txByTunnel
  * @param {string} disappearReason
+ * @param {{ [_ in string]?: string }} startReasons
+ * @param {{ [_ in string]?: string }} endReasons
+ * @param {string} ssid
  * @returns {$CancellablePromise<void>}
  */
-export function ReconcileHistoryFromStatus(activeNames, rxByTunnel, txByTunnel, disappearReason) {
-    return $Call.ByID(1482043575, activeNames, rxByTunnel, txByTunnel, disappearReason);
+export function ReconcileHistoryFromStatus(activeNames, rxByTunnel, txByTunnel, disappearReason, startReasons, endReasons, ssid) {
+    return $Call.ByID(1482043575, activeNames, rxByTunnel, txByTunnel, disappearReason, startReasons, endReasons, ssid);
 }
 
 /**

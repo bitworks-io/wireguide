@@ -382,45 +382,52 @@ func (m *Monitor) monitorLoop() {
 			if !m.manager.IsConnected() {
 				continue
 			}
-			// Check EACH tunnel's handshake individually. If a specific
-			// tunnel is stale, disconnect and reconnect only THAT tunnel.
-			statuses := m.manager.AllStatuses()
-			for _, status := range statuses {
-				if status == nil || status.LastHandshakeTime.IsZero() {
-					continue
-				}
-				if status.State != domain.StateConnected {
-					continue
-				}
-				age := time.Since(status.LastHandshakeTime)
-				if age > handshakeStaleThreshold {
-					tunnelName := status.TunnelName
-					slog.Warn("handshake stale, triggering per-tunnel reconnect",
-						"tunnel", tunnelName,
-						"last_handshake_age", age.Round(time.Second),
-						"threshold", handshakeStaleThreshold)
-					m.triggerReconnectTunnel(tunnelName)
-				}
-			}
+			m.checkStaleHandshakes(handshakeStaleThreshold)
 		}
 	}
 }
 
-func (m *Monitor) triggerReconnect() {
-	// Reconnect all tunnels — used by sleep/wake detection.
-	m.triggerReconnectTunnel("")
-}
-
-// ReconnectTunnelIfIdle lets an additional health signal share the existing
-// retry/backoff state without resetting an in-flight retry.
-func (m *Monitor) ReconnectTunnelIfIdle(tunnelName string, stillNeeded func() bool) {
-	if tunnelName != "" {
-		m.startReconnectTunnel(tunnelName, true, stillNeeded)
+// checkStaleHandshakes checks EACH tunnel's handshake individually. If a
+// specific tunnel is stale, it disconnects and reconnects only THAT tunnel,
+// tagged as a health-check reconnect.
+func (m *Monitor) checkStaleHandshakes(threshold time.Duration) {
+	statuses := m.manager.AllStatuses()
+	for _, status := range statuses {
+		if status == nil || status.LastHandshakeTime.IsZero() {
+			continue
+		}
+		if status.State != domain.StateConnected {
+			continue
+		}
+		age := time.Since(status.LastHandshakeTime)
+		if age > threshold {
+			tunnelName := status.TunnelName
+			slog.Warn("handshake stale, triggering per-tunnel reconnect",
+				"tunnel", tunnelName,
+				"last_handshake_age", age.Round(time.Second),
+				"threshold", threshold)
+			m.triggerReconnectTunnel(tunnelName, TriggerHealthCheck)
+		}
 	}
 }
 
-func (m *Monitor) triggerReconnectTunnel(tunnelName string) {
-	m.startReconnectTunnel(tunnelName, false, nil)
+// triggerReconnect reconnects all tunnels — used by sleep/wake and
+// primary-interface change detection. trigger says which.
+func (m *Monitor) triggerReconnect(trigger Trigger) {
+	m.triggerReconnectTunnel("", trigger)
+}
+
+// ReconnectTunnelIfIdle lets an additional health signal share the existing
+// retry/backoff state without resetting an in-flight retry. The retry is
+// tagged as a health-check reconnect.
+func (m *Monitor) ReconnectTunnelIfIdle(tunnelName string, stillNeeded func() bool) {
+	if tunnelName != "" {
+		m.startReconnectTunnel(tunnelName, TriggerHealthCheck, true, stillNeeded)
+	}
+}
+
+func (m *Monitor) triggerReconnectTunnel(tunnelName string, trigger Trigger) {
+	m.startReconnectTunnel(tunnelName, trigger, false, nil)
 }
 
 // CancelInvalidRetries also runs while tunnels are disconnected or in backoff.
@@ -457,7 +464,10 @@ func (m *Monitor) cancelInvalidRetry(name string, entry *retryState) bool {
 	return true
 }
 
-func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool) {
+// startReconnectTunnel starts (or replaces) the retry for tunnelName. The
+// retry's context carries trigger (WithTrigger) so reconnectFn can record
+// why the tunnel came back up.
+func (m *Monitor) startReconnectTunnel(tunnelName string, trigger Trigger, onlyIfIdle bool, stillNeeded func() bool) {
 	m.mu.Lock()
 	if !m.running || (onlyIfIdle && (m.retries[tunnelName] != nil || m.retries[""] != nil)) {
 		m.mu.Unlock()
@@ -482,7 +492,7 @@ func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, still
 
 	// Create new context + retry slot under the lock so two concurrent
 	// triggers for the same key can't both spawn goroutines.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithTrigger(context.Background(), trigger))
 	entry := &retryState{
 		cancel:      cancel,
 		done:        make(chan struct{}),
@@ -784,12 +794,12 @@ func (m *Monitor) triggerLoop() {
 		case <-wakeCh:
 			slog.Info("system wake detected, triggering reconnect")
 			if m.shouldTriggerReconnect() {
-				m.triggerReconnect()
+				m.triggerReconnect(TriggerWake)
 			}
 		case <-netCh:
 			slog.Info("primary interface change detected, triggering reconnect")
 			if m.shouldTriggerReconnect() {
-				m.triggerReconnect()
+				m.triggerReconnect(TriggerNetworkChange)
 			}
 		}
 	}

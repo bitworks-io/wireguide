@@ -228,7 +228,12 @@ func (h *Helper) handleConnect(params json.RawMessage) (interface{}, error) {
 		}
 	}
 
+	// Recorded before the connect (the GUI opens the history session on the
+	// first Connecting tick); a failure, including already-connected,
+	// restores the previous reason.
+	undoReason := h.beginConnectReason(req.Config.Name, domain.ChangeReasonUser)
 	if err := h.doConnectWithOwnerHeld(req.Config, nil); err != nil {
+		undoReason()
 		return nil, err
 	}
 	h.clearWatchdogBlockHeld(req.Config.Name)

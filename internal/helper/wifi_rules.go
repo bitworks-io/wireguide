@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/automation"
+	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 )
@@ -296,8 +297,11 @@ func (h *Helper) automationConnect(name, reason string, ctx automation.NetworkCo
 		}
 		return
 	}
+	undoReason := h.beginConnectReason(name, domain.ChangeReasonAutomation)
 	err = h.doConnectWithOwnerHeld(cfg, &ssid)
-	if err == nil {
+	if err != nil {
+		undoReason()
+	} else {
 		// Same firewall follow-up a manual connect does — otherwise a
 		// headless automation connect gets no DNS protection and, if the
 		// kill switch is already on, its endpoints are never permitted so
@@ -330,7 +334,7 @@ func (h *Helper) disconnectAutoManaged(name string) (latched bool, err error) {
 	if _, latched := h.manualLatchFor(name); latched {
 		return true, nil
 	}
-	return false, h.teardownTunnelHeld(name, "rule-driven disconnect, no GUI attached")
+	return false, h.teardownTunnelHeld(name, domain.ChangeReasonAutomation, "rule-driven disconnect, no GUI attached")
 }
 
 // teardownTunnelHeld disconnects a tunnel the user didn't turn off by hand
@@ -343,7 +347,9 @@ func (h *Helper) disconnectAutoManaged(name string) (latched bool, err error) {
 // to disconnect a tunnel already gone, and the issue #44 restore would bring
 // it back after a helper restart. Caller holds connectMu. Returns the
 // manager's DisconnectTunnel error (logged here; the cleanup runs anyway).
-func (h *Helper) teardownTunnelHeld(name, shutdownReason string) error {
+// changeReason is recorded as the tunnel's end reason before the teardown
+// (recent_disconnects) and withdrawn if the tunnel is still up afterwards.
+func (h *Helper) teardownTunnelHeld(name, changeReason, shutdownReason string) error {
 	if h.monitor != nil {
 		h.monitor.CancelRetryFor(name)
 	}
@@ -360,9 +366,13 @@ func (h *Helper) teardownTunnelHeld(name, shutdownReason string) error {
 			}
 		}
 	}
+	undoReason := h.beginDisconnectReason(name, changeReason)
 	disconnectErr := h.manager.DisconnectTunnel(name)
 	if disconnectErr != nil {
 		slog.Warn("tunnel teardown failed", "tunnel", name, "error", disconnectErr)
+		if h.tunnelListed(name) {
+			undoReason()
+		}
 	}
 	if iface != "" {
 		if err := h.removeKillSwitchPermit(iface, time.Now()); err != nil {

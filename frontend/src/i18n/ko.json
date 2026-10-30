@@ -50,7 +50,21 @@
     "reason_reconnect": "재연결됨",
     "reason_app_quit": "앱 종료",
     "reason_health_check": "자동 복구",
-    "reason_error": "오류"
+    "reason_error": "오류",
+    "started_by": "시작 원인",
+    "ssid": "Wi-Fi 네트워크",
+    "reason_automation": "자동화로 연결 해제됨",
+    "reason_wake": "깨어난 후 재연결됨",
+    "reason_network_change": "네트워크 변경 후 재연결됨",
+    "reason_recovery": "복구로 초기화됨",
+    "reason_watchdog": "라우팅 루프 보호로 중지됨",
+    "start_user": "사용자",
+    "start_automation": "자동화",
+    "start_wake": "잠자기 해제",
+    "start_network_change": "네트워크 변경",
+    "start_health_check": "상태 점검",
+    "start_reconnect": "재연결",
+    "start_recovery": "복구"
   },
   "tunnel": {
     "list_title": "터널",

@@ -50,7 +50,21 @@
     "reason_reconnect": "Reconnected",
     "reason_app_quit": "App quit",
     "reason_health_check": "Auto-recovered",
-    "reason_error": "Error"
+    "reason_error": "Error",
+    "started_by": "Started by",
+    "ssid": "Wi-Fi network",
+    "reason_automation": "Disconnected by automation",
+    "reason_wake": "Reconnected after wake",
+    "reason_network_change": "Reconnected after network change",
+    "reason_recovery": "Reset by recovery",
+    "reason_watchdog": "Stopped by routing-loop protection",
+    "start_user": "You",
+    "start_automation": "Automation",
+    "start_wake": "Wake from sleep",
+    "start_network_change": "Network change",
+    "start_health_check": "Health check",
+    "start_reconnect": "Reconnect",
+    "start_recovery": "Recovery"
   },
   "tunnel": {
     "list_title": "Tunnels",

@@ -101,8 +101,14 @@ func (s *TunnelService) snapshotActiveStats(wantName string) (string, int64, int
 //     both user-initiated Connect and helper-driven auto-reconnect / wifi
 //     rules engine / sleep-wake)
 //   - closes a session for any tracked tunnel that has disappeared (using
-//     cached rx/tx + cached reason from lastKnownStats; falls back to
-//     disappearReason — defaults to "reconnect")
+//     cached rx/tx from lastKnownStats). The end reason is, in order: the
+//     helper's recorded reason (endReasons, from the status's
+//     recent_disconnects), the cached "user" hint, then disappearReason —
+//     defaults to "reconnect"
+//
+// New sessions record the helper's start reason (startReasons, from each
+// tunnel's last_change_reason) and the GUI's current Wi-Fi SSID. All three
+// are empty with an older helper / off Wi-Fi.
 //
 // Stats cache is always refreshed for currently-active tunnels so disconnect
 // closes have ≤ 1 status-event-tick stale counters. Reason hints set by
@@ -113,7 +119,7 @@ func (s *TunnelService) snapshotActiveStats(wantName string) (string, int64, int
 // (the steady-state case at 1 Hz), we skip the activeSessions Range and the
 // open-session loop. The stats cache still gets updated so the eventual
 // disappear-close uses fresh counters.
-func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTunnel, txByTunnel map[string]int64, disappearReason string) {
+func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTunnel, txByTunnel map[string]int64, disappearReason string, startReasons, endReasons map[string]string, ssid string) {
 	if s.historyStore == nil {
 		return
 	}
@@ -176,7 +182,8 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 			reason := disappearReason
 			// Prefer cached last-seen counters and reason — the current event's
 			// maps don't include this tunnel since it just disappeared, and a
-			// pre-set reason from user Disconnect overrides the default.
+			// pre-set reason from user Disconnect overrides the default. The
+			// helper's own record of why the tunnel went down wins over both.
 			if cached, ok := s.lastKnownStats.LoadAndDelete(name); ok {
 				if st, ok := cached.(lastKnownTunnelStats); ok {
 					rx = st.rx
@@ -185,6 +192,9 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 						reason = st.reason
 					}
 				}
+			}
+			if r := endReasons[name]; r != "" {
+				reason = r
 			}
 			s.historyStore.RecordDisconnect(id, rx, tx, reason)
 		}
@@ -199,7 +209,7 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		if _, exists := s.activeSessions.Load(name); exists {
 			continue
 		}
-		id := s.historyStore.RecordConnect(name)
+		id := s.historyStore.RecordConnectDetail(name, startReasons[name], ssid)
 		s.activeSessions.Store(name, id)
 	}
 }

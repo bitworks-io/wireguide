@@ -7,6 +7,8 @@ All notable changes to WireGuide will be documented in this file.
 ### Added
 - **Automation decision events** - the helper now broadcasts `event.automation` (IPC protocol 1.6) for every executed rule-driven connect or disconnect, including failures, and for held, latched and LAN-overlap-skipped decisions when they change for a tunnel. Each event names the deciding rule, the SSID and whether the network had settled. The GUI forwards it as the `automation_event` frontend event; `event.automation_skipped` is unchanged.
 - **Per-tunnel rules log** - `automation: rules loaded` is logged once per tunnel whenever that tunnel's rules change.
+- **Connection change reasons** - the helper status now says why each tunnel came up (`last_change_reason`: user, automation, wake, network change, health check, reconnect, recovery) and, for about a minute, why a tunnel went down (`recent_disconnects`, including the routing-loop watchdog). Additive within IPC protocol 1.6.
+- **History start reason and Wi-Fi network** - connection history records what started each session and the Wi-Fi network it started on, and shows the helper's own reason for how a session ended (for example an automation rule or the routing-loop watchdog) instead of a generic "Reconnected".
 
 ### Fixed
 - **Connection history byte totals** - sessions no longer record 0 B (or only the bytes since the last reconnect) when a tunnel briefly reports zeroed counters while connecting or disconnecting, or when a reconnect restarts the counters.

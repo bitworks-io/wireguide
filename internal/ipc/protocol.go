@@ -30,7 +30,9 @@ import (
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
 // Minor 6 adds event.automation (per-tunnel Automation decisions). The older
-// event.automation_skipped is still sent alongside it.
+// event.automation_skipped is still sent alongside it. Minor 6 also adds the
+// status fields last_change_reason / last_change_at (why a tunnel came up) and
+// the top-level recent_disconnects map (why a tunnel recently went down).
 const (
 	ProtocolMajor = 1
 	ProtocolMinor = 6

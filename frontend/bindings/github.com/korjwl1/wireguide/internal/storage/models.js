@@ -129,6 +129,25 @@ export class Session {
              */
             this["disconnect_reason"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * StartReason says what brought the session up ("user", "automation",
+             * "wake", "network_change", "health_check", "reconnect", "recovery");
+             * empty when unknown (older helper, older record). SSID is the Wi-Fi
+             * network the GUI saw when the session started ("" when unknown or not
+             * on Wi-Fi).
+             * @member
+             * @type {string | undefined}
+             */
+            this["start_reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ssid"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
