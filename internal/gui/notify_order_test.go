@@ -75,9 +75,9 @@ func TestNotifierOutsideConnectAndDisconnect(t *testing.T) {
 	n, c := testNotifier()
 	n.onStatus(nil)
 	n.onStatus([]string{"Office"})
-	time.Sleep(100 * time.Millisecond)
+	waitForCount(t, c, 1)
 	n.onStatus(nil)
-	time.Sleep(100 * time.Millisecond)
+	waitForCount(t, c, 2)
 	msgs := c.all()
 	if len(msgs) != 2 || msgs[0] != "“Office” connected outside the app." || msgs[1] != "“Office” disconnected outside the app." {
 		t.Fatalf("got %v", msgs)
@@ -197,7 +197,7 @@ func TestNotifierClaimExpires(t *testing.T) {
 func TestNotifierCriticalError(t *testing.T) {
 	n, c := testNotifier()
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
-	time.Sleep(50 * time.Millisecond)
+	waitForCount(t, c, 1)
 	if msgs := c.all(); len(msgs) != 1 {
 		t.Fatalf("got %v", msgs)
 	}
@@ -234,4 +234,111 @@ func TestNilNotifierSafe(t *testing.T) {
 	n.onAutomationEvent(ipc.AutomationEventPayload{Tunnel: "a", Action: ipc.AutomationActionConnect})
 	n.reset()
 	n.stop()
+}
+
+// pendingCount reports how many status-diff messages are held back.
+func pendingCount(n *notifier) int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.pending)
+}
+
+// A reconnect (wake, health check) takes the tunnel down and back up inside
+// the hold-back window: neither direction is announced. The delay is long
+// enough that no timer can fire during the test, so the assertions do not
+// depend on sleeps.
+func TestNotifierReconnectFlapSilent(t *testing.T) {
+	for _, startUp := range []bool{true, false} {
+		n, c := testNotifier()
+		n.pendingDelay = time.Hour
+		if startUp {
+			n.onStatus([]string{"Office"}) // baseline: up
+			n.onStatus(nil)                // down, held back
+			if got := pendingCount(n); got != 1 {
+				t.Fatalf("startUp=%v: down must be held back, pending=%d", startUp, got)
+			}
+			n.onStatus([]string{"Office"}) // back up
+		} else {
+			n.onStatus(nil)                // baseline: down
+			n.onStatus([]string{"Office"}) // up, held back
+			if got := pendingCount(n); got != 1 {
+				t.Fatalf("startUp=%v: up must be held back, pending=%d", startUp, got)
+			}
+			n.onStatus(nil) // down again
+		}
+		if got := pendingCount(n); got != 0 {
+			t.Fatalf("startUp=%v: a reversed change must leave nothing pending, pending=%d", startUp, got)
+		}
+		if got := c.count(); got != 0 {
+			t.Fatalf("startUp=%v: a reversed change must be silent, got %v", startUp, c.all())
+		}
+	}
+}
+
+// A slow reconnect (the tunnel comes back after the up hold-back but inside
+// the down hold-back) announces nothing.
+func TestNotifierSlowReconnectSilent(t *testing.T) {
+	n, c := testNotifier()
+	n.pendingDelay = 30 * time.Millisecond
+	n.downPendingDelay = 2 * time.Second
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)                    // down, held back for the long delay
+	time.Sleep(150 * time.Millisecond) // well past pendingDelay
+	if got := c.count(); got != 0 {
+		t.Fatalf("down must still be held back, got %v", c.all())
+	}
+	n.onStatus([]string{"Office"}) // back up
+	if got := pendingCount(n); got != 0 {
+		t.Fatalf("reconnect must leave nothing pending, pending=%d", got)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if got := c.count(); got != 0 {
+		t.Fatalf("slow reconnect must be silent, got %v", c.all())
+	}
+}
+
+// A tunnel that stays down is announced once, after the down hold-back.
+func TestNotifierDownWithoutUpAnnouncesOnce(t *testing.T) {
+	n, c := testNotifier()
+	n.pendingDelay = 30 * time.Millisecond
+	n.downPendingDelay = 300 * time.Millisecond
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)
+	time.Sleep(100 * time.Millisecond)
+	if got := c.count(); got != 0 {
+		t.Fatalf("down must not be announced before its delay, got %v", c.all())
+	}
+	waitForCount(t, c, 1)
+	time.Sleep(100 * time.Millisecond)
+	if msgs := c.all(); len(msgs) != 1 || msgs[0] != "“Office” disconnected outside the app." {
+		t.Fatalf("got %v", msgs)
+	}
+}
+
+// Once the held-back message has gone out, the reverse change is a new
+// change and is announced.
+func TestNotifierReverseAfterDeliveryNotifies(t *testing.T) {
+	n, c := testNotifier()
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)
+	waitForCount(t, c, 1)
+	n.onStatus([]string{"Office"})
+	waitForCount(t, c, 2)
+	msgs := c.all()
+	if msgs[0] != "“Office” disconnected outside the app." || msgs[1] != "“Office” connected outside the app." {
+		t.Fatalf("got %v", msgs)
+	}
+}
+
+// waitForCount waits until c holds want messages (failing after a generous
+// deadline) instead of sleeping for a fixed time.
+func waitForCount(t *testing.T, c *captured, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for c.count() < want {
+		if time.Now().After(deadline) {
+			t.Fatalf("want %d notifications, got %v", want, c.all())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
