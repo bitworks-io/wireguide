@@ -2,6 +2,15 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Automation status strip** - the Automation editor now shows the network the engine sees and, per tunnel, what the rules decided and why (connect, stay off, on hold, paused by a manual override, blocked by the routing-loop watchdog, or skipped because AllowedIPs overlap the LAN). The same one-liner appears as a chip on the tunnel detail card and tunnel list rows. The helper's `Automation.Preview` reports `blocked` for watchdog-blocked tunnels (IPC protocol 1.6).
+- **Precise macOS Location Services state** - the Wi-Fi permission banner and the strip now say whether Location Services is denied, restricted or not yet allowed instead of guessing.
+
+### Changed
+- The raw "Wi-Fi: name" toast on every SSID change is replaced by the strip.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added

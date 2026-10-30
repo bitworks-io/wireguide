@@ -32,6 +32,28 @@ void cwRequestLocationAuthorization(void) {
     });
 }
 
+// cwLocationAuthorizationStatus reports this process's Location Services
+// authorization WITHOUT requesting anything: 0 not determined, 1 restricted,
+// 2 denied, 3 authorized (always), 4 authorized (when in use), -1 unknown
+// (macOS < 11, where the instance property does not exist). One manager is
+// created lazily and reused: the GUI polls this, and a per-call alloc/init
+// would leak (this file is not built with ARC). No delegate is attached, so
+// the manager needs no run loop.
+static CLLocationManager *gStatusManager = nil;
+int cwLocationAuthorizationStatus(void) {
+    if (@available(macOS 11.0, *)) {
+        @synchronized([WGLocationDelegate class]) {
+            if (gStatusManager == nil) {
+                @autoreleasepool {
+                    gStatusManager = [[CLLocationManager alloc] init];
+                }
+            }
+            return (int)gStatusManager.authorizationStatus;
+        }
+    }
+    return -1;
+}
+
 const char* cwCurrentSSID(void) {
     CWWiFiClient *client = [CWWiFiClient sharedWiFiClient];
     CWInterface *iface = [client interface];
