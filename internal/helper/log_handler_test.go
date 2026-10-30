@@ -3,6 +3,7 @@ package helper
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -167,5 +168,26 @@ func TestBroadcastHandlerWarningRepeatsAfterSummaryFlush(t *testing.T) {
 	l.Warn("[wg:utun4] Failed to send: network is unreachable")
 	if n := strings.Count(buf.String(), "Failed to send"); n != 1 {
 		t.Errorf("real warning logged %d times right after the summary, want 1:\n%s", n, buf.String())
+	}
+}
+
+// Handler output must go through the rotating writer so the live file stays
+// bounded.
+func TestBroadcastHandlerWritesThroughRotatingLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "helper.log")
+	w, err := logrotate.Open(path, 2048, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	l := slog.New(newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, w))
+	for i := 0; i < 100; i++ {
+		l.Info("a line long enough to fill the rotation budget quickly", "i", i)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("expected a rotated sibling: %v", err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Size() > 2048 {
+		t.Errorf("live log missing or over the cap: %v", err)
 	}
 }
