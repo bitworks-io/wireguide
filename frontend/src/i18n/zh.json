@@ -95,7 +95,12 @@
     "sort_added_old": "最早添加优先",
     "rename": "重命名",
     "clear_search": "清除搜索",
-    "resize_hint": "拖动以调整大小 · 双击以恢复默认宽度"
+    "resize_hint": "拖动以调整大小 · 双击以恢复默认宽度",
+    "health_check_override": "握手健康检查",
+    "health_check_inherit": "跟随设置",
+    "health_check_on": "开启",
+    "health_check_off": "关闭",
+    "health_check_override_hint": "仅为此隧道覆盖设置中的健康检查。握手超过 180 秒未更新时会重新连接隧道。睡眠或离线期间的时间不计入。"
   },
   "import": {
     "zip_result_title": "导入结果",

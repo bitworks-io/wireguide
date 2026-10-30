@@ -141,6 +141,12 @@ type Monitor struct {
 
 	// now is the clock (tests inject a fake). nil means time.Now.
 	now func() time.Time
+
+	// healthCheckFilter, when set, decides per tunnel whether the handshake
+	// check applies, given the global setting. With a filter installed the
+	// check loop runs even when the global setting is off, so a tunnel
+	// overriding it to "on" is still watched.
+	healthCheckFilter func(name string, global bool) bool
 }
 
 // Handshake health-check timing.
@@ -220,6 +226,16 @@ func (m *Monitor) SetHealthCheck(enabled bool) {
 	defer m.mu.Unlock()
 	m.healthCheckEnabled = enabled
 	slog.Info("health check toggled", "enabled", enabled)
+}
+
+// SetHealthCheckFilter installs a per-tunnel override of the handshake check:
+// fn(name, global) reports whether tunnel name is checked given the global
+// setting. fn is called without any monitor lock held and may read storage.
+// Safe to call while the monitor is running; nil removes the filter.
+func (m *Monitor) SetHealthCheckFilter(fn func(name string, global bool) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCheckFilter = fn
 }
 
 // SetDesiredActiveFn configures the fallback trigger predicate. When the
@@ -427,12 +443,17 @@ func (m *Monitor) monitorLoop() {
 // primary interface): a handshake cannot succeed then, so its age says
 // nothing about the tunnel. A stale tunnel is only reconnected when no
 // retry for it, and no all-tunnels wake/network retry, is already running.
+//
+// When a healthCheckFilter is installed the pass runs even with the global
+// setting off, and each tunnel is checked only if the filter allows it
+// (per-tunnel override). The filter is called with no monitor lock held.
 func (m *Monitor) checkHandshakes(now time.Time) {
 	m.mu.Lock()
 	enabled := m.healthCheckEnabled
 	lastWake := m.lastWake
+	filter := m.healthCheckFilter
 	m.mu.Unlock()
-	if !enabled {
+	if !enabled && filter == nil {
 		return
 	}
 	if !m.manager.IsConnected() {
@@ -454,6 +475,9 @@ func (m *Monitor) checkHandshakes(now time.Time) {
 			continue
 		}
 		if status.State != domain.StateConnected {
+			continue
+		}
+		if filter != nil && !filter(status.TunnelName, enabled) {
 			continue
 		}
 		// Time spent asleep is not evidence of a dead peer: measure from

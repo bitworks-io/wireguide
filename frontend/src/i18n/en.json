@@ -95,7 +95,12 @@
     "sort_added_old": "Oldest first",
     "rename": "Rename",
     "clear_search": "Clear search",
-    "resize_hint": "Drag to resize · double-click to restore the default width"
+    "resize_hint": "Drag to resize · double-click to restore the default width",
+    "health_check_override": "Handshake health check",
+    "health_check_inherit": "Use Settings",
+    "health_check_on": "On",
+    "health_check_off": "Off",
+    "health_check_override_hint": "Overrides the Settings health check for this tunnel only. Reconnects the tunnel when its handshake goes stale (180 seconds). Time asleep or offline does not count."
   },
   "import": {
     "zip_result_title": "Import Results",

@@ -1279,3 +1279,90 @@ func TestStopWaitsForRetryWorkerAndCanRestart(t *testing.T) {
 	}
 	mon.Stop()
 }
+
+func TestCheckHandshakes_PerTunnelFilter(t *testing.T) {
+	stale := time.Now().Add(-10 * time.Minute)
+	for _, tc := range []struct {
+		name      string
+		global    bool
+		filter    func(string, bool) bool
+		want      []string
+		wantCalls int
+	}{
+		{"no filter, global off", false, nil, nil, 0},
+		{"no filter, global on", true, nil, []string{"a", "b"}, 2},
+		{"filter only a, global off", false, func(n string, _ bool) bool { return n == "a" }, []string{"a"}, 1},
+		{"filter only a, global on", true, func(n string, _ bool) bool { return n == "a" }, []string{"a"}, 1},
+		{"filter excludes b, inherits global on", true, func(n string, g bool) bool { return n != "b" && g }, []string{"a"}, 1},
+		{"filter inherits global off", false, func(_ string, g bool) bool { return g }, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var got []string
+			mon, mgr, _ := newTestMonitor(testConfig(), func(_ context.Context, name string) error {
+				mu.Lock()
+				got = append(got, name)
+				mu.Unlock()
+				return nil
+			})
+			mgr.setConnected(true, "a")
+			mgr.allStatuses = []*tunnel.ConnectionStatus{
+				{TunnelName: "a", State: domain.StateConnected, LastHandshakeTime: stale},
+				{TunnelName: "b", State: domain.StateConnected, LastHandshakeTime: stale},
+			}
+			mon.running = true
+			mon.SetHealthCheck(tc.global)
+			mon.SetHealthCheckFilter(tc.filter)
+
+			mon.checkHandshakes(time.Now())
+
+			if len(tc.want) > 0 {
+				waitFor(t, 2*time.Second, "reconnects for stale tunnels", func() bool {
+					mu.Lock()
+					defer mu.Unlock()
+					return len(got) >= tc.wantCalls
+				})
+			} else {
+				time.Sleep(100 * time.Millisecond)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(got) != tc.wantCalls {
+				t.Fatalf("reconnected %v, want %v", got, tc.want)
+			}
+			for _, w := range tc.want {
+				found := false
+				for _, g := range got {
+					found = found || g == w
+				}
+				if !found {
+					t.Fatalf("reconnected %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// A per-tunnel "on" override must not bypass the wake grace or offline gates.
+func TestCheckHandshakes_FilterRespectsWakeGraceAndOffline(t *testing.T) {
+	rec := &reconnectRecorder{}
+	wake := time.Unix(5_000_000, 0)
+	clk := &fakeClock{t: wake}
+	nd := newOnlineDetector(true)
+	mon, _ := healthMonitor(t, rec, clk, wake.Add(-2*time.Hour), nd)
+	mon.SetHealthCheck(false)
+	mon.SetHealthCheckFilter(func(string, bool) bool { return true })
+	mon.noteWake()
+
+	mon.checkHandshakes(wake.Add(60 * time.Second)) // within grace
+	nd.online.Store(false)
+	mon.checkHandshakes(wake.Add(handshakeStaleThreshold + time.Minute)) // offline
+	time.Sleep(50 * time.Millisecond)
+	if rec.count() != 0 {
+		t.Fatalf("filtered tunnel reconnected during grace/offline: %d", rec.count())
+	}
+
+	nd.online.Store(true)
+	mon.checkHandshakes(wake.Add(handshakeStaleThreshold + time.Minute))
+	waitFor(t, 2*time.Second, "filtered tunnel reconnect", func() bool { return rec.sawName("t1") })
+}

@@ -95,7 +95,12 @@
     "sort_added_old": "古い順",
     "rename": "名前を変更",
     "clear_search": "検索をクリア",
-    "resize_hint": "ドラッグで幅を変更 · ダブルクリックで既定の幅に戻す"
+    "resize_hint": "ドラッグで幅を変更 · ダブルクリックで既定の幅に戻す",
+    "health_check_override": "ハンドシェイクのヘルスチェック",
+    "health_check_inherit": "設定に従う",
+    "health_check_on": "オン",
+    "health_check_off": "オフ",
+    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。ハンドシェイクが180秒以上古くなるとトンネルを再接続します。スリープ中やオフラインの時間は数えません。"
   },
   "import": {
     "zip_result_title": "インポート結果",

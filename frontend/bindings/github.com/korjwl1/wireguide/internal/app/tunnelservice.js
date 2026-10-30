@@ -319,6 +319,17 @@ export function GetTunnelDetail(name) {
 }
 
 /**
+ * GetTunnelHealthCheck returns the tunnel's handshake health-check override:
+ * "on", "off" or "inherit" (follow the global setting). Missing or unknown
+ * values read as "inherit".
+ * @param {string} name
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetTunnelHealthCheck(name) {
+    return $Call.ByID(117513249, name);
+}
+
+/**
  * @param {string} name
  * @returns {$CancellablePromise<healthcheck$0.Config>}
  */
@@ -645,6 +656,20 @@ export function SetPinInterface(enabled) {
  */
 export function SetTunnelBackend(backend) {
     return $Call.ByID(1967609811, backend);
+}
+
+/**
+ * SetTunnelHealthCheck persists the tunnel's health-check override in its
+ * .meta.json sidecar. "inherit" is stored as the absent field, so a tunnel
+ * that never overrode the setting keeps a byte-identical sidecar. The helper
+ * reads the sidecar on each health-check tick, so a change applies without
+ * reconnecting.
+ * @param {string} name
+ * @param {string} value
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetTunnelHealthCheck(name, value) {
+    return $Call.ByID(830677997, name, value);
 }
 
 /**
