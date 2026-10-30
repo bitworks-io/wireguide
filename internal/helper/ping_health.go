@@ -8,6 +8,7 @@ import (
 
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/healthcheck"
+	"github.com/korjwl1/wireguide/internal/storage"
 )
 
 type pingHealthState struct {
@@ -131,4 +132,19 @@ func (h *Helper) pingRetryGuard(name string, triggered healthcheck.Config) func(
 		latest, err := meta.PingHealth.Normalize()
 		return err == nil && latest.Enabled && reflect.DeepEqual(triggered, latest)
 	}
+}
+
+// handshakeHealthCheckFor applies a tunnel's handshake health-check override
+// (the "health_check" field of its .meta.json sidecar) to the global setting.
+// The sidecar is read on every monitor pass, like ping health, so a change
+// applies without reconnecting. Read failures follow the global setting.
+func (h *Helper) handshakeHealthCheckFor(name string, global bool) bool {
+	if h.userTunnelStore == nil {
+		return global
+	}
+	meta, err := h.userTunnelStore.LoadMeta(name)
+	if err != nil || meta == nil {
+		return global
+	}
+	return storage.ResolveHealthCheck(meta.HealthCheck, global)
 }

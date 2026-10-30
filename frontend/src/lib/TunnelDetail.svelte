@@ -9,6 +9,7 @@
   import { createEventDispatcher, tick, onDestroy } from 'svelte';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
+  import HealthCheckOverride from './HealthCheckOverride.svelte';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -607,6 +608,7 @@
 
     {#key $selectedTunnel.name}
       <PingHealthSettings {TunnelService} tunnelName={$selectedTunnel.name} />
+      <HealthCheckOverride {TunnelService} tunnelName={$selectedTunnel.name} />
     {/key}
 
     <!-- SECONDARY ACTIONS: 4-up icon button grid -->

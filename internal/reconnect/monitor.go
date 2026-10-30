@@ -133,6 +133,12 @@ type Monitor struct {
 	// check runs in monitorLoop. Can be toggled at runtime via
 	// SetHealthCheck. Default: false.
 	healthCheckEnabled bool
+
+	// healthCheckFilter, when set, decides per tunnel whether the handshake
+	// check applies, given the global setting. With a filter installed the
+	// check loop runs even when the global setting is off, so a tunnel
+	// overriding it to "on" is still watched.
+	healthCheckFilter func(name string, global bool) bool
 }
 
 // NewMonitor creates a reconnection monitor.
@@ -175,6 +181,16 @@ func (m *Monitor) SetHealthCheck(enabled bool) {
 	defer m.mu.Unlock()
 	m.healthCheckEnabled = enabled
 	slog.Info("health check toggled", "enabled", enabled)
+}
+
+// SetHealthCheckFilter installs a per-tunnel override of the handshake check:
+// fn(name, global) reports whether tunnel name is checked given the global
+// setting. fn is called without any monitor lock held and may read storage.
+// Safe to call while the monitor is running; nil removes the filter.
+func (m *Monitor) SetHealthCheckFilter(fn func(name string, global bool) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCheckFilter = fn
 }
 
 // SetDesiredActiveFn configures the fallback trigger predicate. When the
@@ -373,35 +389,44 @@ func (m *Monitor) monitorLoop() {
 		case <-m.stopCh:
 			return
 		case <-ticker.C:
-			m.mu.Lock()
-			enabled := m.healthCheckEnabled
-			m.mu.Unlock()
-			if !enabled {
-				continue
-			}
-			if !m.manager.IsConnected() {
-				continue
-			}
-			// Check EACH tunnel's handshake individually. If a specific
-			// tunnel is stale, disconnect and reconnect only THAT tunnel.
-			statuses := m.manager.AllStatuses()
-			for _, status := range statuses {
-				if status == nil || status.LastHandshakeTime.IsZero() {
-					continue
-				}
-				if status.State != domain.StateConnected {
-					continue
-				}
-				age := time.Since(status.LastHandshakeTime)
-				if age > handshakeStaleThreshold {
-					tunnelName := status.TunnelName
-					slog.Warn("handshake stale, triggering per-tunnel reconnect",
-						"tunnel", tunnelName,
-						"last_handshake_age", age.Round(time.Second),
-						"threshold", handshakeStaleThreshold)
-					m.triggerReconnectTunnel(tunnelName)
-				}
-			}
+			m.checkHandshakes(handshakeStaleThreshold)
+		}
+	}
+}
+
+// checkHandshakes runs one pass of the per-tunnel handshake age check.
+func (m *Monitor) checkHandshakes(staleThreshold time.Duration) {
+	m.mu.Lock()
+	enabled := m.healthCheckEnabled
+	filter := m.healthCheckFilter
+	m.mu.Unlock()
+	if !enabled && filter == nil {
+		return
+	}
+	if !m.manager.IsConnected() {
+		return
+	}
+	// Check EACH tunnel's handshake individually. If a specific
+	// tunnel is stale, disconnect and reconnect only THAT tunnel.
+	statuses := m.manager.AllStatuses()
+	for _, status := range statuses {
+		if status == nil || status.LastHandshakeTime.IsZero() {
+			continue
+		}
+		if status.State != domain.StateConnected {
+			continue
+		}
+		if filter != nil && !filter(status.TunnelName, enabled) {
+			continue
+		}
+		age := time.Since(status.LastHandshakeTime)
+		if age > staleThreshold {
+			tunnelName := status.TunnelName
+			slog.Warn("handshake stale, triggering per-tunnel reconnect",
+				"tunnel", tunnelName,
+				"last_handshake_age", age.Round(time.Second),
+				"threshold", staleThreshold)
+			m.triggerReconnectTunnel(tunnelName)
 		}
 	}
 }
