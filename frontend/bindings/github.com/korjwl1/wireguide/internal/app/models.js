@@ -356,6 +356,47 @@ export class KnownSSIDs {
 }
 
 /**
+ * LANOverlap is one AllowedIPs range that overlaps the machine's current
+ * physical network.
+ */
+export class LANOverlap {
+    /**
+     * Creates a new LANOverlap instance.
+     * @param {Partial<LANOverlap>} [$$source = {}] - The source object to create the LANOverlap.
+     */
+    constructor($$source = {}) {
+        if (!("range" in $$source)) {
+            /**
+             * Range is the AllowedIPs entry as written in the config.
+             * @member
+             * @type {string}
+             */
+            this["range"] = "";
+        }
+        if (!("network" in $$source)) {
+            /**
+             * Network is the local on-link network it overlaps (e.g. 192.168.50.0/24).
+             * @member
+             * @type {string}
+             */
+            this["network"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LANOverlap instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {LANOverlap}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LANOverlap(/** @type {Partial<LANOverlap>} */($$parsedSource));
+    }
+}
+
+/**
  * ProfileMutationResult reports a committed profile change whose auxiliary
  * automation update failed. Callers must refresh the profile and show Warning.
  */

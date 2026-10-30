@@ -264,18 +264,6 @@ export function GetCurrentSubnets() {
 }
 
 /**
- * GetFirewallStatus asks the helper what DNS protection and the kill switch
- * actually have loaded (read back from pf on macOS). Read-only; the GUI calls
- * it on demand, never on a timer.
- * @returns {$CancellablePromise<$models.FirewallStatus>}
- */
-export function GetFirewallStatus() {
-    return $Call.ByID(2324013693).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType12($result);
-    }));
-}
-
-/**
  * GetKnownSSIDs returns the currently-connected SSID (if any) plus the
  * system's saved wireless networks. Both are best-effort — empty values
  * are normal on a Mac that's only ever been on Ethernet.
@@ -283,7 +271,22 @@ export function GetFirewallStatus() {
  */
 export function GetKnownSSIDs() {
     return $Call.ByID(57262338).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType13($result);
+        return $$createType12($result);
+    }));
+}
+
+/**
+ * GetLANOverlaps returns the AllowedIPs ranges of a stored tunnel that
+ * overlap the machine's current physical network. They are still routed into
+ * the tunnel (and block rule-driven auto-connect); the pre-connect preview
+ * warns about them. Empty when Table=off, which installs no routes at all.
+ * Read-only.
+ * @param {string} name
+ * @returns {$CancellablePromise<$models.LANOverlap[]>}
+ */
+export function GetLANOverlaps(name) {
+    return $Call.ByID(3276277334, name).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType14($result);
     }));
 }
 
@@ -293,7 +296,7 @@ export function GetKnownSSIDs() {
  */
 export function GetRoutingTable() {
     return $Call.ByID(3049102509).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType15($result);
+        return $$createType16($result);
     }));
 }
 
@@ -302,7 +305,7 @@ export function GetRoutingTable() {
  */
 export function GetSettings() {
     return $Call.ByID(2393200110).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType17($result);
+        return $$createType18($result);
     }));
 }
 
@@ -314,7 +317,7 @@ export function GetSettings() {
  */
 export function GetStatus() {
     return $Call.ByID(3544552149).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType19($result);
+        return $$createType20($result);
     }));
 }
 
@@ -326,7 +329,7 @@ export function GetStatus() {
  */
 export function GetTunnelDetail(name) {
     return $Call.ByID(3171898132, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType21($result);
+        return $$createType22($result);
     }));
 }
 
@@ -336,7 +339,7 @@ export function GetTunnelDetail(name) {
  */
 export function GetTunnelPingHealth(name) {
     return $Call.ByID(3816721483, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType22($result);
+        return $$createType23($result);
     }));
 }
 
@@ -346,7 +349,7 @@ export function GetTunnelPingHealth(name) {
  */
 export function GetUpdateState() {
     return $Call.ByID(3155746791).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType23($result);
+        return $$createType24($result);
     }));
 }
 
@@ -367,7 +370,7 @@ export function GetVersion() {
  */
 export function ImportConfig(name, content) {
     return $Call.ByID(2459134310, name, content).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType25($result);
+        return $$createType26($result);
     }));
 }
 
@@ -381,7 +384,7 @@ export function ImportConfig(name, content) {
  */
 export function ImportQRFromBytes(data, name) {
     return $Call.ByID(3817928306, data, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType25($result);
+        return $$createType26($result);
     }));
 }
 
@@ -394,7 +397,7 @@ export function ImportQRFromBytes(data, name) {
  */
 export function ImportQRFromPath(path, name) {
     return $Call.ByID(2544386800, path, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType25($result);
+        return $$createType26($result);
     }));
 }
 
@@ -406,7 +409,7 @@ export function ImportQRFromPath(path, name) {
  */
 export function ImportZip(path) {
     return $Call.ByID(976469479, path).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType27($result);
+        return $$createType28($result);
     }));
 }
 
@@ -418,7 +421,7 @@ export function ImportZip(path) {
  */
 export function ImportZipData(data) {
     return $Call.ByID(2432663343, data).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType27($result);
+        return $$createType28($result);
     }));
 }
 
@@ -429,7 +432,7 @@ export function ImportZipData(data) {
  */
 export function ListTunnels() {
     return $Call.ByID(3587038916).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType28($result);
+        return $$createType29($result);
     }));
 }
 
@@ -444,7 +447,7 @@ export function ListTunnels() {
  */
 export function ListTunnelsLocal() {
     return $Call.ByID(3031176175).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType28($result);
+        return $$createType29($result);
     }));
 }
 
@@ -538,7 +541,7 @@ export function RenameTunnel(oldName, newName) {
  */
 export function ResolveHost(name) {
     return $Call.ByID(3083149897, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType30($result);
+        return $$createType31($result);
     }));
 }
 
@@ -550,7 +553,7 @@ export function ResolveHost(name) {
  */
 export function RunDNSLeakTest() {
     return $Call.ByID(2469114850).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType32($result);
+        return $$createType33($result);
     }));
 }
 
@@ -716,6 +719,15 @@ export function SetUpdateScheduler(sched, store) {
 }
 
 /**
+ * SplitDNSSupported reports whether this platform can apply a config with
+ * "~domain" DNS entries. When false, connecting such a config fails.
+ * @returns {$CancellablePromise<boolean>}
+ */
+export function SplitDNSSupported() {
+    return $Call.ByID(3977972632);
+}
+
+/**
  * TunnelExists reports whether a tunnel with the given name is stored.
  * @param {string} name
  * @returns {$CancellablePromise<boolean>}
@@ -769,7 +781,7 @@ export function ValidateConfig(content) {
  */
 export function Verify(tunnelName, opts) {
     return $Call.ByID(2039407192, tunnelName, opts).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType34($result);
+        return $$createType35($result);
     }));
 }
 
@@ -786,26 +798,27 @@ const $$createType8 = storage$0.Session.createFrom;
 const $$createType9 = $Create.Array($$createType8);
 const $$createType10 = $models.CurrentNetwork.createFrom;
 const $$createType11 = $Create.Array($Create.Any);
-const $$createType12 = $models.FirewallStatus.createFrom;
-const $$createType13 = $models.KnownSSIDs.createFrom;
-const $$createType14 = $models.RouteEntry.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = storage$0.Settings.createFrom;
-const $$createType17 = $Create.Nullable($$createType16);
-const $$createType18 = domain$0.ConnectionStatus.createFrom;
-const $$createType19 = $Create.Nullable($$createType18);
-const $$createType20 = domain$0.WireGuardConfig.createFrom;
-const $$createType21 = $Create.Nullable($$createType20);
-const $$createType22 = healthcheck$0.Config.createFrom;
-const $$createType23 = $models.UpdateState.createFrom;
-const $$createType24 = $models.TunnelInfo.createFrom;
-const $$createType25 = $Create.Nullable($$createType24);
-const $$createType26 = $models.ZipImportResult.createFrom;
-const $$createType27 = $Create.Array($$createType26);
-const $$createType28 = $Create.Array($$createType24);
-const $$createType29 = $models.ResolveResult.createFrom;
-const $$createType30 = $Create.Nullable($$createType29);
-const $$createType31 = $models.DNSLeakResult.createFrom;
-const $$createType32 = $Create.Nullable($$createType31);
-const $$createType33 = $models.VerifyRow.createFrom;
-const $$createType34 = $Create.Array($$createType33);
+const $$createType12 = $models.KnownSSIDs.createFrom;
+const $$createType13 = $models.LANOverlap.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $models.RouteEntry.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = storage$0.Settings.createFrom;
+const $$createType18 = $Create.Nullable($$createType17);
+const $$createType19 = domain$0.ConnectionStatus.createFrom;
+const $$createType20 = $Create.Nullable($$createType19);
+const $$createType21 = domain$0.WireGuardConfig.createFrom;
+const $$createType22 = $Create.Nullable($$createType21);
+const $$createType23 = healthcheck$0.Config.createFrom;
+const $$createType24 = $models.UpdateState.createFrom;
+const $$createType25 = $models.TunnelInfo.createFrom;
+const $$createType26 = $Create.Nullable($$createType25);
+const $$createType27 = $models.ZipImportResult.createFrom;
+const $$createType28 = $Create.Array($$createType27);
+const $$createType29 = $Create.Array($$createType25);
+const $$createType30 = $models.ResolveResult.createFrom;
+const $$createType31 = $Create.Nullable($$createType30);
+const $$createType32 = $models.DNSLeakResult.createFrom;
+const $$createType33 = $Create.Nullable($$createType32);
+const $$createType34 = $models.VerifyRow.createFrom;
+const $$createType35 = $Create.Array($$createType34);

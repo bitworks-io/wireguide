@@ -15,6 +15,7 @@
   import HealthCheckOverride from './HealthCheckOverride.svelte';
   import VerifyPanel from './VerifyPanel.svelte';
   import { parseDnsEntries, dnsModeOf, dnsChip, resolveHint } from './dns-mode.js';
+  import { connectPreview } from './connect-preview.js';
 
   // Whether the user turned DNS protection on. With the helper's live
   // per-tunnel dns_protected flag it decides the protection chip.
@@ -239,6 +240,7 @@
       if (generation !== detailGeneration || $selectedTunnel?.name !== name) return;
       detail = value;
       error = '';
+      refreshPreviewInputs(name);
     } catch (e) {
       if (generation !== detailGeneration || $selectedTunnel?.name !== name) return;
       detail = null;
@@ -248,6 +250,35 @@
       error = errText(e);
     }
   }
+
+  // Inputs of the pre-connect preview that live outside the config: the
+  // ranges overlapping the current LAN and whether this platform can apply
+  // split DNS. Best-effort: a failure just leaves the config-only preview.
+  let lanOverlaps = [];
+  let splitSupported = true;
+  let previewOpen = false;
+  async function refreshPreviewInputs(name) {
+    try {
+      const [o, s] = await Promise.all([
+        TunnelService.GetLANOverlaps(name),
+        TunnelService.SplitDNSSupported(),
+      ]);
+      if ($selectedTunnel?.name !== name) return;
+      lanOverlaps = o || [];
+      splitSupported = s !== false;
+    } catch (_) {
+      if ($selectedTunnel?.name === name) lanOverlaps = [];
+    }
+  }
+  function togglePreview() {
+    previewOpen = !previewOpen;
+    // The LAN may have changed since the tunnel was selected.
+    if (previewOpen && $selectedTunnel) refreshPreviewInputs($selectedTunnel.name);
+  }
+  $: previewLines = connectPreview(detail, lanOverlaps, {
+    splitSupported,
+    platform: typeof navigator !== 'undefined' ? navigator.platform : '',
+  });
 
   function connect() {
     dispatch('connect', {
@@ -487,6 +518,22 @@
         </button>
       {/if}
     </div>
+
+    {#if !isConnected && !isConnecting && previewLines.length > 0}
+      <div class="connect-preview">
+        <button class="preview-toggle" on:click={togglePreview} aria-expanded={previewOpen}>
+          <Icon name={previewOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+          <span>{$t('preview.title')}</span>
+        </button>
+        {#if previewOpen}
+          <ul class="preview-list">
+            {#each previewLines as line}
+              <li class="preview-{line.tone}">{$t(line.key, line.params)}</li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
 
     <!-- STATS HERO: big numbers, colored icons, 3-up grid -->
     {#if isConnected && status.state === 'connected'}
@@ -926,6 +973,30 @@
   .primary-action {
     margin-bottom: 18px;
   }
+  .connect-preview { margin: -8px 0 18px; }
+  .preview-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 0;
+    border: 0;
+    background: none;
+    color: var(--text-secondary);
+    font: 500 12px/16px var(--font-sans);
+    cursor: pointer;
+  }
+  .preview-list {
+    margin: 6px 0 0;
+    padding: 8px 12px 8px 28px;
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    font: 400 12px/18px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .preview-list li + li { margin-top: 4px; }
+  .preview-warn { color: var(--orange, #FF9500); }
+  .preview-error { color: var(--red, #FF3B30); font-weight: 600; }
   .btn-primary-large {
     width: 100%;
     height: 48px;

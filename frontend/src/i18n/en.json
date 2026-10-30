@@ -423,5 +423,18 @@
     "dns_protection_failing_where": "DNS Protection",
     "dns_protection_failing": "DNS protection is turned on but its firewall rules keep failing to apply, so DNS may not be locked to your tunnel.",
     "dns_protection_failing_hint": "WireGuide keeps retrying. Settings > Advanced shows the current state and the last error."
+  },
+  "preview": {
+    "title": "What will change when you connect",
+    "dns_global_mac": "Replaces DNS on all network services with {servers}.",
+    "dns_global": "Uses {servers} as DNS while connected.",
+    "dns_split": "Adds resolver {servers} for {domains} only; system DNS unchanged.",
+    "dns_split_unsupported": "Connecting will FAIL: split DNS ({domains}) is not supported here.",
+    "dns_search": "Adds search domains: {domains}.",
+    "dns_none": "Does not change DNS.",
+    "routes_full": "Routes all traffic through the tunnel.",
+    "routes_split": "Routes only: {ranges}.",
+    "routes_none": "Table=off: installs no routes. Add them yourself.",
+    "routes_overlap": "{range} overlaps your current network ({network}) and will be routed into the tunnel; automation will not auto-connect this tunnel."
   }
 }

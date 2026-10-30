@@ -423,5 +423,18 @@
     "dns_protection_failing_where": "DNS 保护",
     "dns_protection_failing": "DNS 保护已开启，但防火墙规则一直无法应用，DNS 可能没有被锁定到隧道。",
     "dns_protection_failing_hint": "WireGuide 会持续重试。可在 设置 > 高级 中查看当前状态和最近的错误。"
+  },
+  "preview": {
+    "title": "连接后将发生的更改",
+    "dns_global_mac": "将所有网络服务的 DNS 替换为 {servers}。",
+    "dns_global": "连接期间使用 {servers} 作为 DNS。",
+    "dns_split": "仅为 {domains} 添加解析器 {servers}；系统 DNS 保持不变。",
+    "dns_split_unsupported": "连接将失败：此处不支持分流 DNS（{domains}）。",
+    "dns_search": "添加搜索域：{domains}。",
+    "dns_none": "不会更改 DNS。",
+    "routes_full": "所有流量都将通过隧道。",
+    "routes_split": "仅路由：{ranges}。",
+    "routes_none": "Table=off：不会添加任何路由，请自行添加。",
+    "routes_overlap": "{range} 与当前网络（{network}）重叠，将被路由到隧道中；自动化不会自动连接此隧道。"
   }
 }

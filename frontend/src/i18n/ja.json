@@ -423,5 +423,18 @@
     "dns_protection_failing_where": "DNS保護",
     "dns_protection_failing": "DNS保護はオンですが、ファイアウォールルールの適用が失敗し続けているため、DNSがトンネルに固定されていない可能性があります。",
     "dns_protection_failing_hint": "WireGuideは再試行を続けます。設定 > 詳細で現在の状態と最後のエラーを確認できます。"
+  },
+  "preview": {
+    "title": "接続すると変わること",
+    "dns_global_mac": "すべてのネットワークサービスの DNS を {servers} に置き換えます。",
+    "dns_global": "接続中は {servers} を DNS として使用します。",
+    "dns_split": "{domains} のみにリゾルバー {servers} を追加します。システム DNS は変わりません。",
+    "dns_split_unsupported": "接続に失敗します: この環境ではスプリット DNS（{domains}）はサポートされていません。",
+    "dns_search": "検索ドメインを追加します: {domains}。",
+    "dns_none": "DNS は変更しません。",
+    "routes_full": "すべての通信をトンネル経由にします。",
+    "routes_split": "次の範囲のみをルーティングします: {ranges}。",
+    "routes_none": "Table=off: ルートを追加しません。手動で追加してください。",
+    "routes_overlap": "{range} は現在のネットワーク（{network}）と重なり、トンネルにルーティングされます。自動化はこのトンネルを自動接続しません。"
   }
 }

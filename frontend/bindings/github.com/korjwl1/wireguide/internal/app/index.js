@@ -15,6 +15,7 @@ export {
     DomainCheck,
     FirewallStatus,
     KnownSSIDs,
+    LANOverlap,
     ProfileMutationResult,
     ResolveResult,
     RouteEntry,
