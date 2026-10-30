@@ -245,7 +245,7 @@
     "export_diagnostics_failed": "导出失败",
     "dns_protection_allowing": "当前允许：{list}",
     "dns_protection_blocking": "已生效：除本地解析器外的所有 DNS 均被阻止。",
-    "dns_protection_inactive": "未生效 — 分离 DNS 或无 DNS",
+    "dns_protection_inactive": "未生效 — 拆分 DNS 或无 DNS",
     "dns_protection_idle": "已开启。连接带有 DNS 服务器的隧道后生效。",
     "dns_protection_suspended": "隧道重新连接期间已暂停。",
     "dns_protection_error": "无法应用 DNS 保护：{error}",
