@@ -202,11 +202,13 @@ func TestVerifyTableOff(t *testing.T) {
 			t.Errorf("%s: %+v", goos, route)
 		}
 	}
-	// Custom numeric table only matters on Linux.
+	// Custom numeric table only matters on Linux: the routes are installed,
+	// but in table 100, so the row says so instead of "not managed".
 	d.goos = "linux"
 	d.run = func(context.Context, string, ...string) ([]byte, error) { return []byte("10.9.0.0/24 dev utun4"), nil }
 	rows := verifyWith(context.Background(), d, VerifyInput{Connected: true, Interface: "utun4", LastHandshake: "1s", Table: "100", AllowedIPs: []string{"10.9.0.0/24"}})
-	if rows[1].HintKey != "route_unmanaged" {
+	if len(rows) != 2 || rows[1].Status != StatusAmber || rows[1].HintKey != "route_table" ||
+		rows[1].DetailKey != "route_table" || rows[1].DetailParams["table"] != "100" {
 		t.Errorf("linux table 100: %+v", rows)
 	}
 	d.goos = "darwin"

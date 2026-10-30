@@ -32,8 +32,23 @@ test('dnsChip joins domains, hides none', () => {
 
 test('verifyDetail prefers the i18n key', () => {
   assert.equal(verifyDetail(tr, { detail: 'English', detail_key: 'route_more', detail_params: { n: '3' } }),
-    'verify.detail_route_more{"n":"3"}');
-  assert.equal(verifyDetail(tr, { detail: '10.0.0.0/24 via utun4' }), '10.0.0.0/24 via utun4');
+    'verify.detail_route_more{"n":"3","via":""}');
+  assert.equal(verifyDetail(tr, { detail: '10.66.66.1 -> 10.66.66.1' }), '10.66.66.1 -> 10.66.66.1');
+});
+
+test('verifyDetail fills {via} from the resolver params', () => {
+  const tpl = {
+    'verify.detail_resolve_ok': '{name} -> {addrs} ({ms} ms) {via}',
+    'tools.dns_try_via': 'via {resolver}',
+    'tools.dns_try_via_domain': 'via {resolver} (~{domain})',
+  };
+  const fill = (key, params = {}) => (tpl[key] ?? key).replace(/\{(\w+)\}/g, (_, n) => params[n] ?? `{${n}}`);
+  const row = (params) => ({ detail: 'English', detail_key: 'resolve_ok', detail_params: { name: 'nas.corp.example', addrs: '10.66.66.9', ms: '12', ...params } });
+  assert.equal(verifyDetail(fill, row({ resolver: '10.66.66.1', match_domain: 'corp.example' })),
+    'nas.corp.example -> 10.66.66.9 (12 ms) via 10.66.66.1 (~corp.example)');
+  assert.equal(verifyDetail(fill, row({ resolver: '10.66.66.1' })), 'nas.corp.example -> 10.66.66.9 (12 ms) via 10.66.66.1');
+  // No resolver: no dangling "via" and no trailing space.
+  assert.equal(verifyDetail(fill, row({})), 'nas.corp.example -> 10.66.66.9 (12 ms)');
 });
 
 test('verifyHint is hidden for green rows', () => {
