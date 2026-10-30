@@ -15,9 +15,11 @@ import (
 // records the version RunUpdate asked for.
 func stubApplyUpdate(t *testing.T, res *update.InstallResult, err error) *[]string {
 	t.Helper()
-	if runtime.GOOS == "darwin" && update.IsBrewInstall() {
-		t.Skip("Homebrew-managed WireGuide on this machine; RunUpdate would take the brew path")
-	}
+	// A Homebrew-managed WireGuide on the test machine must not route
+	// RunUpdate to the brew path.
+	origBrew := isBrewInstall
+	isBrewInstall = func() bool { return false }
+	t.Cleanup(func() { isBrewInstall = origBrew })
 	var versions []string
 	orig := applyUpdate
 	applyUpdate = func(ctx context.Context, want string, progress func(string)) (*update.InstallResult, error) {
@@ -93,5 +95,37 @@ func TestRunUpdate_RelaunchRequested(t *testing.T) {
 	// claim the restart was scheduled.
 	if err == nil || !strings.Contains(err.Error(), "restart") {
 		t.Fatalf("err = %v, want a restart-unavailable error", err)
+	}
+}
+
+// A fork build installed through Homebrew must not run brew (that would
+// install upstream's cask): it opens the fork's release page instead and
+// never starts the direct-download chain either.
+func TestRunUpdate_ForkUnderHomebrewOpensReleasePage(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Homebrew path is macOS-only")
+	}
+	if update.UsesUpstreamRelease() {
+		t.Skip("upstream build")
+	}
+	orig := isBrewInstall
+	isBrewInstall = func() bool { return true }
+	t.Cleanup(func() { isBrewInstall = orig })
+	called := false
+	origApply := applyUpdate
+	applyUpdate = func(context.Context, string, func(string)) (*update.InstallResult, error) {
+		called = true
+		return nil, nil
+	}
+	t.Cleanup(func() { applyUpdate = origApply })
+	svc := &TunnelService{}
+	err := svc.RunUpdate(&update.UpdateInfo{Available: true, Version: "99.0.0"})
+	// No app in tests: OpenURL reports that, which proves the release-page
+	// branch was taken (brew would have failed differently or run).
+	if err == nil || !strings.Contains(err.Error(), "app not initialized") || called {
+		t.Fatalf("err = %v, apply called = %v", err, called)
+	}
+	if !strings.HasPrefix(releasesPageURL, update.RepoURL+"/releases") {
+		t.Fatalf("releasesPageURL = %q", releasesPageURL)
 	}
 }

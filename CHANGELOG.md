@@ -2,7 +2,7 @@
 
 All notable changes to WireGuide will be documented in this file.
 
-## Unreleased
+## Unreleased (bitworks fork)
 
 ### Added
 - **Per-tunnel handshake health check** - each tunnel can override the global handshake health check (use Settings / on / off) from its detail page. The choice is stored in the tunnel's metadata file and applies without reconnecting.

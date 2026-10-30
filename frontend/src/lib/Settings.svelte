@@ -188,6 +188,11 @@
   // stale pending choice that the user could apply to a later connection.
   $: if ($connectionStatus?.state !== 'connected') pendingBackend = null;
   let appVersion = '';
+  // This build's GitHub repository (Go: update.RepoURL) for the About links.
+  let repoURL = '';
+  function openRepo(path) {
+    if (repoURL) TunnelService.OpenURL(repoURL.replace(/\/+$/, '') + path);
+  }
   let automationBackup = null;
 
   async function refreshAutomationBackup() {
@@ -536,6 +541,7 @@
     nowTimer = setInterval(() => { nowTick = Date.now(); }, 60000);
     (async () => {
       try { appVersion = await TunnelService.GetVersion(); } catch (_) {}
+      try { repoURL = await TunnelService.GetRepoURL(); } catch (_) {}
       await refreshUpdateState();
     })();
   });
@@ -890,10 +896,10 @@
             {/if}
 
             <div class="about-links">
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide')}>GitHub</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/releases')}>{$t('settings.about_releases')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/issues')}>{$t('settings.about_issues')}</button>
-              <button class="link-btn" on:click={() => TunnelService.OpenURL('https://github.com/korjwl1/wireguide/blob/main/LICENSE')}>{$t('settings.about_license')}</button>
+              <button class="link-btn" disabled={!repoURL} on:click={() => openRepo('')}>GitHub</button>
+              <button class="link-btn" disabled={!repoURL} on:click={() => openRepo('/releases')}>{$t('settings.about_releases')}</button>
+              <button class="link-btn" disabled={!repoURL} on:click={() => openRepo('/issues')}>{$t('settings.about_issues')}</button>
+              <button class="link-btn" disabled={!repoURL} on:click={() => openRepo('/blob/main/LICENSE')}>{$t('settings.about_license')}</button>
             </div>
 
           </div>

@@ -371,6 +371,15 @@ export function GetLocationAuthorization() {
 }
 
 /**
+ * GetRepoURL is the GitHub address of this build's repository, for the
+ * About links.
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetRepoURL() {
+    return $Call.ByID(4227346140);
+}
+
+/**
  * GetRoutingTable returns the current OS routing table.
  * @returns {$CancellablePromise<$models.RouteEntry[]>}
  */
@@ -744,7 +753,9 @@ export function RunDNSLeakTest() {
  * RunUpdate performs the update end-to-end:
  * 
  *   - Homebrew installs → `brew update && brew upgrade --cask wireguide`,
- *     then verifying the installed version and restarting the app.
+ *     then verifying the installed version and restarting the app. Only
+ *     for upstream builds: the cask is upstream's, so a fork build under
+ *     Homebrew opens its own release page instead.
  *   - Direct-download installs (Windows NSIS install, macOS .app in a
  *     user-writable folder) → update.Apply: re-fetch the release in the
  *     backend, download, verify SHA256SUMS + its Ed25519 signature, then

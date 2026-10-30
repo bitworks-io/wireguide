@@ -19,8 +19,22 @@ import (
 	"github.com/korjwl1/wireguide/internal/version"
 )
 
+// Repo is the GitHub repository ("owner/name") this build checks for
+// updates and links to; RepoURL is its web address. This is the bitworks
+// fork; upstreamRepo is the original project.
 const (
-	githubRepo     = "korjwl1/wireguide"
+	Repo         = "bitworks-io/wireguide"
+	RepoURL      = "https://github.com/" + Repo
+	upstreamRepo = "korjwl1/wireguide"
+)
+
+// UsesUpstreamRelease reports whether this build's update channel is the
+// upstream project. Only then may the Homebrew path (which installs
+// upstream's cask) be used to apply an update.
+func UsesUpstreamRelease() bool { return Repo == upstreamRepo }
+
+const (
+	githubRepo     = Repo
 	apiEndpoint    = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
 	currentVersion = version.Current
 
@@ -356,7 +370,28 @@ func CheckForUpdate() (*UpdateInfo, error) {
 	return parseReleaseBody(ctx, resp, client)
 }
 
+// splitForkVersion splits "X.Y.Z[-bitworks.N][+meta]" into the base version
+// and N. ok is false when there is no -bitworks.N suffix (n is then 0).
+func splitForkVersion(v string) (base string, n int, ok bool) {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	i := strings.Index(v, "-bitworks.")
+	if i < 0 {
+		return v, 0, false
+	}
+	n, err := strconv.Atoi(v[i+len("-bitworks."):])
+	if err != nil {
+		return v[:i], 0, false
+	}
+	return v[:i], n, true
+}
+
 // isNewerVersion compares two semver strings (without "v" prefix).
+// Fork revisions of the same base order numerically
+// (0.6.1-bitworks.10 > 0.6.1-bitworks.9) and above the plain base release
+// (0.6.1-bitworks.1 > 0.6.1); a newer base wins regardless
+// (0.6.2 > 0.6.1-bitworks.9).
 // Returns true if latest is newer than current.
 //
 // Pre-release suffixes (`-dev2`, `-rc1`, `-beta`, build metadata after
@@ -372,6 +407,13 @@ func CheckForUpdate() (*UpdateInfo, error) {
 // extra complexity would only matter if it did. If we ever do, switch
 // to golang.org/x/mod/semver instead of hand-rolling it.
 func isNewerVersion(latest, current string) bool {
+	// Same base version: a fork "-bitworks.N" revision decides. A plain
+	// upstream release never supersedes a fork build of the same base.
+	lb, ln, lok := splitForkVersion(latest)
+	cb, cn, cok := splitForkVersion(current)
+	if lb == cb && lb != "" && (lok || cok) {
+		return lok && (!cok || ln > cn)
+	}
 	stripSuffix := func(v string) string {
 		// Drop semver build metadata first (`+sha.5114`), then any
 		// pre-release tail (`-dev2`, `-rc1`). The order matters because
