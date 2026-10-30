@@ -393,7 +393,7 @@ func (d verifyDeps) resolverRows(ctx context.Context, in VerifyInput) []VerifyRo
 	}
 	blocks := parseScutilDNS(string(out))
 	var rows []VerifyRow
-	for _, c := range splitDomainChecks(blocks, []domain.DNSEntries{parseEntries(in.DNS)}) {
+	for _, c := range splitDomainChecks(blocks, []domain.DNSEntries{domain.ParseDNSEntries(in.DNS)}) {
 		label := "~" + c.Domain
 		if c.Search {
 			label = c.Domain

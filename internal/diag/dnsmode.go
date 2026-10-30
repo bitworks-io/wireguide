@@ -41,25 +41,11 @@ func DNSModeOf(entries []string) DNSMode {
 	return m
 }
 
-// StatusString renders the `ctl status` form: global, split(a,b) or none.
+// StatusString renders the `ctl status` form: global, split(a,b), search or
+// none.
 func (m DNSMode) StatusString() string {
 	if m.Mode == DNSModeSplit {
 		return "split(" + strings.Join(m.Domains, ",") + ")"
 	}
 	return m.Mode
 }
-
-// TooltipSuffix is the tray tooltip annotation ("" for none).
-func (m DNSMode) TooltipSuffix() string {
-	switch m.Mode {
-	case DNSModeSplit:
-		return " (split DNS)"
-	case DNSModeGlobal:
-		return " (replaces DNS)"
-	case DNSModeSearch:
-		return " (search domains)"
-	}
-	return ""
-}
-
-func parseEntries(entries []string) domain.DNSEntries { return domain.ParseDNSEntries(entries) }
