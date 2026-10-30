@@ -27,6 +27,10 @@ func (w *wailsNotifications) requestAuth() (bool, error) {
 	return w.svc.RequestNotificationAuthorization()
 }
 
+func (w *wailsNotifications) checkAuth() (bool, error) {
+	return w.svc.CheckNotificationAuthorization()
+}
+
 func (w *wailsNotifications) send(id, title, body string) error {
 	return w.svc.SendNotification(notifications.NotificationOptions{ID: id, Title: title, Body: body})
 }
