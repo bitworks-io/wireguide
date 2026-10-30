@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -93,6 +94,7 @@ func (h *Helper) reevaluateAutomation(reason string) {
 	auto := settings.Automation
 	if auto == nil || len(auto.PerTunnel) == 0 {
 		h.pruneLatchesWithoutRules(nil)
+		h.pruneAutomationDecisions(nil)
 		return
 	}
 
@@ -100,36 +102,73 @@ func (h *Helper) reevaluateAutomation(reason string) {
 	ctx := st.ctx
 	h.pruneManualOverrides(st)
 	h.pruneLatchesWithoutRules(auto.PerTunnel)
+	h.pruneAutomationDecisions(auto.PerTunnel)
 
 	active := make(map[string]bool)
-	for _, n := range h.manager.ActiveTunnels() {
+	for _, n := range h.automationActiveTunnels() {
 		active[n] = true
 	}
 
+	// event.automation is broadcast right after each connect/disconnect
+	// returns (both release connectMu before returning), never under it.
 	anyNegated := false
 	for _, name := range auto.TunnelNames() {
 		rules := auto.PerTunnel[name]
+		h.noteRulesLoaded(name, rules)
 		if automation.HasNegated(rules) {
 			anyNegated = true
 		}
 		if latch, ok := h.manualLatchFor(name); ok {
-			slog.Debug("automation: tunnel latched by manual override, skipping",
+			lvl := slog.LevelDebug
+			if h.reportAutomationChange(automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil)) {
+				lvl = slog.LevelInfo
+			}
+			slog.Log(context.Background(), lvl, "automation: tunnel latched by manual override, skipping",
 				"tunnel", name, "disconnected", latch.disconnected, "reason", reason)
 			continue
 		}
 		state, info := automation.EvaluateDetailed(rules, ctx)
 		if info.Held {
-			slog.Debug("automation: negated rule undecidable, holding",
+			lvl := slog.LevelDebug
+			if h.reportAutomationChange(automationEvent(name, ipc.AutomationActionHeld, info.RuleIndex, rules, ctx, nil)) {
+				lvl = slog.LevelInfo
+			}
+			slog.Log(context.Background(), lvl, "automation: negated rule undecidable, holding",
 				"tunnel", name, "rule", info.RuleIndex, "reason", reason,
 				"ssid", ctx.SSID, "settled", ctx.Settled, "online", ctx.Online)
 		}
+		// A decided rule whose desired state already holds, or no decision
+		// at all, forgets the last reported decision, so a later held /
+		// latched episode (e.g. the next roam blip) is reported again.
 		switch state {
 		case automation.StateConnect:
-			if !active[name] && !h.isWatchdogBlocked(name) {
-				h.automationConnect(name, reason, ctx.SSID)
+			if active[name] {
+				h.clearAutomationDecision(name)
+			} else if !h.isWatchdogBlocked(name) {
+				h.automationConnect(name, reason, ctx, rules, info.RuleIndex)
 			}
 		case automation.StateDisconnect:
-			h.disconnectAutoManaged(name)
+			// Always run: for a tunnel that is not up this still withdraws a
+			// pending restore and cancels its retry. Only a teardown of a
+			// tunnel that was actually up is reported, so a disconnect rule
+			// that keeps matching doesn't broadcast on every network tick.
+			wasActive := active[name]
+			if wasActive {
+				slog.Info("automation: rule disconnect", "tunnel", name, "reason", reason, "ssid", ctx.SSID)
+			}
+			latched, err := h.disconnectAutoManaged(name)
+			switch {
+			case latched:
+				h.reportAutomationChange(automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil))
+			case wasActive:
+				h.reportAutomationExecuted(automationEvent(name, ipc.AutomationActionDisconnect, info.RuleIndex, rules, ctx, err))
+			default:
+				h.clearAutomationDecision(name)
+			}
+		case automation.StateUnmanaged:
+			if !info.Held {
+				h.clearAutomationDecision(name)
+			}
 		}
 	}
 
@@ -207,19 +246,34 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 }
 
 // automationConnect brings up a tunnel a rule matched and records it in
-// the auto-managed map. Caller holds reevalMu.
-func (h *Helper) automationConnect(name, reason, ssid string) {
+// the auto-managed map. Caller holds reevalMu. ctx, rules and ruleIndex
+// describe the deciding rule for event.automation, which is broadcast only
+// after connectMu is released.
+func (h *Helper) automationConnect(name, reason string, ctx automation.NetworkContext, rules []automation.Rule, ruleIndex int) {
+	ssid := ctx.SSID
+	fail := func(err error) {
+		h.reportAutomationExecuted(automationEvent(name, ipc.AutomationActionConnect, ruleIndex, rules, ctx, err))
+	}
 	if h.userTunnelStore == nil {
 		slog.Warn("automation: tunnel store unavailable, cannot connect", "tunnel", name)
+		fail(fmt.Errorf("tunnel store unavailable"))
 		return
 	}
 	cfg, err := h.userTunnelStore.Load(name)
 	if err != nil {
 		slog.Warn("automation: cannot load tunnel config", "tunnel", name, "error", err)
+		fail(fmt.Errorf("cannot load tunnel config: %w", err))
 		return
 	}
 	if cidr, addr, overlaps := overlapsLocalNetwork(cfg); overlaps {
-		h.reportAutomationOverlap(name, cidr, addr)
+		// Reported when the overlap is new (the legacy
+		// event.automation_skipped dedupe, which sends that event) or the
+		// tunnel's decision changed (e.g. back from a hold on the same LAN).
+		ev := automationEvent(name, ipc.AutomationActionSkippedOverlap, ruleIndex, rules, ctx, nil)
+		changed := h.recordAutomationDecision(ev)
+		if newOverlap := h.reportAutomationOverlap(name, cidr, addr); newOverlap || changed {
+			h.emitAutomationEvent(ev)
+		}
 		return
 	}
 	h.clearAutomationSkip(name)
@@ -237,6 +291,9 @@ func (h *Helper) automationConnect(name, reason, ssid string) {
 	if _, latched := h.manualLatchFor(name); latched || h.isWatchdogBlocked(name) {
 		h.connectMu.Unlock()
 		slog.Info("automation: connect skipped, manual override latched", "tunnel", name)
+		if latched {
+			h.reportAutomationChange(automationEvent(name, ipc.AutomationActionLatched, -1, rules, ctx, nil))
+		}
 		return
 	}
 	err = h.doConnectWithOwnerHeld(cfg, &ssid)
@@ -250,8 +307,13 @@ func (h *Helper) automationConnect(name, reason, ssid string) {
 	h.connectMu.Unlock()
 	if err != nil {
 		slog.Warn("automation connect failed", "tunnel", name, "error", err)
+		fail(err)
 		return
 	}
+	// The rule details first, then the generic auto_connect: a GUI that
+	// understands event.automation has them before the refresh trigger
+	// (one subscriber's stream is FIFO).
+	h.reportAutomationExecuted(automationEvent(name, ipc.AutomationActionConnect, ruleIndex, rules, ctx, nil))
 	// Notify GUI so it runs the same post-connect refresh as a manual connect.
 	h.server.Broadcast(ipc.EventAutoConnect, ipc.AutoConnectPayload{TunnelName: name})
 }
@@ -259,14 +321,16 @@ func (h *Helper) automationConnect(name, reason, ssid string) {
 // disconnectAutoManaged tears down a tunnel a Wi-Fi rule turned off.
 // Caller holds reevalMu; connectMu is taken here, as handleDisconnect
 // does, so the teardown and its desired-state write can't interleave with
-// a connect of the same tunnel.
-func (h *Helper) disconnectAutoManaged(name string) {
+// a connect of the same tunnel. It reports whether a manual latch stopped
+// it and the teardown error; the caller broadcasts event.automation after
+// connectMu is released.
+func (h *Helper) disconnectAutoManaged(name string) (latched bool, err error) {
 	h.connectMu.Lock()
 	defer h.connectMu.Unlock()
 	if _, latched := h.manualLatchFor(name); latched {
-		return
+		return true, nil
 	}
-	h.teardownTunnelHeld(name, "rule-driven disconnect, no GUI attached")
+	return false, h.teardownTunnelHeld(name, "rule-driven disconnect, no GUI attached")
 }
 
 // teardownTunnelHeld disconnects a tunnel the user didn't turn off by hand
@@ -277,8 +341,9 @@ func (h *Helper) disconnectAutoManaged(name string) {
 // reconnect monitor would fire its pending retry, the wake reconnect would
 // re-Connect from a stale activeCfgs entry, the next SSID change would try
 // to disconnect a tunnel already gone, and the issue #44 restore would bring
-// it back after a helper restart. Caller holds connectMu.
-func (h *Helper) teardownTunnelHeld(name, shutdownReason string) {
+// it back after a helper restart. Caller holds connectMu. Returns the
+// manager's DisconnectTunnel error (logged here; the cleanup runs anyway).
+func (h *Helper) teardownTunnelHeld(name, shutdownReason string) error {
 	if h.monitor != nil {
 		h.monitor.CancelRetryFor(name)
 	}
@@ -295,8 +360,9 @@ func (h *Helper) teardownTunnelHeld(name, shutdownReason string) {
 			}
 		}
 	}
-	if err := h.manager.DisconnectTunnel(name); err != nil {
-		slog.Warn("tunnel teardown failed", "tunnel", name, "error", err)
+	disconnectErr := h.manager.DisconnectTunnel(name)
+	if disconnectErr != nil {
+		slog.Warn("tunnel teardown failed", "tunnel", name, "error", disconnectErr)
 	}
 	if iface != "" {
 		if err := h.removeKillSwitchPermit(iface, time.Now()); err != nil {
@@ -327,6 +393,7 @@ func (h *Helper) teardownTunnelHeld(name, shutdownReason string) {
 	h.latencyMu.Unlock()
 	h.persistDesiredState()
 	h.maybeArmShutdownAfterTeardown(shutdownReason)
+	return disconnectErr
 }
 
 // previewDriftInterval rate-limits the preview's self-heal evaluation.

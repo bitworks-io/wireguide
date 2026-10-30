@@ -170,6 +170,16 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 		} else {
 			b.app.Event.Emit("automation_skipped", payload)
 		}
+	case ipc.EventAutomation:
+		// An Automation decision (protocol minor >= 6): executed rule
+		// connects/disconnects and held/latched/skipped_overlap changes.
+		// The helper sends it before the matching auto_connect.
+		var payload ipc.AutomationEventPayload
+		if err := json.Unmarshal(params, &payload); err != nil {
+			slog.Debug("event bridge: unmarshal automation failed", "error", err)
+		} else {
+			b.app.Event.Emit("automation_event", payload)
+		}
 	case ipc.EventForcedDisconnect:
 		// The helper tore a tunnel down on its own (loop watchdog, issue
 		// #49). EventStatus already shows it as down; the frontend tells

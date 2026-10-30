@@ -2,6 +2,12 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Automation decision events** - the helper now broadcasts `event.automation` (IPC protocol 1.6) for every executed rule-driven connect or disconnect, including failures, and for held, latched and LAN-overlap-skipped decisions when they change for a tunnel. Each event names the deciding rule, the SSID and whether the network had settled. The GUI forwards it as the `automation_event` frontend event; `event.automation_skipped` is unchanged.
+- **Per-tunnel rules log** - `automation: rules loaded` is logged once per tunnel whenever that tunnel's rules change.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added

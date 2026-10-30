@@ -7,6 +7,91 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
+ * AutomationEventPayload is broadcast as EventAutomation (protocol minor
+ * >= 6). RuleIndex is the deciding rule's position in the tunnel's rule
+ * list, -1 when no single rule applies (a manual latch). RuleText is an
+ * English description of that rule ("SSID is not Home"); GUIs localise
+ * from the rule itself when they can. Error is set when an executed
+ * connect/disconnect failed. At is RFC3339 (UTC).
+ */
+export class AutomationEventPayload {
+    /**
+     * Creates a new AutomationEventPayload instance.
+     * @param {Partial<AutomationEventPayload>} [$$source = {}] - The source object to create the AutomationEventPayload.
+     */
+    constructor($$source = {}) {
+        if (!("tunnel" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["tunnel"] = "";
+        }
+        if (!("action" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["action"] = "";
+        }
+        if (!("rule_index" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["rule_index"] = 0;
+        }
+        if (!("rule_text" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["rule_text"] = "";
+        }
+        if (!("ssid" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["ssid"] = "";
+        }
+        if (!("settled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["settled"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+        if (!("at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["at"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationEventPayload instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationEventPayload}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationEventPayload(/** @type {Partial<AutomationEventPayload>} */($$parsedSource));
+    }
+}
+
+/**
  * LogEntry is a single structured log record forwarded from the helper
  * to the GUI (and from the GUI to the frontend LogViewer). We keep it flat
  * — no nested attrs — because the viewer just renders a one-line per entry.

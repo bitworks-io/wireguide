@@ -52,6 +52,7 @@ func init() {
 	application.RegisterEvent[struct{}]("config_changed")
 	application.RegisterEvent[struct{}]("tunnels_changed")
 	application.RegisterEvent[ipc.RecoveryWarningPayload]("recovery_warning")
+	application.RegisterEvent[ipc.AutomationEventPayload]("automation_event")
 }
 
 // Run starts the GUI process. Blocks until the Wails app exits.
