@@ -192,16 +192,16 @@ export function gatewayCandidates(allowed) {
 
 /**
  * in-addr.arpa zones from IPv4 AllowedIPs (max 8, de-duplicated). Mirrors
- * config.ReverseZones: a zone never covers more space than the route. /24 and
- * longer give the /24; /8 and /16 the whole-octet zone; other prefixes give
- * their covered next-octet sub-zones only when there are at most 8 (so
- * 172.16.0.0/12 yields none).
+ * config.ReverseZones: a zone never covers more space than the route. A /24
+ * gives its own zone; /8 and /16 the whole-octet zone; other prefixes of /9 to
+ * /23 give their covered next-octet sub-zones only when there are at most 8
+ * (so 172.16.0.0/12 yields none). Prefixes longer than /24 give nothing.
  */
 export function reverseZones(allowed) {
   const out = [];
   for (const c of allowed) {
     const p = parseCidr4(c);
-    if (!p || p.ones < 8) continue;
+    if (!p || p.ones < 8 || p.ones > 24) continue;
     const octets = Math.min(3, Math.ceil(p.ones / 8));
     const count = p.ones < 24 ? 2 ** (octets * 8 - p.ones) : 1;
     if (count > 8) continue;

@@ -64,6 +64,9 @@ func (s *TunnelService) LintConfigFor(editing, content string) ([]config.Diagnos
 	return ds, nil
 }
 
+// lintConfig is the linter safeLint guards; a variable so tests can make it panic.
+var lintConfig = config.Lint
+
 // safeLint runs config.Lint but never lets a panic escape: linting is advisory
 // and must not be able to kill the GUI.
 func safeLint(cfg *config.WireGuardConfig, others map[string]*config.WireGuardConfig) (ds []config.Diagnostic) {
@@ -72,7 +75,7 @@ func safeLint(cfg *config.WireGuardConfig, others map[string]*config.WireGuardCo
 			ds = nil
 		}
 	}()
-	return config.Lint(cfg, others)
+	return lintConfig(cfg, others)
 }
 
 // GetConfigText returns the serialized form of a stored tunnel's config.

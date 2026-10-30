@@ -121,7 +121,7 @@ test('gatewayCandidates mirrors the Go helper', () => {
 });
 
 test('reverseZones mirrors the Go helper', () => {
-  assert.deepEqual(reverseZones(['192.168.1.0/24', '10.0.0.0/16', '10.0.0.0/8', '0.0.0.0/0', '10.5.0.9/32']), ['1.168.192.in-addr.arpa', '0.10.in-addr.arpa', '10.in-addr.arpa', '0.5.10.in-addr.arpa']);
+  assert.deepEqual(reverseZones(['192.168.1.0/24', '10.0.0.0/16', '10.0.0.0/8', '0.0.0.0/0', '10.5.0.9/32']), ['1.168.192.in-addr.arpa', '0.10.in-addr.arpa', '10.in-addr.arpa']);
 });
 
 test('dnsValueContext finds the token after DNS =', () => {
@@ -176,6 +176,10 @@ test('reverseZones never covers more than the route', () => {
   assert.deepEqual(reverseZones(['10.1.0.0/22']), [
     '0.1.10.in-addr.arpa', '1.1.10.in-addr.arpa', '2.1.10.in-addr.arpa', '3.1.10.in-addr.arpa',
   ]);
+});
+
+test('reverseZones gives nothing for prefixes longer than /24', () => {
+  assert.deepEqual(reverseZones(['10.0.0.5/32', '10.0.0.128/25', '10.0.0.252/30']), []);
 });
 
 test('dnsCompletionOptions is prefix-only and never fuzzy-matches typed servers', () => {

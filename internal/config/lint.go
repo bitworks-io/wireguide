@@ -217,13 +217,13 @@ var privateNets = func() []*net.IPNet {
 
 // allPrivate reports whether every CIDR lies entirely inside private space.
 func allPrivate(cidrs []string) bool {
-	any := false
+	found := false
 	for _, c := range cidrs {
 		_, n, err := net.ParseCIDR(c)
 		if err != nil {
 			continue
 		}
-		any = true
+		found = true
 		ones, _ := n.Mask.Size()
 		inside := false
 		for _, p := range privateNets {
@@ -237,7 +237,7 @@ func allPrivate(cidrs []string) bool {
 			return false
 		}
 	}
-	return any
+	return found
 }
 
 func hasReverseZone(match []string) bool {
@@ -286,11 +286,13 @@ func GatewayCandidates(allowed []string) []string {
 }
 
 // ReverseZones derives in-addr.arpa zones from IPv4 AllowedIPs. A zone must
-// never cover more address space than the route, so: prefixes of /24 or longer
-// yield the /24 containing the entry; /8 and /16 yield the whole-octet zone;
-// other prefixes yield the covered next-octet sub-zones (172.16.0.0/12 would
-// need 16, so it is skipped; 10.1.0.0/22 yields four) only when at most 8.
-// Prefixes shorter than /8 are skipped. De-duplicated and capped at 8.
+// never cover more address space than the route, so: a /24 yields its own
+// zone; /8 and /16 yield the whole-octet zone; other prefixes of /9 to /23
+// yield the covered next-octet sub-zones (172.16.0.0/12 would need 16, so it is
+// skipped; 10.1.0.0/22 yields four) only when at most 8. Prefixes longer than
+// /24 (such as a single host) and shorter than /8 yield nothing, because the
+// smallest zone this derives is a /24 and it would cover more than the route.
+// De-duplicated and capped at 8.
 func ReverseZones(allowed []string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -307,7 +309,7 @@ func ReverseZones(allowed []string) []string {
 		}
 		ones, bits := n.Mask.Size()
 		base := n.IP.To4()
-		if bits != 32 || base == nil || ones < 8 {
+		if bits != 32 || base == nil || ones < 8 || ones > 24 {
 			continue
 		}
 		octets := (ones + 7) / 8
