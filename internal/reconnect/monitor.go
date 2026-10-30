@@ -134,6 +134,12 @@ type Monitor struct {
 	// SetHealthCheck. Default: false.
 	healthCheckEnabled bool
 
+	// noHandshakeStreak counts, per tunnel, the health-check reconnects
+	// triggered by a tunnel that never completed a handshake. It drives the
+	// exponential backoff in staleThresholdFor and is cleared when a
+	// handshake completes or the tunnel's retry is cancelled. Guarded by mu.
+	noHandshakeStreak map[string]int
+
 	// lastWake is when the sleep detector last reported a wake. The
 	// handshake check is skipped for wakeGrace afterwards and never counts
 	// time from before the wake. Guarded by mu.
@@ -383,6 +389,7 @@ func (m *Monitor) CancelRetry() {
 		}
 		delete(m.retries, name)
 	}
+	clear(m.noHandshakeStreak)
 }
 
 // CancelRetryFor aborts the in-flight reconnect attempt for a
@@ -391,6 +398,7 @@ func (m *Monitor) CancelRetry() {
 func (m *Monitor) CancelRetryFor(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	delete(m.noHandshakeStreak, name)
 	if r, ok := m.retries[name]; ok {
 		if r.cancel != nil {
 			r.cancel()
@@ -471,31 +479,74 @@ func (m *Monitor) checkHandshakes(now time.Time) {
 	// Check EACH tunnel's handshake individually. If a specific
 	// tunnel is stale, disconnect and reconnect only THAT tunnel.
 	for _, status := range m.manager.AllStatuses() {
-		if status == nil || status.LastHandshakeTime.IsZero() {
+		if status == nil || status.State != domain.StateConnected {
 			continue
 		}
-		if status.State != domain.StateConnected {
-			continue
+		tunnelName := status.TunnelName
+		neverHandshaked := status.LastHandshakeTime.IsZero()
+		ref := status.LastHandshakeTime
+		if neverHandshaked {
+			// No handshake yet. Only a tunnel that has sent traffic is
+			// treated as dead: handshake initiations count in TxBytes, so
+			// Tx > 0 without a handshake means they went unanswered. An
+			// idle tunnel (Tx == 0) is left alone.
+			// (If the WireGuardNT counters exclude handshake packets, such a
+			// tunnel stays at Tx == 0 and simply keeps the old behaviour.)
+			if status.TxBytes <= 0 || status.ConnectedAt.IsZero() {
+				continue
+			}
+			ref = status.ConnectedAt
 		}
 		if filter != nil && !filter(status.TunnelName, enabled) {
 			continue
 		}
 		// Time spent asleep is not evidence of a dead peer: measure from
-		// the wake when the last handshake predates it.
-		ref := status.LastHandshakeTime
+		// the wake when the reference time predates it.
 		if lastWake.After(ref) {
 			ref = lastWake
 		}
 		age := now.Sub(ref)
-		if age > handshakeStaleThreshold {
-			tunnelName := status.TunnelName
+		threshold := m.staleThresholdFor(tunnelName, neverHandshaked)
+		if age > threshold {
 			slog.Warn("handshake stale, triggering per-tunnel reconnect",
 				"tunnel", tunnelName,
 				"last_handshake_age", age.Round(time.Second),
-				"threshold", handshakeStaleThreshold)
-			m.startReconnectTunnel(tunnelName, true, nil)
+				"threshold", threshold,
+				"never_handshaked", neverHandshaked)
+			if m.startReconnectTunnel(tunnelName, true, nil) && neverHandshaked {
+				m.noteNoHandshakeReconnect(tunnelName)
+			}
 		}
 	}
+}
+
+// maxNoHandshakeBackoff caps the threshold doubling for tunnels whose peer
+// never answers (180 s << 4 = 48 min between attempts).
+const maxNoHandshakeBackoff = 4
+
+// staleThresholdFor returns the staleness threshold for a tunnel. A tunnel
+// that has never completed a handshake since its last health-check reconnect
+// (peer down, endpoint changed) is retried with exponential backoff: each
+// such reconnect "succeeds" (resetting ConnectedAt) without proving the peer
+// is reachable. Any completed handshake resets the streak.
+func (m *Monitor) staleThresholdFor(name string, neverHandshaked bool) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !neverHandshaked {
+		delete(m.noHandshakeStreak, name)
+		return handshakeStaleThreshold
+	}
+	n := min(m.noHandshakeStreak[name], maxNoHandshakeBackoff)
+	return handshakeStaleThreshold << n
+}
+
+func (m *Monitor) noteNoHandshakeReconnect(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.noHandshakeStreak == nil {
+		m.noHandshakeStreak = make(map[string]int)
+	}
+	m.noHandshakeStreak[name]++
 }
 
 func (m *Monitor) triggerReconnect() {
@@ -549,11 +600,11 @@ func (m *Monitor) cancelInvalidRetry(name string, entry *retryState) bool {
 	return true
 }
 
-func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool) {
+func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool) bool {
 	m.mu.Lock()
 	if !m.running || (onlyIfIdle && (m.retries[tunnelName] != nil || m.retries[""] != nil)) {
 		m.mu.Unlock()
-		return
+		return false
 	}
 
 	// Cancel ONLY the previous retry for this same key — per-tunnel
@@ -624,6 +675,7 @@ func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, still
 
 		m.reconnectWithBackoff(ctx, tunnelName, entry)
 	}()
+	return true
 }
 
 // disconnectAll tears down every connected tunnel for the all-tunnels path.

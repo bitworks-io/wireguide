@@ -10,6 +10,7 @@ All notable changes to WireGuide will be documented in this file.
 ### Fixed
 - **Connection history byte totals** - sessions no longer record 0 B (or only the bytes since the last reconnect) when a tunnel briefly reports zeroed counters while connecting or disconnecting, or when a reconnect restarts the counters.
 - **Handshake health check after sleep** - time spent asleep (or offline, on macOS) no longer counts as a dead handshake. The check pauses for 90 seconds after a wake, measures handshake age from the wake when the last handshake predates it, skips while macOS reports no primary network interface, and no longer starts a per-tunnel reconnect while a wake or network-change reconnect (or an earlier retry for that tunnel) is still in progress, so DNS protection and the kill switch are not suspended by overlapping retries.
+- **Tunnels that never handshake** - with the handshake health check on, a connected tunnel that has sent traffic but never completed a handshake (peer down, stale DDNS address) is now reconnected after 180 seconds, then with exponential backoff (up to 48 minutes) until a handshake completes or the tunnel is disconnected. A tunnel that has sent no traffic is left alone, as before. On the WireGuardNT engine this relies on its transmit counter including handshake initiations; if it does not, such tunnels keep the previous behaviour.
 
 ## [0.6.1] - 2026-10-26
 
