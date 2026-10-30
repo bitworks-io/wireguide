@@ -8,12 +8,17 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/korjwl1/wireguide/internal/config"
 )
 
 // ZipImportResult holds the outcome of importing one .conf entry from a zip.
 type ZipImportResult struct {
 	Name  string `json:"name"`
 	Error string `json:"error,omitempty"`
+	// Warnings carries non-blocking lint findings for an entry that
+	// imported successfully (e.g. a shared interface Address).
+	Warnings []config.Diagnostic `json:"warnings,omitempty"`
 }
 
 // zipUniqueName returns a tunnel name that doesn't conflict with existing ones.
@@ -137,10 +142,10 @@ func (s *TunnelService) importZipReader(r *zip.Reader) ([]ZipImportResult, error
 			results = append(results, ZipImportResult{Name: baseName, Error: err.Error()})
 			continue
 		}
-		if _, err := s.ImportConfig(name, string(data)); err != nil {
+		if info, err := s.ImportConfig(name, string(data)); err != nil {
 			results = append(results, ZipImportResult{Name: baseName, Error: err.Error()})
 		} else {
-			results = append(results, ZipImportResult{Name: name})
+			results = append(results, ZipImportResult{Name: name, Warnings: info.Warnings})
 		}
 	}
 	if len(results) == 0 {

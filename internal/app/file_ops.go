@@ -20,10 +20,18 @@ func (s *TunnelService) ImportConfig(name, content string) (*TunnelInfo, error) 
 	if len(cfg.Peers) > 0 {
 		endpoint = cfg.Peers[0].Endpoint
 	}
-	return &TunnelInfo{
+	info := &TunnelInfo{
 		Name:     cfg.Name,
 		Endpoint: endpoint,
-	}, nil
+	}
+	// Non-blocking: surface a duplicate-Address warning against the other
+	// saved tunnels. The import has already succeeded.
+	for _, d := range safeLint(cfg, s.otherTunnelConfigs(cfg.Name)) {
+		if d.Code == "address_shared" {
+			info.Warnings = append(info.Warnings, d)
+		}
+	}
+	return info, nil
 }
 
 // BaseName extracts the filename without extension from a path.
@@ -43,6 +51,58 @@ func (s *TunnelService) ValidateConfig(content string) ([]string, error) {
 		return nil, nil
 	}
 	return result.ErrorMessages(), nil
+}
+
+// LintConfigFor returns advisory (non-blocking) editor diagnostics for a raw
+// config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
+// editing is the saved tunnel name being edited ("" for a new tunnel); it is
+// excluded from the cross-tunnel duplicate-Address check so an edit never
+// "conflicts" with its own saved copy. It never affects whether a config is
+// valid. Content that does not parse yields no diagnostics (ValidateConfig
+// reports the parse error).
+func (s *TunnelService) LintConfigFor(editing, content string) ([]config.Diagnostic, error) {
+	cfg, err := config.Parse(content)
+	if err != nil {
+		return []config.Diagnostic{}, nil
+	}
+	ds := safeLint(cfg, s.otherTunnelConfigs(editing))
+	if ds == nil {
+		ds = []config.Diagnostic{}
+	}
+	return ds, nil
+}
+
+// otherTunnelConfigs loads every saved tunnel except `exclude`. Unreadable
+// tunnels are skipped.
+func (s *TunnelService) otherTunnelConfigs(exclude string) map[string]*config.WireGuardConfig {
+	if s.tunnelStore == nil {
+		return nil
+	}
+	names, err := s.tunnelStore.List()
+	if err != nil {
+		return nil
+	}
+	others := make(map[string]*config.WireGuardConfig, len(names))
+	for _, n := range names {
+		if n == exclude {
+			continue
+		}
+		if c, err := s.tunnelStore.Load(n); err == nil {
+			others[n] = c
+		}
+	}
+	return others
+}
+
+// safeLint runs config.Lint but never lets a panic escape: linting is advisory
+// and must not be able to kill the GUI or fail an already-saved import.
+func safeLint(cfg *config.WireGuardConfig, others map[string]*config.WireGuardConfig) (ds []config.Diagnostic) {
+	defer func() {
+		if r := recover(); r != nil {
+			ds = nil
+		}
+	}()
+	return config.Lint(cfg, others)
 }
 
 // GetConfigText returns the serialized form of a stored tunnel's config.
