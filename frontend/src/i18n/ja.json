@@ -261,7 +261,24 @@
     "helper_repair_done": "ヘルパーを修復しました。",
     "automation_v3_recoverable": "{names} のルールは Wi-Fi 名のリストまたは接続の種類を使用しており、以前のバージョンの WireGuide によって削除されました。バックアップがあります。",
     "automation_v3_restore": "ルールを復元",
-    "automation_v3_restore_failed": "ルールを復元できませんでした。"
+    "automation_v3_restore_failed": "ルールを復元できませんでした。",
+    "section_reset": "ネットワークのリセット",
+    "reset_dns": "DNS とファイアウォールをリセット…",
+    "reset_dns_hint": "クラッシュや切断の後も DNS やインターネットが使えない場合、WireGuide が変更した内容をすべて取り除きます。トンネルと設定は保持されます。",
+    "reset_dns_title": "DNS とファイアウォールをリセットしますか?",
+    "reset_dns_intro": "次の処理を行います:",
+    "reset_dns_item_firewall": "WireGuide のファイアウォールルール(キルスイッチと DNS 保護)を削除",
+    "reset_dns_item_split": "WireGuide のスプリット DNS エントリを削除",
+    "reset_dns_item_recovery": "復元が保留中なら、VPN 接続前の DNS 設定の復元を今すぐ再試行",
+    "reset_dns_item_cache": "DNS キャッシュを消去",
+    "reset_dns_force": "先にすべてのトンネルを切断(保留中の再接続を含む)",
+    "reset_dns_ks_off": "キルスイッチをオフにする(オフにしないと数秒以内に再びすべての通信を遮断します)",
+    "reset_dns_refused_tunnels": "接続中または再接続待ちのトンネルがあります: {tunnels}。先に切断するよう選択してください。",
+    "reset_dns_refused_ks": "先にキルスイッチをオフにしてください。リセット直後に再びすべての通信を遮断します。",
+    "reset_dns_go": "リセット",
+    "reset_dns_running": "リセット中…",
+    "reset_dns_done": "DNS とファイアウォールをリセットしました。",
+    "reset_dns_partial": "リセット中に問題が発生しました:"
   },
   "confirm": {
     "delete_title": "トンネルを削除しますか？",
@@ -530,5 +547,31 @@
     "connect": "接続",
     "disconnect": "切断",
     "cancel": "キャンセル"
+  },
+  "reset_dns": {
+    "step": {
+      "disconnect": "トンネル",
+      "remaining": "トンネル",
+      "kill_switch": "キルスイッチ",
+      "firewall": "ファイアウォールルール",
+      "split_dns": "スプリット DNS",
+      "dns_recovery": "DNS の復元",
+      "dns_cache": "DNS キャッシュ"
+    },
+    "detail": {
+      "disconnect_ok": "切断しました: {tunnels}",
+      "disconnect_failed": "切断できませんでした: {error}",
+      "remaining_failed": "まだ接続中のため、他の処理は行いませんでした: {tunnels}",
+      "kill_switch_ok": "キルスイッチをオフにしました",
+      "kill_switch_failed": "キルスイッチの設定はオフですが、解除に失敗しました: {error}",
+      "firewall_ok": "WireGuide のファイアウォールルールを削除しました",
+      "firewall_failed": "ファイアウォールルールを削除できませんでした: {error}",
+      "split_dns_ok": "スプリット DNS エントリを削除しました",
+      "split_dns_failed": "スプリット DNS エントリを削除できませんでした: {error}",
+      "dns_recovery_ok": "保留中だった DNS 復元 {count} 件を完了しました",
+      "dns_recovery_none": "保留中の DNS 復元はありません",
+      "dns_recovery_pending": "{tunnels} の復元はまだ保留中です。保存された設定は保持され、再試行されます",
+      "dns_cache_ok": "DNS キャッシュを消去しました"
+    }
   }
 }

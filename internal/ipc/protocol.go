@@ -45,9 +45,11 @@ import (
 // reports as unknown.
 // Minor 11 adds AutomationPreviewResponse.Medium (connection type of the primary
 // interface) for connection-type automation rules.
+// Minor 12 adds Network.ResetDNS, the "Reset DNS & firewall" escape hatch; an
+// older helper answers method-not-found and clients say it must be updated.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 11
+	ProtocolMinor = 12
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -190,6 +192,11 @@ const (
 	// (version, how it was started, socket, pid) for the Settings status
 	// card. Minor 9; an older helper answers method-not-found.
 	MethodHelperInfo = "Helper.Info"
+	// MethodResetDNS flushes WireGuide's firewall rules and split-DNS keys,
+	// retries any retained DNS recovery journal now and flushes the DNS
+	// cache. Refused while a tunnel is connected, wanted or pending restore
+	// (unless forced) or while the kill switch is wanted. Minor 12.
+	MethodResetDNS = "Network.ResetDNS"
 )
 
 // Event names (server → client notifications)

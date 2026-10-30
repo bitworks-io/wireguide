@@ -76,6 +76,11 @@ wireguide ctl dnsleak                        # check whether DNS leaks outside t
 wireguide ctl routes                         # OS routing table
 wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake/routes/split-DNS check; exit 1 on failure
+wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
+                                             # escape hatch: drop WireGuide firewall rules + split DNS,
+                                             # retry pending DNS recovery, flush the DNS cache.
+                                             # Refused while tunnels are up (--force disconnects them)
+                                             # or the kill switch is on (--kill-switch-off).
 ` + "```" + `
 Every command exits non-zero on failure and prints a one-line error to stderr,
 so it composes in scripts. ` + "`connect`/`disconnect`/`status`/`set`" + ` need the app

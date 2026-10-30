@@ -294,6 +294,11 @@ wireguide ctl routes                         # OS routing table
 wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake, routes and split-DNS resolvers; exit 1 on failure
 
+# Escape hatch: remove WireGuide's firewall rules and split DNS, retry any
+# pending DNS recovery and flush the DNS cache (also in Settings > Advanced).
+# Refused while tunnels are up or the kill switch is on, unless you ask:
+wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
+
 # Teach coding agents (Claude Code, Codex, ...) how to drive the CLI:
 wireguide ctl install-skills
 

@@ -261,7 +261,24 @@
     "helper_repair_done": "辅助程序已修复。",
     "automation_v3_recoverable": "{names} 的规则使用了 Wi-Fi 名称列表或连接类型，已被旧版 WireGuide 删除。可从备份恢复。",
     "automation_v3_restore": "恢复规则",
-    "automation_v3_restore_failed": "无法恢复规则。"
+    "automation_v3_restore_failed": "无法恢复规则。",
+    "section_reset": "网络重置",
+    "reset_dns": "重置 DNS 和防火墙…",
+    "reset_dns_hint": "如果崩溃或断开连接后 DNS 或网络仍无法使用，此操作会撤销 WireGuide 所做的全部更改。隧道和设置会保留。",
+    "reset_dns_title": "重置 DNS 和防火墙？",
+    "reset_dns_intro": "此操作将：",
+    "reset_dns_item_firewall": "移除 WireGuide 的防火墙规则（终止开关和 DNS 保护）",
+    "reset_dns_item_split": "移除 WireGuide 的分流 DNS 条目",
+    "reset_dns_item_recovery": "如有待处理的恢复，立即重试恢复连接 VPN 前的 DNS 设置",
+    "reset_dns_item_cache": "清除 DNS 缓存",
+    "reset_dns_force": "先断开所有隧道（包括等待中的重连）",
+    "reset_dns_ks_off": "关闭终止开关（否则几秒内会再次阻断所有流量）",
+    "reset_dns_refused_tunnels": "有隧道已连接或正在等待重连：{tunnels}。请选择先断开它们。",
+    "reset_dns_refused_ks": "请先关闭终止开关：否则重置后会立即再次阻断所有流量。",
+    "reset_dns_go": "重置",
+    "reset_dns_running": "正在重置…",
+    "reset_dns_done": "已重置 DNS 和防火墙。",
+    "reset_dns_partial": "重置完成，但出现问题："
   },
   "confirm": {
     "delete_title": "删除隧道？",
@@ -530,5 +547,31 @@
     "connect": "连接",
     "disconnect": "断开连接",
     "cancel": "取消"
+  },
+  "reset_dns": {
+    "step": {
+      "disconnect": "隧道",
+      "remaining": "隧道",
+      "kill_switch": "终止开关",
+      "firewall": "防火墙规则",
+      "split_dns": "分流 DNS",
+      "dns_recovery": "DNS 恢复",
+      "dns_cache": "DNS 缓存"
+    },
+    "detail": {
+      "disconnect_ok": "已断开：{tunnels}",
+      "disconnect_failed": "无法断开：{error}",
+      "remaining_failed": "仍处于连接状态，未进行其他更改：{tunnels}",
+      "kill_switch_ok": "已关闭终止开关",
+      "kill_switch_failed": "终止开关设置已关闭，但移除失败：{error}",
+      "firewall_ok": "已移除 WireGuide 防火墙规则",
+      "firewall_failed": "无法移除防火墙规则：{error}",
+      "split_dns_ok": "已移除分流 DNS 条目",
+      "split_dns_failed": "无法移除分流 DNS 条目：{error}",
+      "dns_recovery_ok": "已完成 {count} 项待处理的 DNS 恢复",
+      "dns_recovery_none": "没有待处理的 DNS 恢复",
+      "dns_recovery_pending": "{tunnels} 的恢复仍在等待；保存的设置会保留并将重试",
+      "dns_cache_ok": "已清除 DNS 缓存"
+    }
   }
 }

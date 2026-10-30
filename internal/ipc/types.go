@@ -35,6 +35,44 @@ type HelperInfoResponse struct {
 	GUIAttached      bool   `json:"gui_attached"`
 }
 
+// ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 7).
+type ResetDNSRequest struct {
+	// Force disconnects every connected, wanted or pending-restore tunnel
+	// first, as an explicit user Off.
+	Force bool `json:"force,omitempty"`
+	// KillSwitchOff turns the kill switch setting off first. Without it a
+	// wanted kill switch refuses the reset: its blockade would come back on
+	// the next reconcile tick.
+	KillSwitchOff bool `json:"kill_switch_off,omitempty"`
+}
+
+// Reasons a Network.ResetDNS request was refused (ResetDNSResponse.Reason).
+const (
+	ResetRefusedTunnels    = "tunnels_active"
+	ResetRefusedKillSwitch = "kill_switch_on"
+)
+
+// ResetDNSResponse reports a Network.ResetDNS run. A refused request changed
+// nothing. Steps run in order; a failed step does not hide the others.
+type ResetDNSResponse struct {
+	Refused bool   `json:"refused"`
+	Reason  string `json:"reason,omitempty"`
+	// ConnectedTunnels lists the tunnels that caused a refusal, or that were
+	// still up after a forced disconnect.
+	ConnectedTunnels []string       `json:"connected_tunnels,omitempty"`
+	Steps            []ResetDNSStep `json:"steps"`
+}
+
+// ResetDNSStep is one step of a reset. DetailKey/DetailParams let the GUI
+// localize the detail; Detail is the English text (CLI, and the fallback).
+type ResetDNSStep struct {
+	Name         string            `json:"name"`
+	OK           bool              `json:"ok"`
+	DetailKey    string            `json:"detail_key,omitempty"`
+	DetailParams map[string]string `json:"detail_params,omitempty"`
+	Detail       string            `json:"detail"`
+}
+
 // ConnectRequest is the parameter for Tunnel.Connect.
 type ConnectRequest struct {
 	Config *domain.WireGuardConfig `json:"config"`

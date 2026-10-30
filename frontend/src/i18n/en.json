@@ -261,7 +261,24 @@
     "helper_repair_done": "Helper repaired.",
     "automation_v3_recoverable": "Rules for {names} use Wi-Fi name lists or connection type and were removed by an older version of WireGuide. A backup is available.",
     "automation_v3_restore": "Restore rules",
-    "automation_v3_restore_failed": "Could not restore rules."
+    "automation_v3_restore_failed": "Could not restore rules.",
+    "section_reset": "Network reset",
+    "reset_dns": "Reset DNS & firewall…",
+    "reset_dns_hint": "If DNS or the internet stays broken after a crash or disconnect, this removes everything WireGuide changed. Your tunnels and settings are kept.",
+    "reset_dns_title": "Reset DNS & firewall?",
+    "reset_dns_intro": "This will:",
+    "reset_dns_item_firewall": "Remove WireGuide’s firewall rules (kill switch and DNS protection)",
+    "reset_dns_item_split": "Remove WireGuide’s split DNS entries",
+    "reset_dns_item_recovery": "Retry restoring the pre-VPN DNS settings now, if a restore is pending",
+    "reset_dns_item_cache": "Flush the DNS cache",
+    "reset_dns_force": "Disconnect all tunnels first (including pending reconnects)",
+    "reset_dns_ks_off": "Turn off the kill switch (otherwise it blocks all traffic again within seconds)",
+    "reset_dns_refused_tunnels": "Tunnels are connected or waiting to reconnect: {tunnels}. Choose to disconnect them first.",
+    "reset_dns_refused_ks": "Turn off the kill switch first: it would block all traffic again right after the reset.",
+    "reset_dns_go": "Reset",
+    "reset_dns_running": "Resetting…",
+    "reset_dns_done": "DNS and firewall reset.",
+    "reset_dns_partial": "Reset finished with problems:"
   },
   "confirm": {
     "delete_title": "Delete tunnel?",
@@ -530,5 +547,31 @@
     "connect": "Connect",
     "disconnect": "Disconnect",
     "cancel": "Cancel"
+  },
+  "reset_dns": {
+    "step": {
+      "disconnect": "Tunnels",
+      "remaining": "Tunnels",
+      "kill_switch": "Kill switch",
+      "firewall": "Firewall rules",
+      "split_dns": "Split DNS",
+      "dns_recovery": "DNS recovery",
+      "dns_cache": "DNS cache"
+    },
+    "detail": {
+      "disconnect_ok": "Disconnected: {tunnels}",
+      "disconnect_failed": "Could not disconnect: {error}",
+      "remaining_failed": "Still connected, nothing else was changed: {tunnels}",
+      "kill_switch_ok": "Kill switch turned off",
+      "kill_switch_failed": "Kill switch setting is off, but removing it failed: {error}",
+      "firewall_ok": "WireGuide firewall rules removed",
+      "firewall_failed": "Could not remove the firewall rules: {error}",
+      "split_dns_ok": "Split DNS entries removed",
+      "split_dns_failed": "Could not remove split DNS entries: {error}",
+      "dns_recovery_ok": "Completed {count} pending DNS recovery task(s)",
+      "dns_recovery_none": "No DNS recovery was pending",
+      "dns_recovery_pending": "Still pending for {tunnels}; the saved settings are kept and will be retried",
+      "dns_cache_ok": "DNS cache flushed"
+    }
   }
 }
