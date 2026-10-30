@@ -12,6 +12,7 @@ export {
     CurrentNetwork,
     DNSLeakResult,
     DNSServer,
+    HelperInfo,
     KnownSSIDs,
     ProfileMutationResult,
     RouteEntry,

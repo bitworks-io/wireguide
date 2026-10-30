@@ -21,6 +21,7 @@
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
   import { createEventScope } from './lib/event-scope.js';
+  import { offersRepair } from './lib/helper-info.js';
   import { uniqueImportName, fileBase64, checkImportSize, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
@@ -33,6 +34,7 @@
   // Modal state
   let showEditor = false;
   let showSettings = false;
+  let settingsTab = 'general';
   let showConflictWarning = false;
   let showZipResult = false;
   let zipResults = [];
@@ -174,6 +176,9 @@
       if (!alive) {
         showToast('⚠ ' + (message || $t('app.helper_disconnected')));
       } else {
+        // A helper that answers again resolves the outage banner (and its
+        // repair offer).
+        criticalErrors = criticalErrors.filter(e => !offersRepair(e));
         showToast($t('app.helper_reconnected'));
       }
     });
@@ -243,10 +248,12 @@
     // helper subsystem (status broadcast, latency probe, wifi rules)
     // is permanently dead and the user should restart the helper.
     appEvents.on('critical_error', (event) => {
-      const { where, detail } = event.data || {};
+      const { where, detail, code, action } = event.data || {};
       const next = [...criticalErrors, {
         where: where || 'unknown',
         detail: detail || '',
+        code: code || '',
+        action: action || '',
         at: new Date().toLocaleTimeString(),
       }];
       // Cap at the 5 most recent entries. A storm of helper goSafe
@@ -263,6 +270,20 @@
     stopLogListener();
     if (toastTimer) clearTimeout(toastTimer);
   });
+
+  // Banner text for a critical error: the unavailable-helper outage is
+  // translated by its code; anything else keeps the existing wording.
+  function criticalDetail(e) {
+    if (e.code === 'helper_unavailable') return $t('app.helper_unavailable');
+    return e.where === 'Helper connection' ? $t('app.helper_disconnected') : e.detail;
+  }
+
+  // The repair button opens Settings on the Advanced tab, where the Helper card
+  // explains the action before anything asks for a password.
+  function openHelperRepair() {
+    settingsTab = 'advanced';
+    showSettings = true;
+  }
 
   function dismissCriticalError(idx) {
     criticalErrors = criticalErrors.filter((_, i) => i !== idx);
@@ -660,12 +681,17 @@
       {#each criticalErrors as e, i}
         <div class="critical-banner-row">
           <span class="critical-banner-where">{e.where === 'Helper connection' ? $t('settings.section_connection') : e.where}</span>
-          <span class="critical-banner-detail">{e.where === 'Helper connection' ? $t('app.helper_disconnected') : e.detail}</span>
+          <span class="critical-banner-detail">{criticalDetail(e)}</span>
           <span class="critical-banner-time">{e.at}</span>
           <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label={$t('app.dismiss')}>×</button>
         </div>
       {/each}
-      <div class="critical-banner-hint">{$t('app.helper_restart_hint')}</div>
+      {#if criticalErrors.some(offersRepair)}
+        <button class="critical-banner-action" on:click={openHelperRepair}>{$t('app.repair_helper')}</button>
+      {/if}
+      {#if criticalErrors.some(e => !offersRepair(e))}
+        <div class="critical-banner-hint">{$t('app.helper_restart_hint')}</div>
+      {/if}
     </div>
   {/if}
 
@@ -835,7 +861,7 @@
   {/if}
 
   {#if showSettings}
-    <Settings {TunnelService} onClose={() => showSettings = false} {updateInfo} onInstall={handleUpdate} />
+    <Settings {TunnelService} initialTab={settingsTab} onClose={() => { showSettings = false; settingsTab = 'general'; }} {updateInfo} onInstall={handleUpdate} />
   {/if}
 
   {#if showConflictWarning}
@@ -1323,6 +1349,17 @@
     padding: 0 var(--space-2);
     line-height: 1;
   }
+  .critical-banner-action {
+    margin-top: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 6px;
+    color: white;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .critical-banner-action:hover { background: rgba(255, 255, 255, 0.3); }
   .critical-banner-hint {
     margin-top: var(--space-2);
     font-size: 0.75rem;

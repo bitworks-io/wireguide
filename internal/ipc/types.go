@@ -17,6 +17,24 @@ type PingResponse struct {
 // GUIKnown distinguishes absent metadata in older helpers.
 func (p PingResponse) GUIKnown() bool { return MinorOf(p.Version) >= 2 }
 
+// HelperInfoResponse is the read-only result of Helper.Info (protocol minor
+// >= 6).
+type HelperInfoResponse struct {
+	AppVersion      string `json:"app_version"`
+	ProtocolVersion string `json:"protocol_version"`
+	PID             int    `json:"pid"`
+	StartedAt       string `json:"started_at"` // RFC3339
+	// StartMode is "launchd-socket" (launchd started the helper through its
+	// socket), "legacy" (the helper listens on its own socket) or "direct".
+	StartMode  string `json:"start_mode"`
+	SocketPath string `json:"socket_path"`
+	// ActivationReason says how the helper came to run in that mode. It
+	// describes the helper's side only; it does not claim which client
+	// connection caused a launchd start.
+	ActivationReason string `json:"activation_reason,omitempty"`
+	GUIAttached      bool   `json:"gui_attached"`
+}
+
 // ConnectRequest is the parameter for Tunnel.Connect.
 type ConnectRequest struct {
 	Config *domain.WireGuardConfig `json:"config"`
@@ -166,6 +184,12 @@ type ForcedDisconnectPayload struct {
 type CriticalErrorPayload struct {
 	Where  string `json:"where"`
 	Detail string `json:"detail"`
+	// Code is an optional stable identifier ("helper_unavailable") the GUI
+	// maps to a translated message; Detail stays the English fallback.
+	// Action optionally names a remedy the GUI can offer ("repair_helper").
+	// Both are additive (protocol minor >= 6).
+	Code   string `json:"code,omitempty"`
+	Action string `json:"action,omitempty"`
 }
 
 // SettingsChangedPayload carries a single applied setting so a running

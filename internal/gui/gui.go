@@ -323,6 +323,12 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		}
 	}
 
+	// "Repair helper" in Settings > Advanced (and the helper-unavailable
+	// banner) runs the administrator repair path with the live client holder.
+	wgapp.SetHelperRepairer(func(ctx context.Context) error {
+		return repairHelper(ctx, clients, bridge, dataDir)
+	})
+
 	var healthWg sync.WaitGroup
 	startGUIHangMonitor(paths.LogsDir, healthDone, &healthWg)
 	healthWg.Add(1)

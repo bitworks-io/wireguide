@@ -59,12 +59,17 @@ func startupGraceFor(activated bool) time.Duration {
 
 // Helper holds the helper process state.
 type Helper struct {
-	server      *ipc.Server
-	activated   bool
-	guiSeen     atomic.Bool
-	guiSeenCh   chan struct{}
-	guiSeenOnce sync.Once
-	armedGrace  time.Duration
+	server    *ipc.Server
+	activated bool
+	// Process facts reported by Helper.Info; set once in Run before Serve.
+	startedAt        time.Time
+	startMode        string
+	socketPath       string
+	activationReason string
+	guiSeen          atomic.Bool
+	guiSeenCh        chan struct{}
+	guiSeenOnce      sync.Once
+	armedGrace       time.Duration
 	// Startup restore owns a lifetime lease until its first attempts finish.
 	// Guarded by mu; connect rollback and pending registration are separate.
 	restoreInProgress bool
@@ -307,7 +312,10 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired boo
 		autoConnectedBy: make(map[string]string),
 		logLevel:        new(slog.LevelVar), // defaults to Info
 		done:            make(chan struct{}),
+		startedAt:       time.Now(),
+		socketPath:      addr,
 	}
+	h.startMode, h.activationReason = describeStart(activated, runtime.GOOS)
 	fallback := func() {
 		var wg sync.WaitGroup
 		wg.Add(2)

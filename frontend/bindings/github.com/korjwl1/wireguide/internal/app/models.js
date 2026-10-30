@@ -199,6 +199,95 @@ export class DNSServer {
 }
 
 /**
+ * HelperInfo is the Settings > Advanced "Helper" card. Available is false
+ * when the helper cannot be asked at all; fields are blank when an older
+ * helper does not report them (it predates Helper.Info).
+ */
+export class HelperInfo {
+    /**
+     * Creates a new HelperInfo instance.
+     * @param {Partial<HelperInfo>} [$$source = {}] - The source object to create the HelperInfo.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("app_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["app_version"] = "";
+        }
+        if (!("protocol_version" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["protocol_version"] = "";
+        }
+        if (!("pid" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["pid"] = 0;
+        }
+        if (!("started_at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["started_at"] = "";
+        }
+        if (!("start_mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["start_mode"] = "";
+        }
+        if (!("socket_path" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["socket_path"] = "";
+        }
+        if (!("activation_reason" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["activation_reason"] = "";
+        }
+        if (!("gui_attached" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["gui_attached"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HelperInfo(/** @type {Partial<HelperInfo>} */($$parsedSource));
+    }
+}
+
+/**
  * KnownSSIDs is the response shape for GetKnownSSIDs. The frontend uses
  * it to render a picker so users can tap saved networks instead of
  * retyping SSIDs they've already joined.

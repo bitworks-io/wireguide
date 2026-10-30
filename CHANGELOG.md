@@ -4,6 +4,9 @@ All notable changes to WireGuide will be documented in this file.
 
 ## Unreleased
 
+### Added
+- **Helper status and Repair** - Settings > Advanced has a Helper card (version, start mode, socket, process ID, start time, whether the app is attached) backed by a new read-only `Helper.Info` request (IPC 1.6; older helpers fall back to Ping). **Repair helper...** reinstalls the helper on request, after a confirmation and WireGuide's own explanation of the administrator prompt; it is refused while a tunnel is connected, wanted or pending restore, and never touches saved state. The helper-unavailable banner now offers Repair instead of "quit and reopen".
+
 ### Changed
 - **macOS login items** - the helper LaunchDaemon and the auto-start LaunchAgent now declare WireGuide as their app (`AssociatedBundleIdentifiers`), so System Settings > Login Items & Extensions attributes them to WireGuide instead of an unidentified developer. An existing auto-start entry is refreshed at launch (only if it still points at this app); the helper plist change causes one reinstall alongside the next update.
 - **macOS administrator prompt** - a short dialog now explains why the password is needed (installing or repairing the VPN helper) just before macOS asks for it, in English, Korean, Japanese or Simplified Chinese. Cancel behaves like cancelling the password prompt.

@@ -10,12 +10,17 @@
   import ErrorNotice from './ErrorNotice.svelte';
   import { loadSettings, patchSettings, settingsErrors, settingRetryValue } from '../stores/settings.js';
   import { errText } from './errors.js';
+  import { createEventScope } from './event-scope.js';
+  import { startModeKey, isRepairBusy } from './helper-info.js';
 
   export let TunnelService;
   export let onClose = () => {};
   export let updateInfo = null;
   export let onInstall = null;
+  // Tab to open on (the helper-unavailable banner deep-links to 'advanced').
+  export let initialTab = 'general';
 
+  const settingsEvents = createEventScope((...args) => Events.On(...args));
   let aboutUpdating = false;
   let aboutShowVpnWarn = false;
   // updateState mirrors UpdateState DTO from GetUpdateState. Used by the
@@ -132,7 +137,7 @@
     }
   }
 
-  let activeTab = 'general';
+  let activeTab = initialTab;
   let settings = {
     language: getLanguage(),
     theme: 'system',
@@ -304,6 +309,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', onKeyDown);
+    settingsEvents.dispose();
     if (settingsChangedUnsub) settingsChangedUnsub();
     if (saveTimer) {
       clearTimeout(saveTimer);
@@ -337,6 +343,55 @@
     }
   }
 
+  // ---- Helper card and Repair (Advanced) ----
+  let helperInfo = { available: false };
+  async function refreshHelperInfo() {
+    try { helperInfo = (await TunnelService.GetHelperInfo()) || { available: false }; }
+    catch (_) { helperInfo = { available: false }; }
+  }
+  function helperModeLabel(mode) {
+    const key = startModeKey(mode);
+    return key ? $t('settings.helper_mode_' + key) : (mode || '—');
+  }
+  function helperReasonLabel(mode) {
+    const key = startModeKey(mode);
+    return key ? $t('settings.helper_reason_' + key) : '—';
+  }
+  function helperStarted(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  }
+  $: if (activeTab === 'advanced') refreshHelperInfo();
+
+  // Repair helper: the only action on this screen that prompts for a password.
+  // The confirm sheet comes first; WireGuide's own dialog then explains the
+  // prompt before the system asks.
+  let repairStage = ''; // '' | 'confirm' | 'running'
+  let repairError = '';
+  let repairDone = false;
+  function askRepair() {
+    repairError = '';
+    repairDone = false;
+    repairStage = 'confirm';
+  }
+  function cancelRepair() {
+    if (repairStage === 'confirm') repairStage = '';
+  }
+  async function doRepair() {
+    repairStage = 'running';
+    repairError = '';
+    try {
+      await TunnelService.RepairHelper();
+      repairDone = true;
+      await refreshHelperInfo();
+    } catch (e) {
+      const msg = errText(e);
+      repairError = isRepairBusy(msg) ? $t('settings.helper_repair_busy') : msg;
+    }
+    repairStage = '';
+  }
+
   // Register the listener synchronously and tear it down via
   // onDestroy. An `onMount(async ...)` callback returns a Promise,
   // not a cleanup function, so the cleanup we used to put after the
@@ -345,6 +400,9 @@
   onMount(() => {
     window.addEventListener('keydown', onKeyDown);
     settingsChangedUnsub = Events.On('settings_changed', onSettingsChanged);
+    // A restarted or repaired helper changes pid/start time: refresh the card.
+    settingsEvents.on('helper', () => { if (activeTab === 'advanced') return refreshHelperInfo(); });
+    settingsEvents.on('helper_reset', () => { if (activeTab === 'advanced') return refreshHelperInfo(); });
     // 60 s tick so the "Last checked Nm ago" line keeps current while
     // the Settings modal is open. Cleanup is in onDestroy above.
     nowTimer = setInterval(() => { nowTick = Date.now(); }, 60000);
@@ -526,6 +584,37 @@
           </div>
 
           <div class="settings-section">
+            <h4 class="section-title">{$t('settings.section_helper')}</h4>
+            <div class="settings-card">
+              {#if helperInfo.available}
+                <div class="setting-row"><span class="setting-label">{$t('settings.helper_version')}</span><span class="info-val">{helperInfo.app_version || '—'}</span></div>
+                {#if helperInfo.start_mode}
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_mode')}</span><span class="info-val">{helperModeLabel(helperInfo.start_mode)}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_reason')}</span><span class="info-val">{helperReasonLabel(helperInfo.start_mode)}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_socket')}</span><span class="info-val mono">{helperInfo.socket_path || '—'}</span></div>
+                  <div class="setting-row"><span class="setting-label">{$t('settings.helper_started')}</span><span class="info-val">{helperStarted(helperInfo.started_at)}</span></div>
+                {:else}
+                  <div class="setting-row"><p class="setting-desc">{$t('settings.helper_old')}</p></div>
+                {/if}
+                <div class="setting-row"><span class="setting-label">{$t('settings.helper_pid')}</span><span class="info-val">{helperInfo.pid || '—'}</span></div>
+                <div class="setting-row"><span class="setting-label">{$t('settings.helper_attached')}</span><span class="info-val">{helperInfo.gui_attached ? $t('settings.helper_attached_yes') : $t('settings.helper_attached_no')}</span></div>
+              {:else}
+                <div class="setting-row"><p class="setting-desc">{$t('settings.helper_unavailable')}</p></div>
+              {/if}
+              <div class="setting-row">
+                <div class="setting-info">
+                  <p class="setting-desc">{$t('settings.helper_repair_hint')}</p>
+                  {#if repairDone}<p class="setting-live-ok">{$t('settings.helper_repair_done')}</p>{/if}
+                  {#if repairError}<ErrorNotice message={repairError} />{/if}
+                </div>
+                <button class="warn-btn warn-proceed" disabled={repairStage !== ''} on:click={askRepair}>
+                  {repairStage === 'running' ? $t('settings.helper_repairing') : $t('settings.helper_repair')}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
             <h4 class="section-title">{$t('settings.section_logging')}</h4>
             <div class="settings-card">
               <div class="setting-row">
@@ -620,6 +709,26 @@
       <button type="button" class="btn-close" on:click={close}>{$t('settings.close')}</button>
     </div>
   </div>
+
+  {#if repairStage === 'confirm'}
+    <div class="confirm-backdrop" use:backdrop={cancelRepair}>
+      <div class="confirm-dialog" use:modal={cancelRepair} role="dialog" aria-modal="true" aria-labelledby="repair-confirm-title" tabindex="-1">
+        <div class="dialog-header">
+          <div class="dialog-icon-tile">
+            <Icon name="triangle-alert" size={18} strokeWidth={2} />
+          </div>
+          <div class="dialog-header-text">
+            <h3 id="repair-confirm-title">{$t('settings.helper_repair_title')}</h3>
+          </div>
+        </div>
+        <p class="dialog-message">{$t('settings.helper_repair_confirm')}</p>
+        <div class="confirm-footer">
+          <button class="dialog-btn dialog-btn-ghost" on:click={cancelRepair}>{$t('confirm.no')}</button>
+          <button class="dialog-btn dialog-btn-primary" on:click={doRepair}>{$t('settings.helper_repair_go')}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if pendingBackend}
     <div class="confirm-backdrop" use:backdrop={cancelBackendChange}>
@@ -812,6 +921,19 @@
     font: 400 13px/18px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
     color: var(--text-primary);
     cursor: pointer;
+  }
+  .info-val {
+    font: 400 12px/16px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-secondary);
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .info-val.mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
+  .setting-live-ok {
+    margin: 6px 0 0;
+    font: 400 11px/15px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--green, #30d158);
   }
   .setting-desc {
     margin: 3px 0 0;
