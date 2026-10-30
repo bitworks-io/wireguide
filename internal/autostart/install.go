@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/korjwl1/wireguide/internal/atomicfile"
 	"github.com/korjwl1/wireguide/internal/launchd"
 	"github.com/korjwl1/wireguide/internal/sysexec"
 )
@@ -91,7 +92,8 @@ func syncMacAutostartFile(path, appPath string) (bool, error) {
 	if string(cur) == want {
 		return false, nil
 	}
-	if err := os.WriteFile(path, []byte(want), 0644); err != nil {
+	// Atomic: a crash mid-write must not leave a truncated login-item plist.
+	if err := atomicfile.WriteFile(path, []byte(want), 0644); err != nil {
 		return false, err
 	}
 	return true, nil
