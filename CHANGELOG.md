@@ -2,6 +2,11 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Changed
+- **Helper log rotation** - the helper now writes `/var/log/wireguide-helper.log` itself through a size-based writer (10 MB x 5 files, `.1`-`.5`) instead of leaving launchd to append to it forever; an oversized log from before the upgrade is rotated at the first start. Identical wireguard-go warnings (for example "network is unreachable") are logged once per 60 s with a `suppressed_repeats` count, in the file and in the in-app log viewer. The LaunchDaemon plist's stdout/stderr now go to `/var/log/wireguide-helper.stderr.log` (panics and runtime output only), so the helper is reinstalled once on update, as with any plist change. On Windows, `WIREGUIDE_HELPER_STDERR=1` now writes a rotated `helper-stderr.log` plus `helper-stderr.panic.log` for runtime crashes.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added
