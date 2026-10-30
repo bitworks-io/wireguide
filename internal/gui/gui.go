@@ -276,6 +276,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	trayMgr.initialBuild()
 
 	if runtime.GOOS == "darwin" {
+		registerURLHandler(app, tunnelService)
 		app.Event.OnApplicationEvent(events.Mac.ApplicationWillTerminate, func(_ *application.ApplicationEvent) {
 			destroyNativeTray()
 		})

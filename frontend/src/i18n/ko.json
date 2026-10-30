@@ -475,5 +475,14 @@
     "routes_split": "다음 범위만 라우팅합니다: {ranges}.",
     "routes_none": "Table=off: 라우트를 추가하지 않습니다. 직접 추가하세요.",
     "routes_overlap": "{range}은(는) 현재 네트워크({network})와 겹치며 터널로 라우팅됩니다. 자동화는 이 터널을 자동 연결하지 않습니다."
+  },
+  "url_action": {
+    "connect_title": "링크로 연결할까요?",
+    "disconnect_title": "링크로 연결을 끊을까요?",
+    "connect_message": "링크 또는 단축어가 WireGuide에 \"{name}\" 연결을 요청했습니다.",
+    "disconnect_message": "링크 또는 단축어가 WireGuide에 \"{name}\" 연결 해제를 요청했습니다.",
+    "connect": "연결",
+    "disconnect": "연결 해제",
+    "cancel": "취소"
   }
 }

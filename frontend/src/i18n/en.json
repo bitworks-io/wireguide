@@ -475,5 +475,14 @@
     "routes_split": "Routes only: {ranges}.",
     "routes_none": "Table=off: installs no routes. Add them yourself.",
     "routes_overlap": "{range} overlaps your current network ({network}) and will be routed into the tunnel; automation will not auto-connect this tunnel."
+  },
+  "url_action": {
+    "connect_title": "Connect from a link?",
+    "disconnect_title": "Disconnect from a link?",
+    "connect_message": "A link or shortcut asked WireGuide to connect \"{name}\".",
+    "disconnect_message": "A link or shortcut asked WireGuide to disconnect \"{name}\".",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "cancel": "Cancel"
   }
 }

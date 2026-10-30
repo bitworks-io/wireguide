@@ -475,5 +475,14 @@
     "routes_split": "仅路由：{ranges}。",
     "routes_none": "Table=off：不会添加任何路由，请自行添加。",
     "routes_overlap": "{range} 与当前网络（{network}）重叠，将被路由到隧道中；自动化不会自动连接此隧道。"
+  },
+  "url_action": {
+    "connect_title": "通过链接连接？",
+    "disconnect_title": "通过链接断开连接？",
+    "connect_message": "某个链接或快捷指令请求 WireGuide 连接“{name}”。",
+    "disconnect_message": "某个链接或快捷指令请求 WireGuide 断开“{name}”。",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "cancel": "取消"
   }
 }

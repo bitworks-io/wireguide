@@ -475,5 +475,14 @@
     "routes_split": "次の範囲のみをルーティングします: {ranges}。",
     "routes_none": "Table=off: ルートを追加しません。手動で追加してください。",
     "routes_overlap": "{range} は現在のネットワーク（{network}）と重なり、トンネルにルーティングされます。自動化はこのトンネルを自動接続しません。"
+  },
+  "url_action": {
+    "connect_title": "リンクから接続しますか?",
+    "disconnect_title": "リンクから切断しますか?",
+    "connect_message": "リンクまたはショートカットが WireGuide に「{name}」の接続を要求しました。",
+    "disconnect_message": "リンクまたはショートカットが WireGuide に「{name}」の切断を要求しました。",
+    "connect": "接続",
+    "disconnect": "切断",
+    "cancel": "キャンセル"
   }
 }
