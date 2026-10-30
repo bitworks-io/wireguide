@@ -97,10 +97,6 @@ func cmdStatus(args []string) int {
 			fmt.Printf("○ %s  connecting\n", r.TunnelName)
 			continue
 		}
-		hs := r.LastHandshake
-		if hs == "" {
-			hs = "—"
-		}
 		fmt.Println(formatStatusRow(r, dns[r.TunnelName]))
 	}
 	return 0
