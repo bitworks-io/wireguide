@@ -3,6 +3,8 @@ package helper
 import (
 	"log/slog"
 
+	"github.com/korjwl1/wireguide/internal/domain"
+
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/tunnel"
 )
@@ -60,7 +62,7 @@ func (h *Helper) handleForcedDisconnect(ev tunnel.ForcedDisconnect) {
 	// during teardown, the next instance must see the block even while the
 	// old desired-tunnel entry is still in this first snapshot.
 	h.persistDesiredState()
-	h.teardownTunnelHeld(ev.TunnelName, "forced disconnect, no GUI attached")
+	h.teardownTunnelHeld(ev.TunnelName, domain.ChangeReasonWatchdog, "forced disconnect, no GUI attached")
 	h.server.Broadcast(ipc.EventForcedDisconnect, ipc.ForcedDisconnectPayload{
 		TunnelName: ev.TunnelName,
 		Reason:     ev.Reason,

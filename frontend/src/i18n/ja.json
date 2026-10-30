@@ -54,7 +54,21 @@
     "reason_reconnect": "再接続",
     "reason_app_quit": "アプリ終了",
     "reason_health_check": "自動復旧",
-    "reason_error": "エラー"
+    "reason_error": "エラー",
+    "started_by": "開始の理由",
+    "ssid": "Wi-Fi ネットワーク",
+    "reason_automation": "自動化で切断",
+    "reason_wake": "スリープ解除後に再接続",
+    "reason_network_change": "ネットワーク変更後に再接続",
+    "reason_recovery": "復旧によりリセット",
+    "reason_watchdog": "ルーティングループ保護により停止",
+    "start_user": "ユーザー",
+    "start_automation": "自動化",
+    "start_wake": "スリープ解除",
+    "start_network_change": "ネットワーク変更",
+    "start_health_check": "ヘルスチェック",
+    "start_reconnect": "再接続",
+    "start_recovery": "復旧"
   },
   "tunnel": {
     "list_title": "トンネル",

@@ -285,7 +285,7 @@ func TestHealthCheck_StaleHandshake_TriggersReconnect(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	waitFor(t, 2*time.Second, "reconnectFn called for stale handshake", func() bool {
 		return reconnectCalls.Load() > 0
@@ -359,7 +359,7 @@ func TestExponentialBackoff(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	select {
 	case <-done:
@@ -406,7 +406,7 @@ func TestCancelRetry_StopsInProgressReconnect(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Wait for at least one attempt to happen (the first backoff sleep).
 	waitFor(t, 2*time.Second, "first reconnect attempt", func() bool {
@@ -472,7 +472,7 @@ func TestFirewallCallbacks_CalledInOrder(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Wait for the retry goroutine to finish by watching retryDone.
 	mon.mu.Lock()
@@ -526,7 +526,7 @@ func TestFirewallCallbacks_ResumedOnFailure(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Wait for attempts to be exhausted.
 	waitFor(t, 2*time.Second, "max attempts reached", func() bool {
@@ -567,7 +567,7 @@ func TestMaxAttempts_LimitsRetries(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Wait for max attempts to be reached.
 	waitFor(t, 5*time.Second, "max attempts exhausted", func() bool {
@@ -603,7 +603,7 @@ func TestMaxAttempts_ZeroMeansUnlimited(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Let it run for enough attempts.
 	waitFor(t, 5*time.Second, "at least 5 attempts with unlimited retries", func() bool {
@@ -766,7 +766,7 @@ func TestGetState_ReflectsAttempt(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 	<-attemptSeen
 
 	state := mon.GetState()
@@ -831,7 +831,7 @@ func TestStatusCallback_CalledDuringReconnect(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	// Wait for completion.
 	waitFor(t, 2*time.Second, "reconnect finished", func() bool {
@@ -949,7 +949,7 @@ func TestBackoffCapsAtMaxDelay(t *testing.T) {
 	mon.running = true
 	mon.mu.Unlock()
 
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 
 	select {
 	case <-done:
@@ -1018,7 +1018,7 @@ func TestInvalidPingRetryDoesNotCancelOtherReasons(t *testing.T) {
 	mon, _, _ := newTestMonitor(cfg, func(context.Context, string) error { t.Error("unexpected attempt"); return nil })
 	mon.running = true
 	defer mon.Stop()
-	mon.triggerReconnectTunnel("network")
+	mon.triggerReconnectTunnel("network", TriggerHealthCheck)
 	mon.mu.Lock()
 	network := mon.retries["network"]
 	mon.mu.Unlock()
@@ -1117,7 +1117,7 @@ func TestRetryCancelledDuringSuspendDoesNotDisconnect(t *testing.T) {
 
 	mon.Start()
 	defer mon.Stop()
-	mon.triggerReconnectTunnel("alpha")
+	mon.triggerReconnectTunnel("alpha", TriggerHealthCheck)
 
 	select {
 	case <-inSuspend:
@@ -1146,7 +1146,7 @@ func TestWakeRetryDoesNotBounceRestoredSiblings(t *testing.T) {
 	mgr.disconnectFn = func() error { disconnects.Add(1); return nil }
 	mon.Start()
 	defer mon.Stop()
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 	waitFor(t, 2*time.Second, "second restore attempt", func() bool { return attempts.Load() >= 2 })
 	if n := disconnects.Load(); n != 2 {
 		t.Fatalf("bounced recovered siblings: %d disconnects", n)
@@ -1186,7 +1186,7 @@ func TestNetworkReadinessWaitPrecedesFirewallAndTeardown(t *testing.T) {
 	mon.SetFirewallCallbacks(func() error { suspends.Add(1); return nil }, func() error { return nil })
 	mon.Start()
 	defer mon.Stop()
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 	select {
 	case <-waiting:
 	case <-time.After(time.Second):
@@ -1218,7 +1218,7 @@ func TestCancelDuringNetworkWaitDoesNotTouchFirewallOrTunnel(t *testing.T) {
 	mon.SetFirewallCallbacks(func() error { suspends.Add(1); return nil }, nil)
 	mon.Start()
 	defer mon.Stop()
-	mon.triggerReconnect()
+	mon.triggerReconnect(TriggerWake)
 	select {
 	case <-waiting:
 	case <-time.After(time.Second):
@@ -1247,7 +1247,7 @@ func TestStopWaitsForRetryWorkerAndCanRestart(t *testing.T) {
 	})
 	mgr.setConnected(true, "alpha")
 	mon.Start()
-	mon.triggerReconnectTunnel("alpha")
+	mon.triggerReconnectTunnel("alpha", TriggerHealthCheck)
 	select {
 	case <-started:
 	case <-time.After(time.Second):

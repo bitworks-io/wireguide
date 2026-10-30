@@ -513,7 +513,7 @@ func (m *Monitor) checkHandshakes(now time.Time) {
 				"last_handshake_age", age.Round(time.Second),
 				"threshold", threshold,
 				"never_handshaked", neverHandshaked)
-			if m.startReconnectTunnel(tunnelName, true, nil) && neverHandshaked {
+			if m.startReconnectTunnel(tunnelName, TriggerHealthCheck, true, nil) && neverHandshaked {
 				m.noteNoHandshakeReconnect(tunnelName)
 			}
 		}
@@ -549,21 +549,23 @@ func (m *Monitor) noteNoHandshakeReconnect(name string) {
 	m.noHandshakeStreak[name]++
 }
 
-func (m *Monitor) triggerReconnect() {
-	// Reconnect all tunnels — used by sleep/wake detection.
-	m.triggerReconnectTunnel("")
+// triggerReconnect reconnects all tunnels — used by sleep/wake and
+// primary-interface change detection. trigger says which.
+func (m *Monitor) triggerReconnect(trigger Trigger) {
+	m.triggerReconnectTunnel("", trigger)
 }
 
 // ReconnectTunnelIfIdle lets an additional health signal share the existing
-// retry/backoff state without resetting an in-flight retry.
+// retry/backoff state without resetting an in-flight retry. The retry is
+// tagged as a health-check reconnect.
 func (m *Monitor) ReconnectTunnelIfIdle(tunnelName string, stillNeeded func() bool) {
 	if tunnelName != "" {
-		m.startReconnectTunnel(tunnelName, true, stillNeeded)
+		m.startReconnectTunnel(tunnelName, TriggerHealthCheck, true, stillNeeded)
 	}
 }
 
-func (m *Monitor) triggerReconnectTunnel(tunnelName string) {
-	m.startReconnectTunnel(tunnelName, false, nil)
+func (m *Monitor) triggerReconnectTunnel(tunnelName string, trigger Trigger) {
+	m.startReconnectTunnel(tunnelName, trigger, false, nil)
 }
 
 // CancelInvalidRetries also runs while tunnels are disconnected or in backoff.
@@ -600,7 +602,11 @@ func (m *Monitor) cancelInvalidRetry(name string, entry *retryState) bool {
 	return true
 }
 
-func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, stillNeeded func() bool) bool {
+// startReconnectTunnel starts (or replaces) the retry for tunnelName. The
+// retry's context carries trigger (WithTrigger) so reconnectFn can record
+// why the tunnel came back up. It reports whether a retry was started
+// (false when the monitor is stopped or, with onlyIfIdle, one is running).
+func (m *Monitor) startReconnectTunnel(tunnelName string, trigger Trigger, onlyIfIdle bool, stillNeeded func() bool) bool {
 	m.mu.Lock()
 	if !m.running || (onlyIfIdle && (m.retries[tunnelName] != nil || m.retries[""] != nil)) {
 		m.mu.Unlock()
@@ -625,7 +631,7 @@ func (m *Monitor) startReconnectTunnel(tunnelName string, onlyIfIdle bool, still
 
 	// Create new context + retry slot under the lock so two concurrent
 	// triggers for the same key can't both spawn goroutines.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(WithTrigger(context.Background(), trigger))
 	entry := &retryState{
 		cancel:      cancel,
 		done:        make(chan struct{}),
@@ -931,12 +937,12 @@ func (m *Monitor) triggerLoop() {
 			// handshake check never counts sleep time as a dead handshake.
 			m.noteWake()
 			if m.shouldTriggerReconnect() {
-				m.triggerReconnect()
+				m.triggerReconnect(TriggerWake)
 			}
 		case <-netCh:
 			slog.Info("primary interface change detected, triggering reconnect")
 			if m.shouldTriggerReconnect() {
-				m.triggerReconnect()
+				m.triggerReconnect(TriggerNetworkChange)
 			}
 		}
 	}

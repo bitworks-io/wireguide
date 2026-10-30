@@ -47,9 +47,12 @@ import (
 // interface) for connection-type automation rules.
 // Minor 12 adds Network.ResetDNS, the "Reset DNS & firewall" escape hatch; an
 // older helper answers method-not-found and clients say it must be updated.
+// Minor 13 adds the status fields last_change_reason / last_change_at (why a
+// tunnel came up) and the top-level recent_disconnects map (why a tunnel
+// recently went down), used for change reasons in the connection history.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 12
+	ProtocolMinor = 13
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in

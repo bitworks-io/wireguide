@@ -103,6 +103,9 @@ func (h *Helper) disconnectHeld(tunnelName string) (interface{}, error) {
 	defer h.reconcileDisconnectFirewall(ifaceSnapshot)
 
 	if tunnelName != "" {
+		// The end reason is recorded before the teardown so no status tick
+		// sees the tunnel gone without it; withdrawn on a real failure.
+		undoReason := h.beginDisconnectReason(tunnelName, domain.ChangeReasonUser)
 		if err := h.manager.DisconnectTunnel(tunnelName); err != nil {
 			// A wake retry may already have torn the tunnel down and still
 			// be trying to bring it back from activeCfgs. The user's "off"
@@ -113,6 +116,7 @@ func (h *Helper) disconnectHeld(tunnelName string) (interface{}, error) {
 			h.mu.Unlock()
 			var te *tunnel.TunnelError
 			if (!cached && !withdrew) || !errors.As(err, &te) || te.Kind != tunnel.ErrNotConnected {
+				undoReason()
 				return nil, err
 			}
 			slog.Info("disconnect: tunnel already down (retry pending); dropping it", "tunnel", tunnelName)
@@ -143,7 +147,9 @@ func (h *Helper) disconnectHeld(tunnelName string) (interface{}, error) {
 		toDisconnect := h.manager.ActiveTunnels()
 		var firstErr error
 		for _, name := range toDisconnect {
+			undoReason := h.beginDisconnectReason(name, domain.ChangeReasonUser)
 			if err := h.manager.DisconnectTunnel(name); err != nil {
+				undoReason()
 				if firstErr == nil {
 					firstErr = err
 				}

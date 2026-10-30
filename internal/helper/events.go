@@ -11,6 +11,7 @@ import (
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/tunnel"
 )
 
 // pingTargetForTunnel picks the best ICMP target to measure latency
@@ -67,18 +68,31 @@ func pingTargetForTunnel(cfg *domain.WireGuardConfig, fallbackEndpoint, customTa
 	return fallbackEndpoint
 }
 
+// managerAllStatuses and managerActiveTunnels are statusDTO's tunnel
+// sources. Package vars so tests can present tunnels without real ones.
+var managerAllStatuses = func(h *Helper) []*tunnel.ConnectionStatus {
+	return h.manager.AllStatuses()
+}
+
+var managerActiveTunnels = func(h *Helper) []string {
+	return h.manager.ActiveTunnels()
+}
+
 // statusDTO returns the current connection status for broadcast.
 // Pulled from manager.AllStatuses() in a single call — the previous
 // version queried the primary tunnel via Status() AND again via
 // AllStatuses(), doubling UAPI round-trips on every 1Hz tick for the
 // common single-tunnel case.
 func (h *Helper) statusDTO() ipc.ConnectionStatus {
-	allStats := h.manager.AllStatuses()
+	allStats := managerAllStatuses(h)
 	if len(allStats) == 0 {
 		// Mirror the previous Status()==nil behavior with an empty
 		// disconnected struct so subscribers don't spuriously see
-		// "tunnel disappeared" events on idle helpers.
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		// "tunnel disappeared" events on idle helpers. Recently ended
+		// tunnels still report why they went down — the last tunnel going
+		// down is the common case.
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 
 	// Pick the primary the same way manager.Status() did: prefer
@@ -97,10 +111,11 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 		}
 	}
 	if primary == nil {
-		return ipc.ConnectionStatus{State: domain.StateDisconnected}
+		_, ended := h.changeSnapshot(nil)
+		return ipc.ConnectionStatus{State: domain.StateDisconnected, RecentDisconnects: ended}
 	}
 	result := *primary
-	result.ActiveTunnels = h.manager.ActiveTunnels()
+	result.ActiveTunnels = managerActiveTunnels(h)
 
 	// Snapshot the latency cache once per call so we don't take the
 	// lock per-tunnel inside the loop.
@@ -114,6 +129,26 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 	if lat, ok := latencies[result.TunnelName]; ok {
 		result.LatencyMs = lat
 	}
+
+	// Change reasons (protocol minor 13): why each listed tunnel came up,
+	// and why recently-ended tunnels went down — a gone tunnel is absent
+	// from the status entirely, so its end reason travels top-level. The
+	// primary carries its own reason because Tunnels is filled only when
+	// more than one tunnel is listed. "Active" is ActiveTunnels — the list
+	// the GUI diffs to close sessions — not every AllStatuses entry, which
+	// also lists Disconnected/Error tunnels whose end reason must show.
+	activeSet := make(map[string]bool, len(result.ActiveTunnels))
+	for _, name := range result.ActiveTunnels {
+		activeSet[name] = true
+	}
+	connReasons, ended := h.changeSnapshot(activeSet)
+	applyChange := func(st *domain.ConnectionStatus) {
+		if c, ok := connReasons[st.TunnelName]; ok {
+			st.LastChangeReason, st.LastChangeAt = c.Reason, c.At
+		}
+	}
+	applyChange(&result)
+	result.RecentDisconnects = ended
 
 	// Include complete per-tunnel status. The same DTO backs both the
 	// frontend's selected-tunnel statistics and `ctl status --json`; copying
@@ -130,6 +165,8 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 			sub := *ts
 			sub.ActiveTunnels = nil
 			sub.Tunnels = nil
+			sub.RecentDisconnects = nil
+			applyChange(&sub)
 			if lat, ok := latencies[ts.TunnelName]; ok {
 				sub.LatencyMs = lat
 			}

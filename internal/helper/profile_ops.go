@@ -58,6 +58,7 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		h.watchdogBlocked[req.NewName] = struct{}{}
 	}
 	h.mu.Unlock()
+	h.renameChangeReasons(req.OldName, req.NewName)
 
 	// Sync autoConnectedBy under h.wifiMu, released before the next lock
 	// (connectMu is held throughout; the order everywhere is connectMu →

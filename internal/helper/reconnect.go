@@ -32,6 +32,10 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 	h.mu.Lock()
 	cfgs := h.copyActiveCfgs()
 	h.mu.Unlock()
+	// The trigger kind the monitor attached to ctx (wake, network change,
+	// health check) becomes the change reason of every tunnel this
+	// reconnect brings up.
+	reason := reconnectReason(ctx)
 	// Tunnels that are wanted but not up because the helper restarted and
 	// its startup restore failed (issue #44). They go through the full
 	// connect path, not a bare manager connect: nothing about them is in
@@ -60,7 +64,14 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 		if latch, ok := h.manualLatchFor(name); ok && latch.disconnected {
 			return reconnect.ErrNothingToReconnect
 		}
-		return alreadyConnectedIsOK(h.manager.ConnectWithContext(ctx, cfg))
+		// Undo on the raw error: already-connected (a GUI connect raced the
+		// retry) keeps the reason that connect recorded.
+		undoReason := h.beginConnectReason(name, reason)
+		err := reconnectConnect(h, ctx, cfg)
+		if err != nil {
+			undoReason()
+		}
+		return alreadyConnectedIsOK(err)
 	}
 
 	// Legacy path: reconnect all tunnels.
@@ -88,7 +99,13 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 				return nil
 			}
 			attempted++
+			undoReason := h.beginConnectReason(cfg.Name, reason)
 			var err error
+			defer func() {
+				if err != nil {
+					undoReason()
+				}
+			}()
 			if h.firewall.IsKillSwitchEnabled() {
 				// The monitor did not suspend the firewall this attempt (nothing
 				// was up — e.g. the previous attempt failed and resume put the
@@ -98,7 +115,7 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 				// blockade for the connect and rebuilds it with this tunnel.
 				err = connectUnderKillSwitch(h, cfg)
 			} else {
-				err = h.manager.ConnectWithContext(ctx, cfg)
+				err = reconnectConnect(h, ctx, cfg)
 			}
 			return err
 		}()
@@ -120,6 +137,13 @@ func (h *Helper) reconnectFn(ctx context.Context, name string) error {
 		return reconnect.ErrNothingToReconnect
 	}
 	return lastErr
+}
+
+// reconnectConnect is reconnectFn's bare manager connect for a cached
+// tunnel. A package var so tests can exercise reconnectFn without a real
+// tunnel. Caller MUST hold h.connectMu.
+var reconnectConnect = func(h *Helper, ctx context.Context, cfg *domain.WireGuardConfig) error {
+	return h.manager.ConnectWithContext(ctx, cfg)
 }
 
 // stillCached reports whether name is still in activeCfgs.

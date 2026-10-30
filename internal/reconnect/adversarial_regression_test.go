@@ -38,13 +38,13 @@ func TestAuditDistinctRetrySlotsOverlapFirewallSuspensions(t *testing.T) {
 	m.Start()
 	defer m.Stop()
 	defer close(release)
-	m.startReconnectTunnel("alpha", true, nil)
+	m.startReconnectTunnel("alpha", TriggerHealthCheck, true, nil)
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("first retry never entered")
 	}
-	m.startReconnectTunnel("bravo", true, nil)
+	m.startReconnectTunnel("bravo", TriggerHealthCheck, true, nil)
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
@@ -63,7 +63,7 @@ func TestReconnectPanicResumesFirewallAndReleasesRetrySlot(t *testing.T) {
 	m.SetFirewallCallbacks(func() error { suspended.Add(1); return nil }, func() error { resumed.Add(1); return nil })
 	m.Start()
 	defer m.Stop()
-	m.startReconnectTunnel("alpha", true, nil)
+	m.startReconnectTunnel("alpha", TriggerHealthCheck, true, nil)
 	waitFor(t, 2*time.Second, "panic retry exit", func() bool {
 		m.mu.Lock()
 		r := m.retries["alpha"]
@@ -99,7 +99,7 @@ func TestFailedSuspendLeavesTransportUpForRetry(t *testing.T) {
 	m.SetFirewallCallbacks(func() error { attempts.Add(1); return errors.New("OS refused firewall suspension") }, func() error { resumes.Add(1); return nil })
 	m.Start()
 	defer m.Stop()
-	m.startReconnectTunnel("alpha", true, nil)
+	m.startReconnectTunnel("alpha", TriggerHealthCheck, true, nil)
 	waitFor(t, 2*time.Second, "failed suspension attempt exit", func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()

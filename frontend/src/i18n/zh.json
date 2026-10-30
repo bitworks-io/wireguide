@@ -54,7 +54,21 @@
     "reason_reconnect": "已重新连接",
     "reason_app_quit": "应用退出",
     "reason_health_check": "自动恢复",
-    "reason_error": "错误"
+    "reason_error": "错误",
+    "started_by": "启动原因",
+    "ssid": "Wi-Fi 网络",
+    "reason_automation": "由自动化断开",
+    "reason_wake": "唤醒后重新连接",
+    "reason_network_change": "网络变化后重新连接",
+    "reason_recovery": "已由恢复重置",
+    "reason_watchdog": "已被路由环路保护停止",
+    "start_user": "用户",
+    "start_automation": "自动化",
+    "start_wake": "从睡眠唤醒",
+    "start_network_change": "网络变化",
+    "start_health_check": "健康检查",
+    "start_reconnect": "重新连接",
+    "start_recovery": "恢复"
   },
   "tunnel": {
     "list_title": "隧道",

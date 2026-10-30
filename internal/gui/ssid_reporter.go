@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
@@ -102,7 +103,21 @@ func pollSSID(clients *ipc.ClientHolder, done <-chan struct{}, last string) {
 	}
 }
 
+// currentSSID is the Wi-Fi network the GUI last observed: from its own
+// reporter on macOS, or from the helper's wifi_ssid events elsewhere. The
+// history records it on sessions as they open; the status path reads only
+// this cache, never CoreWLAN.
+var currentSSID atomic.Value // string
+
+func setCurrentSSID(ssid string) { currentSSID.Store(ssid) }
+
+func getCurrentSSID() string {
+	v, _ := currentSSID.Load().(string)
+	return v
+}
+
 func reportSSID(clients *ipc.ClientHolder, ssid string) {
+	setCurrentSSID(ssid)
 	c := clients.Get()
 	if c == nil {
 		return

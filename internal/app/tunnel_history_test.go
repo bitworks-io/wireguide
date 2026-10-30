@@ -11,7 +11,7 @@ func TestClosedHistoryIgnoresLateStatus(t *testing.T) {
 	defer h.Flush()
 	s := &TunnelService{historyStore: h}
 	s.CloseHistorySessions("app_quit")
-	s.ReconcileHistoryFromStatus([]string{"late-status"}, nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"late-status"}, nil, nil, "", nil, nil, "")
 	if rows := h.GetAll(); len(rows) != 0 {
 		t.Fatalf("status received during shutdown reopened history: %+v", rows)
 	}

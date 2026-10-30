@@ -36,22 +36,22 @@ func TestReconcileKeepsCountersAcrossZeroedTeardownTick(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			s := newHistoryTestService(t)
 			rx, tx := rxtx("a", 1000, 500)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 			time.Sleep(1100 * time.Millisecond) // non-zero duration
 			rx, tx = rxtx("a", 5000, 2500)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 			if reason == "user" {
 				s.markUserDisconnect("a", 0, 0)
 			}
 			// Teardown tick: still active, counters zeroed.
 			rx, tx = rxtx("a", 0, 0)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 			// Gone.
 			disappear := reason
 			if reason == "user" {
 				disappear = ""
 			}
-			s.ReconcileHistoryFromStatus(nil, nil, nil, disappear)
+			s.ReconcileHistoryFromStatus(nil, nil, nil, disappear, nil, nil, "")
 			got := lastSession(t, s)
 			if got.RxBytes != 5000 || got.TxBytes != 2500 {
 				t.Errorf("rx/tx = %d/%d, want 5000/2500", got.RxBytes, got.TxBytes)
@@ -65,13 +65,13 @@ func TestReconcileKeepsCountersAcrossZeroedTeardownTick(t *testing.T) {
 func TestReconcileAccumulatesAcrossCounterReset(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 1000, 400)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 	time.Sleep(1100 * time.Millisecond)
 	rx, tx = rxtx("a", 0, 0)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 	rx, tx = rxtx("a", 50, 20)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect", nil, nil, "")
 	got := lastSession(t, s)
 	if got.RxBytes != 1050 || got.TxBytes != 420 {
 		t.Errorf("rx/tx = %d/%d, want 1050/420", got.RxBytes, got.TxBytes)
@@ -83,10 +83,10 @@ func TestReconcileAccumulatesAcrossCounterReset(t *testing.T) {
 func TestCloseHistorySessionsUsesCachedCountersWhenHelperGone(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 7000, 3000)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 	time.Sleep(1100 * time.Millisecond)
 	rx, tx = rxtx("a", 0, 0) // teardown tick before quit
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
 	s.CloseHistorySessions("app_quit")
 	got := lastSession(t, s)
 	if got.RxBytes != 7000 || got.TxBytes != 3000 || got.DisconnectReason != "app_quit" {
