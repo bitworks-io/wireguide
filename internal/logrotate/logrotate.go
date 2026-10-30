@@ -1,7 +1,7 @@
 // Package logrotate provides a small size-based rotating file writer and a
 // repeat-suppressing limiter for noisy log lines. It exists so the root
 // helper can own its log file instead of leaving launchd to append to it
-// forever (a 61.8 MB unrotated log was observed in the field).
+// forever.
 package logrotate
 
 import (
@@ -26,7 +26,7 @@ type Writer struct {
 
 // Open opens (creating if needed, mode 0644, O_APPEND) the log at path. If an
 // existing file is already larger than maxBytes it is rotated immediately so
-// an oversized log inherited from before rotation existed is retired at once.
+// an oversized existing log is retired at once.
 func Open(path string, maxBytes int64, maxFiles int) (*Writer, error) {
 	if maxBytes <= 0 || maxFiles < 1 {
 		return nil, fmt.Errorf("logrotate: invalid limits (%d bytes, %d files)", maxBytes, maxFiles)

@@ -3,6 +3,7 @@ package helper
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,5 +127,67 @@ func TestHelperLogFile(t *testing.T) {
 		if got := helperLogFile(c.goos, dir, c.opt); got != c.want {
 			t.Errorf("helperLogFile(%s, opt=%v) = %q, want %q", c.goos, c.opt, got, c.want)
 		}
+	}
+}
+
+// Identical warnings from different tunnel interfaces are independent.
+func TestBroadcastHandlerRateLimitsPerInterface(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, &buf))
+	for _, iface := range []string{"utun4", "utun5"} {
+		for i := 0; i < 5; i++ {
+			l.Warn("[wg:" + iface + "] Failed to send: network is unreachable")
+		}
+	}
+	out := buf.String()
+	for _, iface := range []string{"utun4", "utun5"} {
+		if n := strings.Count(out, "[wg:"+iface+"]"); n != 1 {
+			t.Errorf("%s warning logged %d times, want 1:\n%s", iface, n, out)
+		}
+	}
+}
+
+// An unrelated record arriving first after the window flushes the summary but
+// must not delay the real warning by another window.
+func TestBroadcastHandlerWarningRepeatsAfterSummaryFlush(t *testing.T) {
+	var buf bytes.Buffer
+	h := newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, &buf)
+	now := time.Unix(1000, 0)
+	h.clock = func() time.Time { return now }
+	l := slog.New(h)
+	for i := 0; i < 3; i++ {
+		l.Warn("[wg:utun4] Failed to send: network is unreachable")
+	}
+	now = now.Add(2 * time.Minute)
+	l.Info("unrelated line")
+	if !strings.Contains(buf.String(), "suppressed repeated engine warnings") {
+		t.Fatalf("summary missing:\n%s", buf.String())
+	}
+	now = now.Add(time.Second)
+	buf.Reset()
+	l.Warn("[wg:utun4] Failed to send: network is unreachable")
+	if n := strings.Count(buf.String(), "Failed to send"); n != 1 {
+		t.Errorf("real warning logged %d times right after the summary, want 1:\n%s", n, buf.String())
+	}
+}
+
+// Handler output must go through the rotating writer so the live file stays
+// bounded.
+func TestBroadcastHandlerWritesThroughRotatingLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "helper.log")
+	w, err := logrotate.Open(path, 2048, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	l := slog.New(newBroadcastHandlerTo(new(slog.LevelVar), func() func(string, interface{}) { return nil }, w))
+	for i := 0; i < 100; i++ {
+		l.Info("a line long enough to fill the rotation budget quickly", "i", i)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Errorf("expected a rotated sibling: %v", err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Size() > 2048 {
+		t.Errorf("live log missing or over the cap: %v", err)
 	}
 }

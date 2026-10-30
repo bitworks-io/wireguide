@@ -75,12 +75,8 @@ type broadcastHandler struct {
 	// limiter suppresses repeated identical wireguard-go warnings; shared
 	// across WithAttrs/WithGroup clones.
 	limiter *logrotate.Limiter
-	// raw remembers the last raw message per limiter key for summaries.
-	raw *sync.Map
 	// clock returns the current time (injectable for tests).
 	clock func() time.Time
-	// out is where records are written (the rotating file, or stderr).
-	out io.Writer
 
 	// attrs holds WithAttrs/WithGroup state so Handle can render them.
 	mu    sync.Mutex
@@ -106,9 +102,7 @@ func newBroadcastHandlerTo(levelVar *slog.LevelVar, getBroadcaster func() func(s
 		stderr:         stderr,
 		getBroadcaster: getBroadcaster,
 		limiter:        logrotate.NewLimiter(repeatWindow),
-		raw:            &sync.Map{},
 		clock:          time.Now,
-		out:            out,
 	}
 }
 
@@ -128,9 +122,8 @@ func (h *broadcastHandler) rateLimit(ctx context.Context, r *slog.Record) bool {
 		// through with the suppressed count and resets the entry, so a
 		// sustained outage logs the actual warning (not just a summary)
 		// about once per window.
-		ok, suppressed := h.limiter.Allow(key, now)
+		ok, suppressed := h.limiter.Allow(key, r.Message, now)
 		if ok {
-			h.raw.Store(key, r.Message)
 			if suppressed > 0 {
 				r.AddAttrs(slog.Int("suppressed_repeats", suppressed))
 			}
@@ -139,13 +132,9 @@ func (h *broadcastHandler) rateLimit(ctx context.Context, r *slog.Record) bool {
 		}
 	}
 	// Flush trailing summaries for other messages whose window elapsed.
-	for key, n := range h.limiter.Expired(now) {
-		msg := key
-		if v, ok := h.raw.Load(key); ok {
-			msg, _ = v.(string)
-		}
+	for _, s := range h.limiter.Expired(now) {
 		sum := slog.NewRecord(now, slog.LevelWarn, "suppressed repeated engine warnings", 0)
-		sum.AddAttrs(slog.Int("count", n), slog.String("message", msg))
+		sum.AddAttrs(slog.Int("count", s.Count), slog.String("message", s.Message))
 		h.emit(ctx, sum)
 	}
 	return pass
@@ -211,9 +200,7 @@ func (h *broadcastHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		stderr:         h.stderr.WithAttrs(attrs),
 		getBroadcaster: h.getBroadcaster,
 		limiter:        h.limiter,
-		raw:            h.raw,
 		clock:          h.clock,
-		out:            h.out,
 		attrs:          combined,
 		group:          h.group,
 	}
@@ -225,9 +212,7 @@ func (h *broadcastHandler) WithGroup(name string) slog.Handler {
 		stderr:         h.stderr.WithGroup(name),
 		getBroadcaster: h.getBroadcaster,
 		limiter:        h.limiter,
-		raw:            h.raw,
 		clock:          h.clock,
-		out:            h.out,
 		attrs:          h.attrs,
 		group:          name,
 	}
