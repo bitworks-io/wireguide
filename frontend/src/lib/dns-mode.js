@@ -38,9 +38,14 @@ export function dnsChip(tr, mode, domains = []) {
 }
 
 // verifyDetail renders a Verify row's detail: the localised key when the
-// backend supplied one, otherwise its language-neutral text.
+// backend supplied one, otherwise its language-neutral text. Resolve rows
+// carry the raw resolver / match_domain; their {via} placeholder is filled
+// with the same localised text as "Try a name" (empty when no resolver).
 export function verifyDetail(tr, row) {
-  return row.detail_key ? tr('verify.detail_' + row.detail_key, row.detail_params || {}) : row.detail;
+  if (!row.detail_key) return row.detail;
+  const params = { ...(row.detail_params || {}) };
+  params.via = tryVia(tr, { resolver: params.resolver, match_domain: params.match_domain });
+  return tr('verify.detail_' + row.detail_key, params).trim();
 }
 
 // verifyHint renders a row's hint; green rows never show one.

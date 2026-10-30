@@ -535,10 +535,18 @@
     "detail_resolver_missing": "{domain}: no supplemental resolver registered",
     "detail_resolver_outside": "{domain} -> {resolver}: resolver reached over the local network, not the tunnel",
     "detail_ping_none": "{host}: no reply",
-    "detail_resolve_outside": "{name} -> {addrs} ({ms} ms) via {resolver}: resolver reached over the local network, not the tunnel",
-    "hint_route_unmanaged": "Table is set, so WireGuide installs no routes in the main table. Add them yourself.",
+    "detail_resolve_outside": "{name} -> {addrs} ({ms} ms) {via}: resolver reached over the local network, not the tunnel",
+    "hint_route_unmanaged": "Table = off, so WireGuide installs no routes. Add them yourself.",
     "hint_resolver_mismatch": "Another resolver is registered for this domain. Disconnect the tunnel or app that owns it.",
-    "detail_resolver_mismatch": "{domain} -> {resolver}: not one of this tunnel's DNS servers"
+    "detail_resolver_mismatch": "{domain} -> {resolver}: not one of this tunnel's DNS servers",
+    "detail_route_table": "Routes are installed in table {table} (not checked)",
+    "hint_route_table": "WireGuide adds the ip rule that selects this table only for full-tunnel (0.0.0.0/0) configs. Otherwise add one yourself, e.g. ip rule add to <prefix> table <N>.",
+    "detail_route_ok": "{cidr} via {iface}",
+    "detail_ping_ok": "{host}: {ms} ms",
+    "detail_resolve_ok": "{name} -> {addrs} ({ms} ms) {via}",
+    "detail_resolve_nxdomain": "{name}: no such name (NXDOMAIN, {ms} ms) {via}",
+    "detail_resolve_timeout": "{name}: no answer within {s} s {via}",
+    "detail_resolve_failed": "{name}: {err} {via}"
   },
   "critical": {
     "dns_protection_failing_title": "DNS protection is not applied",

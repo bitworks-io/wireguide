@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/network"
@@ -277,14 +278,18 @@ func (d verifyDeps) routeIface(ctx context.Context, cidr *net.IPNet) (iface stri
 	return "", fmt.Errorf("unsupported platform")
 }
 
-// routesUnmanaged reports whether the config keeps WireGuide from installing
-// routes in the main table, so per-prefix checks would be meaningless.
-func (d verifyDeps) routesUnmanaged(table string) bool {
+// routesOff reports Table = off: WireGuide installs no routes at all.
+func routesOff(table string) bool {
+	return strings.EqualFold(strings.TrimSpace(table), "off")
+}
+
+// customRouteTable reports a Linux Table = <N>: WireGuide installs the routes
+// into table N, which the main-table lookups below cannot see. Only a
+// full-tunnel (/0) config also gets a policy rule selecting that table; for
+// other prefixes the user has to add one. macOS ignores numeric tables.
+func (d verifyDeps) customRouteTable(table string) bool {
 	t := strings.ToLower(strings.TrimSpace(table))
-	if t == "off" {
-		return true
-	}
-	return d.goos == "linux" && t != "" && t != "auto" && t != "main" && t != "254"
+	return d.goos == "linux" && t != "" && t != "off" && t != "auto" && t != "main" && t != "254"
 }
 
 func (d verifyDeps) routeRows(ctx context.Context, in VerifyInput) []VerifyRow {
@@ -292,12 +297,19 @@ func (d verifyDeps) routeRows(ctx context.Context, in VerifyInput) []VerifyRow {
 		return []VerifyRow{withDetail(VerifyRow{Check: CheckRoute, Status: StatusAmber, Detail: "not checked on this platform"},
 			"route_unsupported", nil)}
 	}
-	if d.routesUnmanaged(in.Table) {
-		tbl := strings.TrimSpace(in.Table)
+	tbl := strings.TrimSpace(in.Table)
+	if routesOff(tbl) {
 		return []VerifyRow{withDetail(VerifyRow{Check: CheckRoute, Status: StatusAmber,
 			Detail: fmt.Sprintf("routes not managed by WireGuide (Table = %s)", tbl),
-			Hint:   "Table is set so WireGuide installs no routes in the main table; add them yourself.", HintKey: "route_unmanaged"},
+			Hint:   "Table = off, so WireGuide installs no routes; add them yourself.", HintKey: "route_unmanaged"},
 			"route_unmanaged", map[string]string{"table": tbl})}
+	}
+	if d.customRouteTable(tbl) {
+		return []VerifyRow{withDetail(VerifyRow{Check: CheckRoute, Status: StatusAmber,
+			Detail: fmt.Sprintf("routes are installed in table %s (not checked)", tbl),
+			Hint: "WireGuide adds the ip rule that selects this table only for full-tunnel (0.0.0.0/0) configs; " +
+				"otherwise add one yourself, e.g. ip rule add to <prefix> table <N>.", HintKey: "route_table"},
+			"route_table", map[string]string{"table": tbl})}
 	}
 	var locals []*net.IPNet
 	if d.goos == "darwin" && d.localAddrs != nil {
@@ -348,8 +360,9 @@ func (d verifyDeps) routeRows(ctx context.Context, in VerifyInput) []VerifyRow {
 					HintKey: "route_overlap"}, "route_overlap", map[string]string{"cidr": cs, "iface": iface, "addr": overlap.String()}))
 				continue
 			}
-			rows = append(rows, VerifyRow{Check: CheckRoute, Status: StatusGreen,
-				Detail: fmt.Sprintf("%s via %s", cs, iface)})
+			rows = append(rows, withDetail(VerifyRow{Check: CheckRoute, Status: StatusGreen,
+				Detail: fmt.Sprintf("%s via %s", cs, iface)},
+				"route_ok", map[string]string{"cidr": cs, "iface": iface}))
 		}
 	}
 	if skipped > 0 {
@@ -393,7 +406,7 @@ func (d verifyDeps) resolverRows(ctx context.Context, in VerifyInput) []VerifyRo
 	}
 	blocks := parseScutilDNS(string(out))
 	var rows []VerifyRow
-	for _, c := range splitDomainChecks(blocks, []domain.DNSEntries{parseEntries(in.DNS)}) {
+	for _, c := range splitDomainChecks(blocks, []domain.DNSEntries{domain.ParseDNSEntries(in.DNS)}) {
 		label := "~" + c.Domain
 		if c.Search {
 			label = c.Domain
@@ -469,34 +482,57 @@ func (d verifyDeps) pingRow(ctx context.Context, host string) VerifyRow {
 			Hint: "The host is down, filtered, or not routed through the tunnel.", HintKey: "ping_failed"},
 			"ping_none", map[string]string{"host": host})
 	}
-	return VerifyRow{Check: CheckPing, Status: StatusGreen, Detail: fmt.Sprintf("%s: %.1f ms", host, ms)}
+	return withDetail(VerifyRow{Check: CheckPing, Status: StatusGreen, Detail: fmt.Sprintf("%s: %.1f ms", host, ms)},
+		"ping_ok", map[string]string{"host": host, "ms": fmt.Sprintf("%.1f", ms)})
+}
+
+// resolveParams are the detail params shared by every resolve row. The
+// resolver and match_domain params let the GUI render the localised "via"
+// text itself (the {via} placeholder of the resolve detail keys).
+func resolveParams(r *ResolveResult, extra map[string]string) map[string]string {
+	p := map[string]string{"name": r.Name}
+	if r.Resolver != "" {
+		p["resolver"] = r.Resolver
+	}
+	if r.MatchDomain != "" {
+		p["match_domain"] = r.MatchDomain
+	}
+	for k, v := range extra {
+		p[k] = v
+	}
+	return p
 }
 
 func (d verifyDeps) resolveRow(ctx context.Context, in VerifyInput, name string) VerifyRow {
 	r := d.resolve(ctx, name)
+	ms := fmt.Sprintf("%.0f", r.DurationMs)
+	addrs := strings.Join(r.Addrs, ", ")
 	switch {
 	case r.NXDomain:
-		return VerifyRow{Check: CheckResolve, Status: StatusRed,
-			Detail: fmt.Sprintf("%s: NXDOMAIN (%.0f ms)%s", r.Name, r.DurationMs, viaResolver(r)),
-			Hint:   "The resolver answered but does not know this name; check the ~domain and the resolver.", HintKey: "resolve_nxdomain"}
+		return withDetail(VerifyRow{Check: CheckResolve, Status: StatusRed,
+			Detail: fmt.Sprintf("%s: NXDOMAIN (%s ms)%s", r.Name, ms, viaResolver(r)),
+			Hint:   "The resolver answered but does not know this name; check the ~domain and the resolver.", HintKey: "resolve_nxdomain"},
+			"resolve_nxdomain", resolveParams(r, map[string]string{"ms": ms}))
+	case r.TimedOut:
+		return withDetail(VerifyRow{Check: CheckResolve, Status: StatusRed,
+			Detail: fmt.Sprintf("%s: %s%s", r.Name, r.Error, viaResolver(r)),
+			Hint:   "No answer in time; the resolver may be unreachable through the tunnel.", HintKey: "resolve_timeout"},
+			"resolve_timeout", resolveParams(r, map[string]string{"s": strconv.Itoa(int(ProbeTimeout / time.Second))}))
 	case r.Error != "":
-		hk := "resolve_failed"
-		hint := "The name did not resolve; check the resolver and routes."
-		if r.TimedOut {
-			hk, hint = "resolve_timeout", "No answer in time; the resolver may be unreachable through the tunnel."
-		}
-		return VerifyRow{Check: CheckResolve, Status: StatusRed,
-			Detail: fmt.Sprintf("%s: %s%s", r.Name, r.Error, viaResolver(r)), Hint: hint, HintKey: hk}
+		return withDetail(VerifyRow{Check: CheckResolve, Status: StatusRed,
+			Detail: fmt.Sprintf("%s: %s%s", r.Name, r.Error, viaResolver(r)),
+			Hint:   "The name did not resolve; check the resolver and routes.", HintKey: "resolve_failed"},
+			"resolve_failed", resolveParams(r, map[string]string{"err": r.Error}))
 	case r.Resolver != "" && tunnelOwnsResolver(in, r) && !ipInAllowed(r.Resolver, in.AllowedIPs):
 		return withDetail(VerifyRow{Check: CheckResolve, Status: StatusAmber,
-			Detail: fmt.Sprintf("%s -> %s (%.0f ms)%s: resolver reached over the local network, not the tunnel",
-				r.Name, strings.Join(r.Addrs, ", "), r.DurationMs, viaResolver(r)),
+			Detail: fmt.Sprintf("%s -> %s (%s ms)%s: resolver reached over the local network, not the tunnel",
+				r.Name, addrs, ms, viaResolver(r)),
 			Hint: "Add the resolver address to AllowedIPs so queries travel through the tunnel.", HintKey: "resolver_outside"},
-			"resolve_outside", map[string]string{"name": r.Name, "addrs": strings.Join(r.Addrs, ", "),
-				"ms": fmt.Sprintf("%.0f", r.DurationMs), "resolver": r.Resolver})
+			"resolve_outside", resolveParams(r, map[string]string{"addrs": addrs, "ms": ms}))
 	}
-	return VerifyRow{Check: CheckResolve, Status: StatusGreen,
-		Detail: fmt.Sprintf("%s -> %s (%.0f ms)%s", r.Name, strings.Join(r.Addrs, ", "), r.DurationMs, viaResolver(r))}
+	return withDetail(VerifyRow{Check: CheckResolve, Status: StatusGreen,
+		Detail: fmt.Sprintf("%s -> %s (%s ms)%s", r.Name, addrs, ms, viaResolver(r))},
+		"resolve_ok", resolveParams(r, map[string]string{"addrs": addrs, "ms": ms}))
 }
 
 func viaResolver(r *ResolveResult) string {
