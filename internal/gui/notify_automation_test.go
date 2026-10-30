@@ -162,3 +162,29 @@ func TestAutomationNotifyTextLanguages(t *testing.T) {
 		}
 	}
 }
+
+// With the longer down hold-back, an automation disconnect event that lands
+// after the up delay but inside the down delay still replaces the generic
+// message with the named one.
+func TestNotifierStatusThenAutomationDisconnectWithinDownDelay(t *testing.T) {
+	n, c := testNotifier()
+	n.downPendingDelay = 300 * time.Millisecond
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)
+	time.Sleep(100 * time.Millisecond) // past pendingDelay, inside downPendingDelay
+	n.onAutomationEvent(autoEvent("Office", ipc.AutomationActionDisconnect))
+	time.Sleep(300 * time.Millisecond) // past the original down timer
+	wantOne(t, c, "Automation disconnected “Office”. Rule: SSID is not HomeWiFi. Wi-Fi: CafeWiFi.")
+}
+
+// Past the down hold-back the generic message has gone out, so a late
+// automation disconnect event adds nothing.
+func TestNotifierStatusThenAutomationDisconnectAfterDownDelay(t *testing.T) {
+	n, c := testNotifier()
+	n.downPendingDelay = 100 * time.Millisecond
+	n.onStatus([]string{"Office"})
+	n.onStatus(nil)
+	waitForCount(t, c, 1)
+	n.onAutomationEvent(autoEvent("Office", ipc.AutomationActionDisconnect))
+	wantOne(t, c, "“Office” disconnected outside the app.")
+}
