@@ -20,7 +20,12 @@ const (
 	testPub  = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
 )
 
-type fakeHelper struct{ failSnapshot bool }
+type fakeHelper struct {
+	failSnapshot bool
+	// oldHelper answers Helper.Info and Firewall.Status with
+	// method-not-found, as a helper before IPC 1.9 / 1.10 does.
+	oldHelper bool
+}
 
 func (f fakeHelper) Call(method string, params, result interface{}) error {
 	var v interface{}
@@ -31,6 +36,15 @@ func (f fakeHelper) Call(method string, params, result interface{}) error {
 		v = ipc.AutomationPreviewResponse{SSID: "home", Online: true}
 	case ipc.MethodActiveTunnels:
 		v = ipc.ActiveTunnelsResponse{}
+	case ipc.MethodHelperInfo, ipc.MethodFirewallStatus:
+		if f.oldHelper {
+			return &ipc.Error{Code: ipc.ErrCodeMethodNotFound, Message: "method not found: " + method}
+		}
+		if method == ipc.MethodHelperInfo {
+			v = ipc.HelperInfoResponse{AppVersion: "9.9.9", PID: 1, StartMode: "launchd-socket"}
+		} else {
+			v = ipc.FirewallStatusResponse{DNSProtectionWanted: true, Source: "pf", Permits: []ipc.FirewallPermit{{Server: "10.66.66.1", Tunnel: "work"}}}
+		}
 	case ipc.MethodDiagSnapshot:
 		if f.failSnapshot {
 			return errors.New("method not found")
@@ -123,6 +137,7 @@ func TestBundleContents(t *testing.T) {
 	for _, want := range []string{
 		"MANIFEST.txt", "versions.txt", "config.json", "history.json", "tunnels/work.conf", "tunnels/work.meta.json",
 		"logs/helper.log", "logs/helper-log-files.txt", "network/firewall-rules.txt", "automation-preview.json", "dns-leak.json",
+		"helper-info.json", "firewall-status.json",
 	} {
 		if _, ok := files[want]; !ok {
 			t.Errorf("missing %s", want)
@@ -249,5 +264,34 @@ func TestBundleStderrLogIncluded(t *testing.T) {
 	files, _ := buildZip(t, src)
 	if files["logs/helper.stderr.log"] != "panic: boom\n" {
 		t.Errorf("stderr tail = %q", files["logs/helper.stderr.log"])
+	}
+}
+
+func TestBundleHelperInfoAndFirewallStatus(t *testing.T) {
+	files, _ := buildZip(t, fixture(t))
+	if !strings.Contains(files["helper-info.json"], `"start_mode": "launchd-socket"`) {
+		t.Errorf("helper-info.json: %q", files["helper-info.json"])
+	}
+	if !strings.Contains(files["firewall-status.json"], `"server": "10.66.66.1"`) {
+		t.Errorf("firewall-status.json: %q", files["firewall-status.json"])
+	}
+}
+
+// A helper that predates Helper.Info / Firewall.Status still yields a bundle;
+// the manifest says why those files are missing.
+func TestBundleOldHelperWithoutInfoOrFirewallStatus(t *testing.T) {
+	src := fixture(t)
+	src.Helper = fakeHelper{oldHelper: true}
+	files, _ := buildZip(t, src)
+	for _, name := range []string{"helper-info.json", "firewall-status.json"} {
+		if _, ok := files[name]; ok {
+			t.Errorf("%s written for a helper without the method", name)
+		}
+		if !strings.Contains(files["MANIFEST.txt"], name+": unavailable (a helper older than IPC") {
+			t.Errorf("manifest should note %s:\n%s", name, files["MANIFEST.txt"])
+		}
+	}
+	if _, ok := files["tunnels/work.conf"]; !ok {
+		t.Error("bundle must still be built")
 	}
 }

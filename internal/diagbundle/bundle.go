@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,6 +156,8 @@ func Build(w io.Writer, src Sources) error {
 	b.addGUILogs()
 	b.addNetwork()
 	b.addHelperSnapshot()
+	b.addHelperJSON("helper-info.json", ipc.MethodHelperInfo, "1.9")
+	b.addHelperJSON("firewall-status.json", ipc.MethodFirewallStatus, "1.10")
 	b.addAutomation()
 	b.addDNSLeak()
 
@@ -502,6 +505,28 @@ func (b *builder) addHelperSnapshot() {
 		sb.WriteString("(no WireGuide firewall rulesets reported on this platform)\n")
 	}
 	b.add(file, []byte(sb.String()))
+}
+
+// addHelperJSON records a read-only helper method's response as indented
+// JSON. A helper that predates the method (older than IPC minMinor) answers
+// method-not-found; that, like any other failure, is only noted in the
+// manifest.
+func (b *builder) addHelperJSON(name, method, minMinor string) {
+	if b.src.Helper == nil {
+		b.note("%s: helper not reachable", name)
+		return
+	}
+	var raw json.RawMessage
+	if err := b.src.Helper.Call(method, nil, &raw); err != nil {
+		var coded *ipc.Error
+		if errors.As(err, &coded) && coded.Code == ipc.ErrCodeMethodNotFound {
+			b.note("%s: unavailable (a helper older than IPC %s has no %s)", name, minMinor, method)
+			return
+		}
+		b.note("%s: %v", name, err)
+		return
+	}
+	b.addJSON(name, raw)
 }
 
 func (b *builder) addAutomation() {
