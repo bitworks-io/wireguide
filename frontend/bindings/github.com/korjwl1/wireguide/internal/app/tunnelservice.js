@@ -58,9 +58,11 @@ export function BaseName(path) {
 
 /**
  * CheckConflicts loads a tunnel's config and scans local network interfaces
- * for routing overlaps (e.g. Tailscale, another WireGuard instance). Runs
- * entirely in the GUI process — no IPC needed. The frontend calls this before
- * Connect so it can show a warning dialog if conflicts exist.
+ * for routing overlaps (e.g. Tailscale, another WireGuard instance). The
+ * interface scan runs in the GUI process; the shared-Address check asks the
+ * helper which tunnels are connected (Tunnel.ActiveTunnels) and is skipped if
+ * that call fails. The frontend calls this before Connect so it can show a
+ * warning dialog if conflicts exist.
  * @param {string} name
  * @returns {$CancellablePromise<diag$0.ConflictInfo[]>}
  */
