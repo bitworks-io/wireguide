@@ -443,6 +443,8 @@
             </div>
           </div>
 
+          <!-- Windows has no notification backend; hide the toggle there. -->
+          {#if !/Windows/i.test(navigator.userAgent)}
           <div class="settings-section">
             <h4 class="section-title">{$t('settings.section_notifications')}</h4>
             <div class="settings-card">
@@ -458,6 +460,7 @@
               </div>
             </div>
           </div>
+          {/if}
 
           <div class="settings-section">
             <h4 class="section-title">{$t('settings.section_updates')}</h4>

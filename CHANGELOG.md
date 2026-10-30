@@ -5,7 +5,7 @@ All notable changes to WireGuide will be documented in this file.
 ## Unreleased
 
 ### Added
-- **Notifications for automatic tunnel changes** - macOS and Linux show a native notification when a tunnel connects or disconnects without a connect or disconnect made in the app (automation, wake, health-check recovery, the CLI), when the helper's loop watchdog disconnects a tunnel, and on helper errors. Changes you make from the window or tray, and the disconnects on quit, never notify. Turn it off with "Notify on automatic tunnel changes" in Settings. If the system notification service is unavailable, macOS falls back to AppleScript notifications.
+- **Notifications for automatic tunnel changes** - macOS and Linux show a native notification when a tunnel connects or disconnects without a connect or disconnect made in the app (automation, wake, health-check recovery, the CLI), when the helper's loop watchdog disconnects a tunnel, and on helper errors. Changes you make from the window or tray, and the disconnects on quit, never notify. A reconnect that takes a tunnel down and straight back up (wake, health check) does not notify. Turn it off with "Notify on automatic tunnel changes" in Settings (not shown on Windows, which has no notification support yet). If you deny WireGuide notification access, nothing is posted. If the system notification service fails, macOS falls back to AppleScript notifications.
 
 ### Changed
 - **Automation toast** - the raw "Wi-Fi: <name>" toast on every network change is replaced by "Automation connected <tunnel>" when an automation rule connects a tunnel.

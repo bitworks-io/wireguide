@@ -72,6 +72,12 @@ type notifier struct {
 	// systemLanguage reports the OS UI language; preferredGUILanguage in
 	// production, a stub in tests.
 	systemLanguage func() string
+	// newBackend creates the platform notification service (stubbed in
+	// tests).
+	newBackend func() notificationBackend
+	// fallback posts without the service when it cannot be used; nil where
+	// no fallback exists. osascriptNotify on macOS.
+	fallback func(title, body string) error
 
 	svcMu       sync.Mutex // guards the fields below; never held across a blocking call
 	svc         notificationBackend
@@ -79,6 +85,7 @@ type notifier struct {
 	svcUsable   bool
 	authAsked   bool
 	authPending bool
+	authDenied  bool
 }
 
 func newNotifier(settings *storage.SettingsStore, actions *wgapp.UserActions) *notifier {
@@ -88,6 +95,10 @@ func newNotifier(settings *storage.SettingsStore, actions *wgapp.UserActions) *n
 		pending:        map[string]*time.Timer{},
 		claimed:        map[string]time.Time{},
 		systemLanguage: preferredGUILanguage,
+		newBackend:     newNotificationBackend,
+	}
+	if runtime.GOOS == "darwin" {
+		n.fallback = osascriptNotify
 	}
 	n.post = n.deliver
 	return n
@@ -184,9 +195,12 @@ func (n *notifier) onStatus(connected []string) {
 	now := time.Now()
 	for _, ev := range events {
 		up := ev.Kind == wgapp.NotifyTunnelUp
-		if !up {
-			// The tunnel dropped before its "up" was announced.
-			n.cancelPending(changeKey(ev.Tunnel, true))
+		// A change reversed inside the hold-back window (a wake or
+		// health-check reconnect tears the tunnel down and brings it
+		// back) is no change at all: drop the held-back message and
+		// announce nothing.
+		if n.cancelPending(changeKey(ev.Tunnel, !up)) {
+			continue
 		}
 		if !wgapp.ShouldNotify(enabled, ev, n.actions, now) {
 			continue
@@ -229,13 +243,18 @@ func (n *notifier) delay() time.Duration {
 	return pendingDelay
 }
 
-func (n *notifier) cancelPending(key string) {
+// cancelPending drops the message held back under key and reports whether
+// it was stopped before delivery. false means nothing was pending or its
+// timer had already fired, so that message goes out.
+func (n *notifier) cancelPending(key string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if t, ok := n.pending[key]; ok {
-		t.Stop()
-		delete(n.pending, key)
+	t, ok := n.pending[key]
+	if !ok {
+		return false
 	}
+	delete(n.pending, key)
+	return t.Stop()
 }
 
 // onAutoConnected handles the helper's auto_connected event: it names the
@@ -301,38 +320,59 @@ func (n *notifier) language() string {
 	return pickLanguage(lang)
 }
 
+// serviceResult is the outcome of one delivery attempt through the
+// notifications service.
+type serviceResult int
+
+const (
+	// serviceDelivered: the service posted the notification.
+	serviceDelivered serviceResult = iota
+	// serviceDrop: the user has not allowed notifications (denied, or the
+	// authorization prompt is still open); the notification is dropped so
+	// the user's choice is respected.
+	serviceDrop
+	// serviceFailed: the service could not start, or authorization or
+	// delivery returned an error; the fallback may post instead.
+	serviceFailed
+)
+
 // deliver posts through the Wails notifications service, requesting
-// authorization lazily on first use, and falls back to osascript on macOS
-// when authorization or delivery fails (or is still pending).
+// authorization lazily on first use. The osascript fallback (macOS) is used
+// only when the service fails; a denied or still-pending authorization
+// drops the notification instead of routing around the user's choice.
 func (n *notifier) deliver(title, body string) {
-	if n.sendViaService(title, body) {
+	if n.sendViaService(title, body) != serviceFailed || n.fallback == nil {
 		return
 	}
-	if runtime.GOOS == "darwin" {
-		if err := osascriptNotify(title, body); err != nil {
-			slog.Warn("notification fallback failed", "error", err)
-		}
+	if err := n.fallback(title, body); err != nil {
+		slog.Warn("notification fallback failed", "error", err)
 	}
 }
 
-// sendViaService returns true when the service delivered the notification.
-// svcMu is only held for state changes, never across the authorization
-// wait (which can block until the user answers the macOS prompt), so other
-// notifications fall back immediately while a prompt is pending.
-func (n *notifier) sendViaService(title, body string) bool {
+// sendViaService attempts one delivery through the service. svcMu is only
+// held for state changes, never across the authorization wait (which can
+// block until the user answers the macOS prompt). Notifications arriving
+// while the prompt is open are dropped. A denial holds for the rest of the
+// session: allowing notifications later in System Settings takes effect
+// after a restart.
+func (n *notifier) sendViaService(title, body string) serviceResult {
 	n.svcMu.Lock()
 	if !n.svcStarted {
 		n.svcStarted = true
-		n.svc = newNotificationBackend()
+		n.svc = n.newBackend()
 		if err := n.svc.start(); err != nil {
 			slog.Info("notifications service unavailable, using fallback", "error", err)
 		} else {
 			n.svcUsable = true
 		}
 	}
-	if !n.svcUsable || n.authPending {
+	if !n.svcUsable {
 		n.svcMu.Unlock()
-		return false
+		return serviceFailed
+	}
+	if n.authPending || n.authDenied {
+		n.svcMu.Unlock()
+		return serviceDrop
 	}
 	svc := n.svc
 	if !n.authAsked {
@@ -342,19 +382,25 @@ func (n *notifier) sendViaService(title, body string) bool {
 		n.svcMu.Lock()
 		n.authPending = false
 		n.authAsked = true // ask at most once per session, even on error/timeout
-		if err != nil || !ok {
-			slog.Info("notification authorization not granted, using fallback", "granted", ok, "error", err)
+		if err != nil {
+			slog.Info("notification authorization failed, using fallback", "error", err)
 			n.svcUsable = false
 			n.svcMu.Unlock()
-			return false
+			return serviceFailed
+		}
+		if !ok {
+			slog.Info("notifications not allowed by the user; dropping them")
+			n.authDenied = true
+			n.svcMu.Unlock()
+			return serviceDrop
 		}
 	}
 	n.svcMu.Unlock()
 	if err := svc.send(fmt.Sprintf("wireguide-%d", time.Now().UnixNano()), title, body); err != nil {
 		slog.Info("notification delivery failed, using fallback", "error", err)
-		return false
+		return serviceFailed
 	}
-	return true
+	return serviceDelivered
 }
 
 // osascriptNotify posts a notification through AppleScript, which needs no
