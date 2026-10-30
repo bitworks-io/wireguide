@@ -291,5 +291,14 @@
     "saving": "正在保存……",
     "saved": "已保存",
     "loading": "正在加载……"
+  },
+  "url_action": {
+    "connect_title": "通过链接连接？",
+    "disconnect_title": "通过链接断开连接？",
+    "connect_message": "某个链接或快捷指令请求 WireGuide 连接“{name}”。",
+    "disconnect_message": "某个链接或快捷指令请求 WireGuide 断开“{name}”。",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "cancel": "取消"
   }
 }

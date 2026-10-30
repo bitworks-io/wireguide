@@ -291,5 +291,14 @@
     "saving": "Saving…",
     "saved": "Saved",
     "loading": "Loading…"
+  },
+  "url_action": {
+    "connect_title": "Connect from a link?",
+    "disconnect_title": "Disconnect from a link?",
+    "connect_message": "A link or shortcut asked WireGuide to connect \"{name}\".",
+    "disconnect_message": "A link or shortcut asked WireGuide to disconnect \"{name}\".",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "cancel": "Cancel"
   }
 }

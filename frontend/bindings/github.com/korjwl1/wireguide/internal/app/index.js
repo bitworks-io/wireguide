@@ -17,6 +17,7 @@ export {
     RouteEntry,
     SettingsPatch,
     TunnelInfo,
+    URLAction,
     UpdateState,
     ZipImportResult
 } from "./models.js";

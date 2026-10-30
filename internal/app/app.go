@@ -29,6 +29,10 @@ type TunnelService struct {
 	clients       *ipc.ClientHolder
 	app           *application.App
 
+	// urlQueue holds wireguide:// connect/disconnect requests awaiting the
+	// user's confirmation (see url_actions.go).
+	urlQueue urlActionQueue
+
 	// updateScheduler + updateStore are wired in by the GUI Run() entry
 	// after the Wails service registers (we can't inject them at
 	// construction time because the scheduler needs the app reference to

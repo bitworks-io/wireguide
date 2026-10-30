@@ -2,6 +2,11 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **`wireguide://` URL scheme (macOS)** - `connect/<name>`, `disconnect/<name>` and `show` let Shortcuts, Raycast or a shell drive the app (see README for a Shortcuts recipe). Tunnel names are validated and matched exactly against saved tunnels, connect/disconnect always show a confirmation sheet in the window (even when WireGuide is frontmost), and a URL can never import, delete or modify a config. A confirmed connect takes the normal Connect path, including the manual override for automation rules. Windows and Linux are not wired up yet.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added

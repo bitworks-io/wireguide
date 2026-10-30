@@ -691,6 +691,18 @@ export function SetUpdateScheduler(sched, store) {
 }
 
 /**
+ * TakeURLActions returns (and clears) the URL actions waiting for the user's
+ * confirmation. The frontend shows a sheet per action and, on approval,
+ * calls the ordinary Connect / DisconnectTunnel methods.
+ * @returns {$CancellablePromise<$models.URLAction[]>}
+ */
+export function TakeURLActions() {
+    return $Call.ByID(1243665022).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType31($result);
+    }));
+}
+
+/**
  * TunnelExists reports whether a tunnel with the given name is stored.
  * @param {string} name
  * @returns {$CancellablePromise<boolean>}
@@ -764,3 +776,5 @@ const $$createType26 = $Create.Array($$createType25);
 const $$createType27 = $Create.Array($$createType23);
 const $$createType28 = $models.DNSLeakResult.createFrom;
 const $$createType29 = $Create.Nullable($$createType28);
+const $$createType30 = $models.URLAction.createFrom;
+const $$createType31 = $Create.Array($$createType30);

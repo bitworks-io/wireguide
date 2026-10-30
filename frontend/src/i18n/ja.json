@@ -291,5 +291,14 @@
     "saving": "保存中…",
     "saved": "保存しました",
     "loading": "読み込み中…"
+  },
+  "url_action": {
+    "connect_title": "リンクから接続しますか?",
+    "disconnect_title": "リンクから切断しますか?",
+    "connect_message": "リンクまたはショートカットが WireGuide に「{name}」の接続を要求しました。",
+    "disconnect_message": "リンクまたはショートカットが WireGuide に「{name}」の切断を要求しました。",
+    "connect": "接続",
+    "disconnect": "切断",
+    "cancel": "キャンセル"
   }
 }
