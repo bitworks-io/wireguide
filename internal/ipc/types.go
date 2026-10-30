@@ -279,7 +279,10 @@ type AutomationPreviewResponse struct {
 	// PrimaryIface is the default-route interface ("" when unknown).
 	PrimaryIface  string `json:"primary_iface,omitempty"`
 	PrimaryIsWiFi bool   `json:"primary_is_wifi,omitempty"`
-	Online        bool   `json:"online"`
+	// Medium is the primary interface's connection type (wifi, wired,
+	// tethered); "" when unknown (always on Windows).
+	Medium string `json:"medium,omitempty"`
+	Online bool   `json:"online"`
 	// Settled is true once the network has been stable long enough for
 	// negated rules to act; SettleRemainingSec counts down otherwise.
 	Settled            bool                       `json:"settled"`

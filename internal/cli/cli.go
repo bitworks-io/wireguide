@@ -102,9 +102,13 @@ Automation (per-tunnel connect/disconnect rules):
                                           append a rule; <cond> is one of:
                                             ssid:<wifi-name>   subnet:<CIDR>
                                             mac:<gateway-MAC>  else
+                                            'ssid:<a>|<b>'     any of several Wi-Fi names
+                                            medium:<wifi|wired|tethered>  connection type
+                                              (macOS and Linux; never matches on Windows)
                                           or negated: not-ssid:<name> not-subnet:<CIDR>
-                                            not-mac:<MAC> (matches only when the value is
-                                            known and different; unknown holds, see README)
+                                            not-mac:<MAC> 'not-ssid:<a>|<b>' not-medium:<m>
+                                            (matches only when the value is known and
+                                            different; unknown holds, see README)
   wireguide ctl automation rm <name> <n>  remove rule number <n> (from 'rules')
 
 Settings & diagnostics:
@@ -133,6 +137,8 @@ Examples:
   wireguide ctl automation add work connect else
   wireguide ctl automation add vpn disconnect ssid:HomeWiFi
   wireguide ctl automation add vpn connect not-ssid:HomeWiFi
+  wireguide ctl automation add vpn disconnect 'ssid:HomeWiFi|HomeWiFi-5G'
+  wireguide ctl automation add vpn connect not-medium:wired
 
 WireGuide must be running for connect/disconnect/status — start it with
 'wireguide ctl start' (or by opening the app). Nothing else starts it for you.

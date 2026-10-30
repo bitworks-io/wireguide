@@ -111,12 +111,15 @@ func (h *Helper) reevaluateAutomation(reason string) {
 
 	// event.automation is broadcast right after each connect/disconnect
 	// returns (both release connectMu before returning), never under it.
-	anyNegated := false
+	anyNegated, anyMedium := false, false
 	for _, name := range auto.TunnelNames() {
 		rules := auto.PerTunnel[name]
 		h.noteRulesLoaded(name, rules)
 		if automation.HasNegated(rules) {
 			anyNegated = true
+		}
+		if automation.UsesMedium(rules) {
+			anyMedium = true
 		}
 		if latch, ok := h.manualLatchFor(name); ok {
 			lvl := slog.LevelDebug
@@ -175,8 +178,19 @@ func (h *Helper) reevaluateAutomation(reason string) {
 	// A negated rule can't act, and a manual latch can't clear, until the
 	// network has been stable for the settle window, and nothing else
 	// re-triggers evaluation then.
+	// An unknown medium (macOS: interface not yet in the hardware-port
+	// listing) is re-checked shortly, since a corrected classification
+	// changes no fingerprint and triggers nothing by itself. One timer
+	// serves both: arm it for whichever is due first.
+	delay := time.Duration(-1)
 	if (anyNegated || h.hasManualOverrides()) && !ctx.Settled {
-		h.armSettleTimer(st.settleRemaining)
+		delay = st.settleRemaining
+	}
+	if h.mediumRetryDue(ctx, anyMedium) && (delay < 0 || mediumRetryInterval < delay) {
+		delay = mediumRetryInterval
+	}
+	if delay >= 0 {
+		h.armSettleTimer(delay)
 	}
 }
 
@@ -211,7 +225,7 @@ func (h *Helper) handleAutomationPreview(_ json.RawMessage) (interface{}, error)
 	resp := ipc.AutomationPreviewResponse{
 		SSID: ctx.SSID, PhysicalIPs: ipStrs, GatewayMAC: ctx.GatewayMAC,
 		PrimaryIface: ctx.PrimaryIface, PrimaryIsWiFi: ctx.PrimaryIsWiFi,
-		Online: ctx.Online, Settled: ctx.Settled,
+		Online: ctx.Online, Settled: ctx.Settled, Medium: ctx.Medium,
 		SettleRemainingSec: int((st.settleRemaining + time.Second - 1) / time.Second),
 	}
 	if auto != nil {

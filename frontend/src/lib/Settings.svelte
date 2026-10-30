@@ -13,6 +13,8 @@
   import { firewallDnsLine } from './dns-protection.js';
   import { createEventScope } from './event-scope.js';
   import { startModeKey, isRepairBusy } from './helper-info.js';
+  import { rulesFor } from './automationRules.js';
+  import { noteOwnSave } from '../stores/automationWatch.js';
 
   export let TunnelService;
   export let onClose = () => {};
@@ -190,6 +192,30 @@
   async function refreshAutomationBackup() {
     try { automationBackup = await TunnelService.GetAutomationBackupStatus(); }
     catch (e) { console.error('load automation backup status:', e); }
+  }
+
+  // Tier-3 rule lists (Wi-Fi name lists, connection type) that an older
+  // version dropped from the settings file. Restoring only fills tunnels
+  // that currently have no rules.
+  let restoringV3 = false;
+  let restoreV3Error = '';
+  async function restoreV3Backup() {
+    restoringV3 = true;
+    restoreV3Error = '';
+    try {
+      const names = (await TunnelService.RestoreAutomationV3Backup()) || [];
+      // Mark the restored lists as this app's own write so the rule
+      // history's outside-change notice does not report them.
+      if (names.length) {
+        const s = await TunnelService.GetSettings();
+        for (const name of names) noteOwnSave(name, rulesFor(s, name));
+      }
+    }
+    catch (e) { restoreV3Error = errText(e); }
+    finally {
+      restoringV3 = false;
+      await refreshAutomationBackup();
+    }
   }
 
   async function load() {
@@ -491,6 +517,18 @@
           <div class="settings-section" role="status">
             <p class="setting-desc">{$t(automationBackup.error ? 'settings.automation_backup_error' : 'settings.automation_backup_recovery')}</p>
             {#if automationBackup.error}<p class="setting-desc">{automationBackup.error}</p>{/if}
+          </div>
+        {/if}
+        {#if automationBackup?.v3?.error || automationBackup?.v3?.recoverable?.length > 0 || restoreV3Error}
+          <div class="settings-section" role="status">
+            {#if automationBackup?.v3?.error}
+              <p class="setting-desc">{$t('settings.automation_backup_error')}</p>
+              <p class="setting-desc">{automationBackup.v3.error}</p>
+            {:else if automationBackup?.v3?.recoverable?.length > 0}
+              <p class="setting-desc">{$t('settings.automation_v3_recoverable', { names: automationBackup.v3.recoverable.join(', ') })}</p>
+              <button type="button" class="check-btn" disabled={restoringV3} on:click={restoreV3Backup}>{$t('settings.automation_v3_restore')}</button>
+            {/if}
+            {#if restoreV3Error}<ErrorNotice message={$t('settings.automation_v3_restore_failed') + ' ' + restoreV3Error} busy={restoringV3} onRetry={restoreV3Backup}/>{/if}
           </div>
         {/if}
         {#if activeTab === 'general'}

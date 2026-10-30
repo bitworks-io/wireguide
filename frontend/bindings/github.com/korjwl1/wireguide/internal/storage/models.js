@@ -44,6 +44,14 @@ export class AutomationBackupStatus {
              */
             this["error"] = undefined;
         }
+        if (!("v3" in $$source)) {
+            /**
+             * V3 reports the separate tier-3 recovery copy (automation_backup_v3.go).
+             * @member
+             * @type {AutomationV3BackupStatus}
+             */
+            this["v3"] = (new AutomationV3BackupStatus());
+        }
 
         Object.assign(this, $$source);
     }
@@ -54,8 +62,120 @@ export class AutomationBackupStatus {
      * @returns {AutomationBackupStatus}
      */
     static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("v3" in $$parsedSource) {
+            $$parsedSource["v3"] = $$createField4_0($$parsedSource["v3"]);
+        }
         return new AutomationBackupStatus(/** @type {Partial<AutomationBackupStatus>} */($$parsedSource));
+    }
+}
+
+/**
+ * AutomationHistoryEntry describes one snapshot for the GUI list.
+ */
+export class AutomationHistoryEntry {
+    /**
+     * Creates a new AutomationHistoryEntry instance.
+     * @param {Partial<AutomationHistoryEntry>} [$$source = {}] - The source object to create the AutomationHistoryEntry.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("time" in $$source)) {
+            /**
+             * RFC3339, UTC
+             * @member
+             * @type {string}
+             */
+            this["time"] = "";
+        }
+        if (!("rule_count" in $$source)) {
+            /**
+             * rules for the requested tunnel
+             * @member
+             * @type {number}
+             */
+            this["rule_count"] = 0;
+        }
+        if (!("total_rules" in $$source)) {
+            /**
+             * rules across all tunnels
+             * @member
+             * @type {number}
+             */
+            this["total_rules"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationHistoryEntry instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationHistoryEntry}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationHistoryEntry(/** @type {Partial<AutomationHistoryEntry>} */($$parsedSource));
+    }
+}
+
+/**
+ * AutomationV3BackupStatus describes the tier-3 recovery copy.
+ */
+export class AutomationV3BackupStatus {
+    /**
+     * Creates a new AutomationV3BackupStatus instance.
+     * @param {Partial<AutomationV3BackupStatus>} [$$source = {}] - The source object to create the AutomationV3BackupStatus.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * Available is true when the v3 backup file exists.
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (!("recoverable" in $$source)) {
+            /**
+             * Recoverable lists the backed-up tunnels that have no rules at all in
+             * config.json, typically because an older version dropped them.
+             * RestoreAutomationV3Backup puts these back.
+             * @member
+             * @type {string[]}
+             */
+            this["recoverable"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["error"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationV3BackupStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationV3BackupStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recoverable" in $$parsedSource) {
+            $$parsedSource["recoverable"] = $$createField1_0($$parsedSource["recoverable"]);
+        }
+        return new AutomationV3BackupStatus(/** @type {Partial<AutomationV3BackupStatus>} */($$parsedSource));
     }
 }
 
@@ -280,18 +400,6 @@ export class Settings {
              */
             this["auto_update_check"] = undefined;
         }
-        if (!("notify_auto_changes" in $$source)) {
-            /**
-             * NotifyAutoChanges: show a native notification when a tunnel connects
-             * or disconnects without a user action in this GUI process (automation,
-             * wake, health-check recovery, CLI) and on helper problems. A plain
-             * bool is enough: Load starts from DefaultSettings, so a settings.json
-             * that predates the field keeps the default (true).
-             * @member
-             * @type {boolean}
-             */
-            this["notify_auto_changes"] = false;
-        }
         if (!("wifi_rules" in $$source)) {
             /**
              * WifiRules holds the LEGACY SSID-based auto-connect / auto-disconnect
@@ -324,14 +432,16 @@ export class Settings {
      * @returns {Settings}
      */
     static createFrom($$source = {}) {
-        const $$createField16_0 = $$createType0;
+        const $$createField15_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("wifi_rules" in $$parsedSource) {
-            $$parsedSource["wifi_rules"] = $$createField16_0($$parsedSource["wifi_rules"]);
+            $$parsedSource["wifi_rules"] = $$createField15_0($$parsedSource["wifi_rules"]);
         }
         return new Settings(/** @type {Partial<Settings>} */($$parsedSource));
     }
 }
 
 // Private type creation functions
-const $$createType0 = automation$0.Rules.createFrom;
+const $$createType0 = AutomationV3BackupStatus.createFrom;
+const $$createType1 = $Create.Array($Create.Any);
+const $$createType2 = automation$0.Rules.createFrom;

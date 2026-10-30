@@ -43,9 +43,11 @@ import (
 // dns_protection_failing critical-error code. An older helper answers
 // Firewall.Status with method-not-found and omits the fields, which the GUI
 // reports as unknown.
+// Minor 11 adds AutomationPreviewResponse.Medium (connection type of the primary
+// interface) for connection-type automation rules.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 10
+	ProtocolMinor = 11
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in

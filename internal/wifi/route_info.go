@@ -3,10 +3,20 @@ package wifi
 import (
 	"net"
 	"strings"
+
+	"github.com/korjwl1/wireguide/internal/automation"
 )
 
-// Pure parsers shared by the per-OS DefaultRoute / IsWiFiInterface
-// implementations, kept untagged so their tests run everywhere.
+// Pure parsers shared by the per-OS DefaultRoute / IsWiFiInterface /
+// InterfaceMedium implementations, kept untagged so their tests run
+// everywhere.
+
+// Connection types InterfaceMedium reports (automation.NetworkContext.Medium).
+const (
+	MediumWiFi     = automation.MediumWiFi
+	MediumWired    = automation.MediumWired
+	MediumTethered = automation.MediumTethered
+)
 
 // parseRouteGetDefault extracts the gateway IP and interface from the
 // output of macOS `route -n get default`. Either may be "".
@@ -47,4 +57,65 @@ func parseWiFiHardwarePorts(out string) map[string]bool {
 		}
 	}
 	return devs
+}
+
+// parseHardwarePorts maps each BSD device in `networksetup
+// -listallhardwareports` output to its hardware port name ("en0" →
+// "Wi-Fi", "en8" → "iPhone USB").
+func parseHardwarePorts(out string) map[string]string {
+	ports := map[string]string{}
+	port := ""
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "Hardware Port:"):
+			port = strings.TrimSpace(strings.TrimPrefix(line, "Hardware Port:"))
+		case strings.HasPrefix(line, "Device:"):
+			if d := strings.TrimSpace(strings.TrimPrefix(line, "Device:")); d != "" && port != "" {
+				ports[d] = port
+			}
+			port = ""
+		}
+	}
+	return ports
+}
+
+// classifyHardwarePort maps a macOS hardware port name to a medium: Wi-Fi
+// ports are wifi; iPhone/iPad USB, Bluetooth PAN and RNDIS/USB tethering
+// ports are tethered; anything else is wired.
+func classifyHardwarePort(port string) string {
+	p := strings.ToLower(strings.TrimSpace(port))
+	switch {
+	case p == "wi-fi" || p == "airport":
+		return MediumWiFi
+	case strings.Contains(p, "iphone"), strings.Contains(p, "ipad"),
+		strings.Contains(p, "bluetooth pan"), strings.Contains(p, "rndis"),
+		strings.Contains(p, "tether"):
+		return MediumTethered
+	}
+	return MediumWired
+}
+
+// classifyLinuxIface maps a Linux interface to a medium from its name, its
+// kernel driver (basename of /sys/class/net/<if>/device/driver, "" when
+// unknown) and whether it has a wireless/ directory.
+//
+// Tethering drivers: ipheth (iPhone USB), rndis_host / rndis_wlan (Android
+// and other RNDIS USB tethering) and bnep (Bluetooth PAN), plus the usb* /
+// bnep* interface names those drivers create. The generic USB CDC drivers
+// (cdc_ether, cdc_ncm) are deliberately NOT treated as tethering: they also
+// drive many ordinary USB-C Ethernet adapters, and calling those "tethered"
+// would make a "connection type is wired" rule silently misfire.
+func classifyLinuxIface(name, driver string, wireless bool) string {
+	if wireless {
+		return MediumWiFi
+	}
+	switch driver {
+	case "rndis_host", "ipheth", "rndis_wlan", "bnep":
+		return MediumTethered
+	}
+	if strings.HasPrefix(name, "bnep") || strings.HasPrefix(name, "usb") {
+		return MediumTethered
+	}
+	return MediumWired
 }

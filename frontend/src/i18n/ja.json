@@ -258,7 +258,10 @@
     "helper_repair_busy": "先にすべてのトンネルを切断し、保留中の再接続を取り消してください。ヘルパーを修復するとトンネルが切断されます。",
     "helper_repair_go": "修復",
     "helper_repairing": "修復中…",
-    "helper_repair_done": "ヘルパーを修復しました。"
+    "helper_repair_done": "ヘルパーを修復しました。",
+    "automation_v3_recoverable": "{names} のルールは Wi-Fi 名のリストまたは接続の種類を使用しており、以前のバージョンの WireGuide によって削除されました。バックアップがあります。",
+    "automation_v3_restore": "ルールを復元",
+    "automation_v3_restore_failed": "ルールを復元できませんでした。"
   },
   "confirm": {
     "delete_title": "トンネルを削除しますか？",
@@ -421,7 +424,22 @@
       "net_unknown_denied": "WireGuide の位置情報サービスが拒否されています — Wi-Fi 名が不明のため「でない」SSID ルールは保留中です",
       "net_unknown_not_allowed": "WireGuide の位置情報サービスがまだ許可されていません — Wi-Fi 名が不明のため「でない」SSID ルールは保留中です",
       "net_unknown_roaming": "Wi-Fi 名を一時的に取得できません (再接続またはローミング中) — 「でない」ルールは保留中です"
-    }
+    },
+    "rule_removed": "ルールを削除しました",
+    "undo": "元に戻す",
+    "restore_previous": "以前のルールを復元…",
+    "rule_history": "ルールの履歴",
+    "rule_history_empty": "保存された以前のルールはまだありません。",
+    "rule_history_count": "ルール: {count} 件",
+    "rules_changed_outside": "{name} のルールがアプリの外部で変更されました。",
+    "cond_medium": "接続の種類",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "有線 (イーサネット)",
+    "medium_tethered": "テザリング (スマートフォン USB/Bluetooth)",
+    "ssid_add_placeholder": "追加…",
+    "ssid_tags_hint": "Wi-Fi 名です。Enter キーまたはカンマで追加でき、いずれかに一致するとルールが適用されます。",
+    "remove_ssid": "{ssid} を削除",
+    "medium_windows_note": "Windows では接続の種類を検出できないため、このルールは適用されません。"
   },
   "ping_health": {
     "title": "応答がない場合に自動再接続",

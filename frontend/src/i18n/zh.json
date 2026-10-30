@@ -258,7 +258,10 @@
     "helper_repair_busy": "请先断开所有隧道并取消待处理的重连:修复辅助程序会使它们中断。",
     "helper_repair_go": "修复",
     "helper_repairing": "正在修复…",
-    "helper_repair_done": "辅助程序已修复。"
+    "helper_repair_done": "辅助程序已修复。",
+    "automation_v3_recoverable": "{names} 的规则使用了 Wi-Fi 名称列表或连接类型，已被旧版 WireGuide 删除。可从备份恢复。",
+    "automation_v3_restore": "恢复规则",
+    "automation_v3_restore_failed": "无法恢复规则。"
   },
   "confirm": {
     "delete_title": "删除隧道？",
@@ -421,7 +424,22 @@
       "net_unknown_denied": "WireGuide 的定位服务被拒绝 — 无法获取 Wi-Fi 名称，“不是” SSID 规则暂缓",
       "net_unknown_not_allowed": "尚未允许 WireGuide 使用定位服务 — 无法获取 Wi-Fi 名称，“不是” SSID 规则暂缓",
       "net_unknown_roaming": "Wi-Fi 名称暂时不可用（正在重连或漫游）— “不是”规则暂缓"
-    }
+    },
+    "rule_removed": "规则已删除",
+    "undo": "撤销",
+    "restore_previous": "恢复以前的规则…",
+    "rule_history": "规则历史",
+    "rule_history_empty": "尚未保存以前的规则。",
+    "rule_history_count": "规则：{count} 条",
+    "rules_changed_outside": "{name} 的规则已在应用外部更改。",
+    "cond_medium": "连接类型",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "有线 (以太网)",
+    "medium_tethered": "共享网络 (手机 USB/蓝牙)",
+    "ssid_add_placeholder": "再添加一个…",
+    "ssid_tags_hint": "Wi-Fi 名称。按 Enter 键或输入逗号可继续添加；匹配其中任意一个即应用此规则。",
+    "remove_ssid": "移除 {ssid}",
+    "medium_windows_note": "Windows 无法检测连接类型，因此此规则在这里不会生效。"
   },
   "ping_health": {
     "title": "无响应时重新连接",

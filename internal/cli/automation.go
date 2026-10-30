@@ -60,7 +60,11 @@ func automationPreview() int {
 	if !resp.Settled {
 		settle = fmt.Sprintf("settling, %ds left (negated rules hold)", resp.SettleRemainingSec)
 	}
-	fmt.Printf("                 primary=%s wifi=%v online=%v  %s\n", iface, resp.PrimaryIsWiFi, resp.Online, settle)
+	medium := resp.Medium
+	if medium == "" {
+		medium = "(unknown)"
+	}
+	fmt.Printf("                 primary=%s wifi=%v medium=%s online=%v  %s\n", iface, resp.PrimaryIsWiFi, medium, resp.Online, settle)
 	if len(resp.Tunnels) == 0 {
 		fmt.Println("no tunnels have automation rules")
 		return 0
@@ -122,7 +126,18 @@ func formatCondition(c automation.Condition) string {
 	}
 	switch c.Type {
 	case automation.CondSSID:
+		if set := automation.SSIDSet(c); len(c.SSIDs) > 0 && len(set) > 1 {
+			in := " in "
+			if c.Negate {
+				in = " not in "
+			}
+			return "ssid" + in + "{" + strings.Join(set, ", ") + "}"
+		} else if len(c.SSIDs) > 0 && len(set) == 1 {
+			return "ssid" + op + set[0]
+		}
 		return "ssid" + op + c.SSID
+	case automation.CondMedium:
+		return "medium" + op + c.Medium
 	case automation.CondSubnet:
 		return "subnet" + op + c.Subnet
 	case automation.CondNetwork:
@@ -157,10 +172,12 @@ func automationRules(args []string) int {
 }
 
 // parseCondition turns "ssid:home" / "subnet:10.0.0.0/24" / "mac:.." /
-// "else" into a automation.Condition. A "not-" prefix on ssid/subnet/mac
-// ("not-ssid:home") negates it: it matches only when the value is known
-// and different (a blank SSID mid-roam holds instead of matching).
-// "not-else" is rejected. Returns an error for malformed values.
+// "medium:wired" / "else" into an automation.Condition. "ssid:A|B" matches
+// any of several SSIDs (one name is stored as ssid, several as ssids). A
+// "not-" prefix on ssid/subnet/mac/medium ("not-ssid:home") negates it: it
+// matches only when the value is known and different (a blank SSID
+// mid-roam holds instead of matching). "not-else" is rejected. Returns an
+// error for malformed values.
 func parseCondition(spec string) (automation.Condition, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "else" || spec == "otherwise" || spec == "none" {
@@ -171,7 +188,7 @@ func parseCondition(spec string) (automation.Condition, error) {
 	}
 	kind, val, ok := strings.Cut(spec, ":")
 	if !ok || strings.TrimSpace(val) == "" {
-		return automation.Condition{}, fmt.Errorf("condition %q must be ssid:<name>, subnet:<CIDR>, mac:<MAC> or else (prefix not- to negate)", spec)
+		return automation.Condition{}, fmt.Errorf("condition %q must be ssid:<name>[|<name>...], subnet:<CIDR>, mac:<MAC>, medium:<wifi|wired|tethered> or else (prefix not- to negate)", spec)
 	}
 	negate := false
 	if rest, found := strings.CutPrefix(kind, "not-"); found {
@@ -181,7 +198,29 @@ func parseCondition(spec string) (automation.Condition, error) {
 	val = strings.TrimSpace(val)
 	switch kind {
 	case "ssid":
-		return automation.Condition{Type: automation.CondSSID, Negate: negate, SSID: val}, nil
+		parts := strings.Split(val, "|")
+		names := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				return automation.Condition{}, fmt.Errorf("ssid list %q has an empty name", val)
+			}
+			names = append(names, p)
+		}
+		if len(names) == 1 {
+			return automation.Condition{Type: automation.CondSSID, Negate: negate, SSID: names[0]}, nil
+		}
+		return automation.Condition{Type: automation.CondSSID, Negate: negate, SSIDs: names}, nil
+	case "medium":
+		m := strings.ToLower(val)
+		if strings.Contains(m, "|") {
+			return automation.Condition{}, fmt.Errorf("medium takes one value (wifi, wired or tethered), got %q", val)
+		}
+		c := automation.Condition{Type: automation.CondMedium, Negate: negate, Medium: m}
+		if err := c.Validate(); err != nil {
+			return automation.Condition{}, fmt.Errorf("medium %q must be wifi, wired or tethered", val)
+		}
+		return c, nil
 	case "subnet":
 		if _, _, err := net.ParseCIDR(val); err != nil {
 			return automation.Condition{}, fmt.Errorf("subnet %q is not a valid CIDR (e.g. 192.168.0.0/24)", val)
@@ -199,7 +238,7 @@ func parseCondition(spec string) (automation.Condition, error) {
 		}
 		return automation.Condition{Type: automation.CondNetwork, Negate: negate, GatewayMAC: strings.ToLower(val)}, nil
 	default:
-		return automation.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/else, or not-ssid/not-subnet/not-mac)", kind)
+		return automation.Condition{}, fmt.Errorf("unknown condition kind %q (use ssid/subnet/mac/medium/else, or not-ssid/not-subnet/not-mac/not-medium)", kind)
 	}
 }
 

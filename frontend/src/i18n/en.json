@@ -258,7 +258,10 @@
     "helper_repair_busy": "Disconnect all tunnels and cancel pending reconnects first: repairing the helper would drop them.",
     "helper_repair_go": "Repair",
     "helper_repairing": "Repairing…",
-    "helper_repair_done": "Helper repaired."
+    "helper_repair_done": "Helper repaired.",
+    "automation_v3_recoverable": "Rules for {names} use Wi-Fi name lists or connection type and were removed by an older version of WireGuide. A backup is available.",
+    "automation_v3_restore": "Restore rules",
+    "automation_v3_restore_failed": "Could not restore rules."
   },
   "confirm": {
     "delete_title": "Delete tunnel?",
@@ -421,7 +424,22 @@
       "net_unknown_denied": "Location Services denied for WireGuide — Wi-Fi names unknown, 'is not' SSID rules on hold",
       "net_unknown_not_allowed": "Location Services not yet allowed for WireGuide — Wi-Fi names unknown, 'is not' SSID rules on hold",
       "net_unknown_roaming": "Wi-Fi name momentarily unavailable (reconnecting or roaming) — 'is not' rules hold"
-    }
+    },
+    "rule_removed": "Rule removed",
+    "undo": "Undo",
+    "restore_previous": "Restore previous rules…",
+    "rule_history": "Rule history",
+    "rule_history_empty": "No earlier rules saved yet.",
+    "rule_history_count": "Rules: {count}",
+    "rules_changed_outside": "Rules for {name} changed outside the app.",
+    "cond_medium": "Connection type",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "Wired (Ethernet)",
+    "medium_tethered": "Tethered (phone USB/Bluetooth)",
+    "ssid_add_placeholder": "Add another…",
+    "ssid_tags_hint": "Wi-Fi names. Press Enter or type a comma to add another; the rule matches any of them.",
+    "remove_ssid": "Remove {ssid}",
+    "medium_windows_note": "Windows can’t detect the connection type, so this rule never applies here."
   },
   "ping_health": {
     "title": "Reconnect when unresponsive",
