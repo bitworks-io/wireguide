@@ -167,7 +167,12 @@
     "load_failed": "Could not load settings. Try again.",
     "save_failed": "Could not save or apply the change. Try again.",
     "retry": "Retry",
-    "list_width": "Tunnel list width"
+    "list_width": "Tunnel list width",
+    "export_diagnostics": "Export diagnostics…",
+    "export_diagnostics_hint": "Saves a zip with logs, redacted tunnel configs, DNS, routes and firewall state for bug reports. Private and preshared keys are never included.",
+    "export_diagnostics_busy": "Exporting…",
+    "export_diagnostics_done": "Saved to {path}",
+    "export_diagnostics_failed": "Export failed"
   },
   "confirm": {
     "delete_title": "Delete tunnel?",

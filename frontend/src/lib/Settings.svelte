@@ -25,6 +25,26 @@
   let updateState = null;
   let aboutChecking = false;
   let aboutCheckResult = '';
+
+  // Diagnostics export (native save dialog on the Go side). The result is
+  // shown inline: the app toast renders underneath this modal.
+  let exportBusy = false;
+  let exportSaved = '';
+  let exportError = '';
+  async function exportDiagnostics() {
+    if (exportBusy) return;
+    exportBusy = true;
+    exportSaved = '';
+    exportError = '';
+    try {
+      const path = await TunnelService.ExportDiagnostics();
+      if (path) exportSaved = $t('settings.export_diagnostics_done', { path });
+    } catch (e) {
+      exportError = errText(e);
+    } finally {
+      exportBusy = false;
+    }
+  }
   // nowTick drives formatLastChecked re-evaluation. Without this, opening
   // Settings and leaving it on the About tab for 10 minutes would still
   // show "just now". Updated every 60 s by an interval started in
@@ -537,6 +557,17 @@
                   <option value="error">{$t('settings.log_level_error')}</option>
                 </select>
               </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <span class="setting-label">{$t('settings.export_diagnostics')}</span>
+                  <p class="setting-desc">{$t('settings.export_diagnostics_hint')}</p>
+                  {#if exportSaved}<p class="setting-desc" role="status">{exportSaved}</p>{/if}
+                </div>
+                <button type="button" class="check-btn" on:click={exportDiagnostics} disabled={exportBusy}>
+                  {exportBusy ? $t('settings.export_diagnostics_busy') : $t('settings.export_diagnostics')}
+                </button>
+              </div>
+              {#if exportError}<ErrorNotice message={$t('settings.export_diagnostics_failed') + ': ' + exportError} busy={exportBusy} onRetry={exportDiagnostics}/>{/if}
             </div>
           </div>
 
