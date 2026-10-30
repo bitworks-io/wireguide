@@ -893,8 +893,9 @@ func TestMonitorLoop_SkipsWhenNotConnected(t *testing.T) {
 }
 
 func TestMonitorLoop_SkipsZeroHandshake(t *testing.T) {
-	// When Status() returns non-nil but LastHandshakeTime is zero (tunnel
-	// still initializing), monitorLoop should NOT trigger a reconnect.
+	// When Status() returns non-nil but LastHandshakeTime is zero and the
+	// tunnel has sent nothing (idle, or still initializing), monitorLoop
+	// should NOT trigger a reconnect.
 	var reconnectCalls atomic.Int32
 	reconnectFn := func(_ context.Context, name string) error {
 		reconnectCalls.Add(1)
