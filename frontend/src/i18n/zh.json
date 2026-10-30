@@ -359,5 +359,18 @@
     "detail_resolver_outside": "{domain} -> {resolver}：解析器通过本地网络而不是隧道访问",
     "detail_ping_none": "{host}：无响应",
     "detail_resolve_outside": "{name} -> {addrs}（{ms} ms），经由 {resolver}：解析器通过本地网络而不是隧道访问"
+  },
+  "preview": {
+    "title": "连接后将发生的更改",
+    "dns_global_mac": "将所有网络服务的 DNS 替换为 {servers}。",
+    "dns_global": "连接期间使用 {servers} 作为 DNS。",
+    "dns_split": "仅为 {domains} 添加解析器 {servers}；系统 DNS 保持不变。",
+    "dns_split_unsupported": "连接将失败：此处不支持分流 DNS（{domains}）。",
+    "dns_search": "添加搜索域：{domains}。",
+    "dns_none": "不会更改 DNS。",
+    "routes_full": "所有流量都将通过隧道。",
+    "routes_split": "仅路由：{ranges}。",
+    "routes_none": "Table=off：不会添加任何路由，请自行添加。",
+    "routes_overlap": "{range} 与当前网络（{network}）重叠，将被路由到隧道中；自动化不会自动连接此隧道。"
   }
 }

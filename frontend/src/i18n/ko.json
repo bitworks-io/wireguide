@@ -359,5 +359,18 @@
     "hint_route_unmanaged": "Table이 설정되어 WireGuide가 메인 테이블에 라우트를 추가하지 않습니다. 직접 추가하세요.",
     "hint_resolver_mismatch": "이 도메인에는 다른 리졸버가 등록되어 있습니다. 해당 터널이나 앱의 연결을 끊으세요.",
     "detail_resolver_mismatch": "{domain} -> {resolver}: 이 터널의 DNS 서버가 아닙니다"
+  },
+  "preview": {
+    "title": "연결하면 바뀌는 사항",
+    "dns_global_mac": "모든 네트워크 서비스의 DNS를 {servers}(으)로 바꿉니다.",
+    "dns_global": "연결된 동안 {servers}을(를) DNS로 사용합니다.",
+    "dns_split": "{domains} 도메인에만 리졸버 {servers}을(를) 추가합니다. 시스템 DNS는 그대로입니다.",
+    "dns_split_unsupported": "연결에 실패합니다: 이 환경에서는 분할 DNS({domains})를 지원하지 않습니다.",
+    "dns_search": "검색 도메인을 추가합니다: {domains}.",
+    "dns_none": "DNS를 변경하지 않습니다.",
+    "routes_full": "모든 트래픽을 터널로 보냅니다.",
+    "routes_split": "다음 범위만 라우팅합니다: {ranges}.",
+    "routes_none": "Table=off: 라우트를 추가하지 않습니다. 직접 추가하세요.",
+    "routes_overlap": "{range}은(는) 현재 네트워크({network})와 겹치며 터널로 라우팅됩니다. 자동화는 이 터널을 자동 연결하지 않습니다."
   }
 }

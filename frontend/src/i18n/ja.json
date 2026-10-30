@@ -359,5 +359,18 @@
     "hint_route_unmanaged": "Tableが設定されているため、WireGuideはメインテーブルにルートを追加しません。手動で追加してください。",
     "hint_resolver_mismatch": "このドメインには別のリゾルバが登録されています。それを所有するトンネルまたはアプリを切断してください。",
     "detail_resolver_mismatch": "{domain} -> {resolver}: このトンネルのDNSサーバではありません"
+  },
+  "preview": {
+    "title": "接続すると変わること",
+    "dns_global_mac": "すべてのネットワークサービスの DNS を {servers} に置き換えます。",
+    "dns_global": "接続中は {servers} を DNS として使用します。",
+    "dns_split": "{domains} のみにリゾルバー {servers} を追加します。システム DNS は変わりません。",
+    "dns_split_unsupported": "接続に失敗します: この環境ではスプリット DNS（{domains}）はサポートされていません。",
+    "dns_search": "検索ドメインを追加します: {domains}。",
+    "dns_none": "DNS は変更しません。",
+    "routes_full": "すべての通信をトンネル経由にします。",
+    "routes_split": "次の範囲のみをルーティングします: {ranges}。",
+    "routes_none": "Table=off: ルートを追加しません。手動で追加してください。",
+    "routes_overlap": "{range} は現在のネットワーク（{network}）と重なり、トンネルにルーティングされます。自動化はこのトンネルを自動接続しません。"
   }
 }

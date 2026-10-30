@@ -359,5 +359,18 @@
     "hint_route_unmanaged": "Table is set, so WireGuide installs no routes in the main table. Add them yourself.",
     "hint_resolver_mismatch": "Another resolver is registered for this domain. Disconnect the tunnel or app that owns it.",
     "detail_resolver_mismatch": "{domain} -> {resolver}: not one of this tunnel's DNS servers"
+  },
+  "preview": {
+    "title": "What will change when you connect",
+    "dns_global_mac": "Replaces DNS on all network services with {servers}.",
+    "dns_global": "Uses {servers} as DNS while connected.",
+    "dns_split": "Adds resolver {servers} for {domains} only; system DNS unchanged.",
+    "dns_split_unsupported": "Connecting will FAIL: split DNS ({domains}) is not supported here.",
+    "dns_search": "Adds search domains: {domains}.",
+    "dns_none": "Does not change DNS.",
+    "routes_full": "Routes all traffic through the tunnel.",
+    "routes_split": "Routes only: {ranges}.",
+    "routes_none": "Table=off: installs no routes. Add them yourself.",
+    "routes_overlap": "{range} overlaps your current network ({network}) and will be routed into the tunnel; automation will not auto-connect this tunnel."
   }
 }

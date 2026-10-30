@@ -14,6 +14,7 @@ export {
     DNSServer,
     DomainCheck,
     KnownSSIDs,
+    LANOverlap,
     ProfileMutationResult,
     ResolveResult,
     RouteEntry,
