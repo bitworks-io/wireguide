@@ -136,8 +136,34 @@ export class ConnectionStatus {
         }
         if (/** @type {any} */(false)) {
             /**
+             * DNSMode is how the tunnel's DNS= line is applied (global / split /
+             * search / none), DNSServers its resolver addresses and DNSProtected
+             * whether the helper's applied DNS protection rules cover those
+             * resolvers. Filled by the helper for connected tunnels; an older helper
+             * omits all three, which the GUI treats as unknown.
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_servers"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["dns_protected"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * LastChangeReason / LastChangeAt say what last brought this tunnel up
-             * (protocol minor 6): one of the ChangeReason* values and an RFC3339
+             * (protocol minor 13): one of the ChangeReason* values and an RFC3339
              * time. Empty when the helper does not know (older helper, or a tunnel
              * it did not connect itself).
              * @member
@@ -155,7 +181,7 @@ export class ConnectionStatus {
         if (/** @type {any} */(false)) {
             /**
              * RecentDisconnects maps a tunnel that went down in the last minute to
-             * why (top-level only; protocol minor 6). A disconnected tunnel is no
+             * why (top-level only; protocol minor 13). A disconnected tunnel is no
              * longer in the status at all, so this is how its end reason reaches
              * the GUI's history.
              * @member
@@ -192,18 +218,22 @@ export class ConnectionStatus {
      * @returns {ConnectionStatus}
      */
     static createFrom($$source = {}) {
-        const $$createField12_0 = $$createType1;
-        const $$createField13_0 = $$createType2;
-        const $$createField14_0 = $$createType4;
+        const $$createField11_0 = $$createType0;
+        const $$createField15_0 = $$createType2;
+        const $$createField16_0 = $$createType0;
+        const $$createField17_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("dns_servers" in $$parsedSource) {
+            $$parsedSource["dns_servers"] = $$createField11_0($$parsedSource["dns_servers"]);
+        }
         if ("recent_disconnects" in $$parsedSource) {
-            $$parsedSource["recent_disconnects"] = $$createField12_0($$parsedSource["recent_disconnects"]);
+            $$parsedSource["recent_disconnects"] = $$createField15_0($$parsedSource["recent_disconnects"]);
         }
         if ("active_tunnels" in $$parsedSource) {
-            $$parsedSource["active_tunnels"] = $$createField13_0($$parsedSource["active_tunnels"]);
+            $$parsedSource["active_tunnels"] = $$createField16_0($$parsedSource["active_tunnels"]);
         }
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField14_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField17_0($$parsedSource["tunnels"]);
         }
         return new ConnectionStatus(/** @type {Partial<ConnectionStatus>} */($$parsedSource));
     }
@@ -323,8 +353,8 @@ export class InterfaceConfig {
      * @returns {InterfaceConfig}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType2;
-        const $$createField2_0 = $$createType2;
+        const $$createField1_0 = $$createType0;
+        const $$createField2_0 = $$createType0;
         const $$createField11_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("address" in $$parsedSource) {
@@ -406,7 +436,7 @@ export class PeerConfig {
      * @returns {PeerConfig}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType2;
+        const $$createField3_0 = $$createType0;
         const $$createField5_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowed_ips" in $$parsedSource) {
@@ -533,9 +563,9 @@ export class WireGuardConfig {
 }
 
 // Private type creation functions
-const $$createType0 = TunnelChange.createFrom;
-const $$createType1 = $Create.Map($Create.Any, $$createType0);
-const $$createType2 = $Create.Array($Create.Any);
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = TunnelChange.createFrom;
+const $$createType2 = $Create.Map($Create.Any, $$createType1);
 const $$createType3 = ConnectionStatus.createFrom;
 const $$createType4 = $Create.Array($$createType3);
 const $$createType5 = ConfigKey.createFrom;
