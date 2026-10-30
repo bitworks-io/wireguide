@@ -87,6 +87,7 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 		PrimaryIface:  resp.PrimaryIface,
 		PrimaryIsWiFi: resp.PrimaryIsWiFi,
 		Online:        resp.Online,
+		Medium:        resp.Medium,
 	}
 	for _, s := range resp.PhysicalIPs {
 		if ip := net.ParseIP(s); ip != nil {
@@ -108,7 +109,9 @@ func buildAutomationPreview(resp ipc.AutomationPreviewResponse, rules map[string
 			v.RuleNegate = c.Negate
 			switch c.Type {
 			case automation.CondSSID:
-				v.RuleValue = c.SSID
+				v.RuleValue = strings.Join(automation.SSIDSet(c), ", ")
+			case automation.CondMedium:
+				v.RuleValue = c.Medium
 			case automation.CondSubnet:
 				v.RuleValue = c.Subnet
 			case automation.CondNetwork:

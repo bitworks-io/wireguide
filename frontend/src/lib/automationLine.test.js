@@ -15,6 +15,12 @@ test('condition text covers negation and none_match', () => {
   assert.equal(conditionText(tr, {}), '');
 });
 
+test('condition text covers SSID lists and connection type', () => {
+  assert.equal(conditionText(tr, { rule_type: 'ssid', rule_negate: true, rule_value: 'HomeWiFi, CafeWiFi' }), 'automation.why.cond_ssid_not|value=HomeWiFi, CafeWiFi');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_value: 'wired' }), 'automation.why.cond_medium_is|value=automation.medium_wired');
+  assert.equal(conditionText(tr, { rule_type: 'medium', rule_negate: true, rule_value: 'wifi' }), 'automation.why.cond_medium_not|value=automation.medium_wifi');
+});
+
 test('verdict lines per state', () => {
   const base = { rule_index: 2, rule_type: 'ssid', rule_value: 'X' };
   assert.match(verdictText(tr, { ...base, verdict: 'connect', active: false }), /^automation\.why\.v_connect\|rule=automation\.why\.rule\|n=2/);

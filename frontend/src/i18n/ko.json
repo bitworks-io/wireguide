@@ -441,6 +441,8 @@
       "cond_subnet_not": "서브넷이 {value} 아님",
       "cond_network_is": "네트워크가 {value}",
       "cond_network_not": "네트워크가 {value} 아님",
+      "cond_medium_is": "연결 유형이 {value}",
+      "cond_medium_not": "연결 유형이 {value} 아님",
       "cond_none": "그 외",
       "v_connect": "연결 {rule}",
       "v_connected": "자동화로 연결 유지 {rule}",

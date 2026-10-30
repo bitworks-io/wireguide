@@ -166,3 +166,29 @@ func TestConfigLANOverlap_TableOffNeverOverlaps(t *testing.T) {
 		t.Error("nil config must not overlap")
 	}
 }
+
+// A Wi-Fi name list or a connection-type rule must show its value in the
+// strip (it rendered "ssid is ?" / "network is ?" before).
+func TestBuildAutomationPreview_ListAndMediumRuleValues(t *testing.T) {
+	rules := map[string][]automation.Rule{
+		"home-vpn":   {{When: automation.Condition{Type: automation.CondSSID, SSIDs: []string{"CafeWiFi", "HomeWiFi"}}, Do: automation.ActionConnect}},
+		"office-vpn": {{When: automation.Condition{Type: automation.CondMedium, Medium: automation.MediumWired}, Do: automation.ActionConnect}},
+	}
+	resp := ipc.AutomationPreviewResponse{
+		SSID: "HomeWiFi", Online: true, Settled: true, PrimaryIface: "en0", PrimaryIsWiFi: true, Medium: automation.MediumWiFi,
+		Tunnels: []ipc.AutomationTunnelDecision{
+			{Name: "home-vpn", Decision: "connect", RuleCount: 1},
+			{Name: "office-vpn", Decision: "unmanaged", RuleCount: 1},
+		},
+	}
+	p := buildAutomationPreview(resp, rules, nil)
+	if h := verdictFor(t, p, "home-vpn"); h.RuleIndex != 1 || h.RuleValue != "CafeWiFi, HomeWiFi" {
+		t.Errorf("home-vpn: %+v", h)
+	}
+	resp.SSID, resp.PrimaryIsWiFi, resp.Medium = "", false, automation.MediumWired
+	resp.Tunnels[1].Decision = "connect"
+	p = buildAutomationPreview(resp, rules, nil)
+	if o := verdictFor(t, p, "office-vpn"); o.RuleIndex != 1 || o.RuleType != automation.CondMedium || o.RuleValue != "wired" {
+		t.Errorf("office-vpn: %+v", o)
+	}
+}

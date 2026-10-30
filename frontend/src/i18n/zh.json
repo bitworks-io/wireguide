@@ -441,6 +441,8 @@
       "cond_subnet_not": "子网不是 {value}",
       "cond_network_is": "网络是 {value}",
       "cond_network_not": "网络不是 {value}",
+      "cond_medium_is": "连接类型是 {value}",
+      "cond_medium_not": "连接类型不是 {value}",
       "cond_none": "其他情况",
       "v_connect": "连接 {rule}",
       "v_connected": "由自动化保持连接 {rule}",

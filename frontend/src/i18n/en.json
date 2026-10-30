@@ -441,6 +441,8 @@
       "cond_subnet_not": "subnet is not {value}",
       "cond_network_is": "network is {value}",
       "cond_network_not": "network is not {value}",
+      "cond_medium_is": "connection type is {value}",
+      "cond_medium_not": "connection type is not {value}",
       "cond_none": "otherwise",
       "v_connect": "connect {rule}",
       "v_connected": "kept connected by automation {rule}",

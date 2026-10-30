@@ -441,6 +441,8 @@
       "cond_subnet_not": "サブネットが {value} でない",
       "cond_network_is": "ネットワークが {value}",
       "cond_network_not": "ネットワークが {value} でない",
+      "cond_medium_is": "接続の種類が {value}",
+      "cond_medium_not": "接続の種類が {value} でない",
       "cond_none": "それ以外",
       "v_connect": "接続 {rule}",
       "v_connected": "自動化により接続を維持 {rule}",

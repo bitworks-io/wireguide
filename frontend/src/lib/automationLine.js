@@ -2,13 +2,18 @@
 // Takes the translator `tr(key, params)` as an argument (instead of
 // importing the i18n store) so it stays testable under plain node.
 
-// "ssid is CafeWiFi" / "subnet is not 10.0.0.0/24" / "otherwise".
+// "ssid is CafeWiFi" / "ssid is HomeWiFi, CafeWiFi" / "connection type is
+// Wired (Ethernet)" / "subnet is not 10.0.0.0/24" / "otherwise".
 export function conditionText(tr, v) {
   if (v.rule_type === 'none_match') return tr('automation.why.cond_none');
   if (!v.rule_type) return '';
-  const kind = ['ssid', 'subnet', 'network'].includes(v.rule_type) ? v.rule_type : 'network';
+  const kind = ['ssid', 'subnet', 'network', 'medium'].includes(v.rule_type) ? v.rule_type : 'network';
   const neg = v.rule_negate ? '_not' : '_is';
-  return tr(`automation.why.cond_${kind}${neg}`, { value: v.rule_value || '?' });
+  let value = v.rule_value || '?';
+  if (kind === 'medium' && ['wifi', 'wired', 'tethered'].includes(v.rule_value)) {
+    value = tr(`automation.medium_${v.rule_value}`);
+  }
+  return tr(`automation.why.cond_${kind}${neg}`, { value });
 }
 
 function ruleSuffix(tr, v) {
