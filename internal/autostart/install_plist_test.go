@@ -78,6 +78,13 @@ func TestSyncMacAutostartFile(t *testing.T) {
 		t.Fatalf("rewritten plist:\n%s", got)
 	}
 
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0644 {
+		t.Fatalf("rewritten plist mode = %v, err = %v, want 0644", fi.Mode().Perm(), err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".wireguide-*.tmp")); len(left) != 0 {
+		t.Fatalf("temp files left behind: %v", left)
+	}
+
 	if changed, err := syncMacAutostartFile(path, exe); err != nil || changed {
 		t.Fatalf("up-to-date plist must not be rewritten: changed=%v err=%v", changed, err)
 	}

@@ -78,9 +78,13 @@ func TestShowAuthorizationNoticeMapsCancel(t *testing.T) {
 }
 
 func TestDeclinedNoticeStopsBeforePasswordPrompt(t *testing.T) {
-	old := showAuthorizationNotice
-	t.Cleanup(func() { showAuthorizationNotice = old })
+	oldNotice, oldRun := showAuthorizationNotice, runAuthorizationScript
+	t.Cleanup(func() { showAuthorizationNotice, runAuthorizationScript = oldNotice, oldRun })
 	showAuthorizationNotice = func() error { return ErrAuthorizationCanceled }
+	runAuthorizationScript = func(string) ([]byte, error) {
+		t.Fatal("password prompt reached after the notice was declined")
+		return nil, nil
+	}
 	// runDaemonAuthorization must stop at the notice, before any osascript
 	// password prompt could run.
 	if err := runDaemonAuthorization("true"); !errors.Is(err, ErrAuthorizationCanceled) {
