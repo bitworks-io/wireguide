@@ -3,7 +3,9 @@ package gui
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 )
 
@@ -86,5 +88,36 @@ func TestNotifierLanguage(t *testing.T) {
 	nilSettings.systemLanguage = func() string { return "ja-JP" }
 	if got := nilSettings.language(); got != "ja" {
 		t.Errorf("nil settings should follow the system language, got %q", got)
+	}
+}
+
+// Known critical codes are translated instead of naming the subsystem.
+func TestNotifierCriticalErrorCodes(t *testing.T) {
+	n, c := testNotifier()
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "DNS Protection", Code: ipc.CriticalCodeDNSProtectionFailing})
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "Helper connection", Code: "helper_unavailable"})
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
+	time.Sleep(80 * time.Millisecond)
+	got := strings.Join(c.all(), "\n")
+	for _, want := range []string{
+		"DNS protection is turned on but its firewall rules keep failing to apply",
+		"The VPN helper is not responding. Use Repair helper",
+		"Helper problem (eventLoop).",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "(DNS Protection)") || strings.Contains(got, "(Helper connection)") {
+		t.Errorf("known codes must not fall back to the raw where:\n%s", got)
+	}
+	for _, lang := range []string{"ko", "ja", "zh"} {
+		for _, k := range []msgKind{msgCriticalDNS, msgCriticalHelper} {
+			_, en := notifyText("en", k, "")
+			_, loc := notifyText(lang, k, "")
+			if loc == en || loc == "" {
+				t.Errorf("%s/%d not localized", lang, k)
+			}
+		}
 	}
 }

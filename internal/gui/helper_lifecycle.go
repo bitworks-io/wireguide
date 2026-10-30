@@ -362,12 +362,18 @@ func startHelperHealthMonitor(app *application.App, clients *ipc.ClientHolder, d
 				outageStarted = time.Now()
 			}
 			if !wasAlive && !outageReported && time.Since(outageStarted) >= 10*time.Second {
-				app.Event.Emit("critical_error", ipc.CriticalErrorPayload{
+				outage := ipc.CriticalErrorPayload{
 					Where:  "Helper connection",
 					Detail: "The VPN helper is unavailable. Use Repair helper (Settings > Advanced) to reinstall it.",
-					Code:   "helper_unavailable",
+					Code:   criticalCodeHelperUnavailable,
 					Action: "repair_helper",
-				})
+				}
+				app.Event.Emit("critical_error", outage)
+				// A hidden window would not show the banner; the native
+				// notification (if enabled) does.
+				if bridge != nil {
+					bridge.notify.onCriticalError(outage)
+				}
 				outageReported = true
 			}
 		}

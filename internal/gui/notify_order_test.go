@@ -6,6 +6,7 @@ import (
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 )
 
@@ -136,7 +137,7 @@ func TestNotifierStopSilences(t *testing.T) {
 	n.onStatus([]string{"Office"})
 	n.stop()
 	n.onStatus(nil)
-	n.onCriticalError("x")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "x"})
 	n.onAutoConnected("Office")
 	n.onForcedDisconnect("Office")
 	time.Sleep(100 * time.Millisecond)
@@ -195,7 +196,7 @@ func TestNotifierClaimExpires(t *testing.T) {
 
 func TestNotifierCriticalError(t *testing.T) {
 	n, c := testNotifier()
-	n.onCriticalError("eventLoop")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
 	time.Sleep(50 * time.Millisecond)
 	if msgs := c.all(); len(msgs) != 1 {
 		t.Fatalf("got %v", msgs)
@@ -216,7 +217,7 @@ func TestNotifierToggleOff(t *testing.T) {
 	n.onStatus([]string{"Office"})
 	n.onAutoConnected("Office")
 	n.onForcedDisconnect("Office")
-	n.onCriticalError("x")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "x"})
 	time.Sleep(150 * time.Millisecond)
 	if got := c.count(); got != 0 {
 		t.Fatalf("toggle off must be silent, got %v", c.all())
@@ -229,7 +230,7 @@ func TestNilNotifierSafe(t *testing.T) {
 	n.onStatus([]string{"a"})
 	n.onAutoConnected("a")
 	n.onForcedDisconnect("a")
-	n.onCriticalError("a")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "a"})
 	n.reset()
 	n.stop()
 }

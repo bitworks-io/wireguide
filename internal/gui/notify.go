@@ -11,6 +11,7 @@ import (
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 )
 
@@ -262,15 +263,29 @@ func (n *notifier) onForcedDisconnect(name string) {
 	}
 }
 
-// onCriticalError handles the helper's critical_error event.
-func (n *notifier) onCriticalError(where string) {
+// onCriticalError handles a critical_error (from the helper, or the GUI's
+// own helper-unavailable report). A known code gets its translated text;
+// anything else names the failing subsystem.
+func (n *notifier) onCriticalError(p ipc.CriticalErrorPayload) {
 	if n == nil {
 		return
 	}
-	if wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyCriticalError}, n.actions, time.Now()) {
-		n.send(msgCritical, where)
+	if !wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyCriticalError}, n.actions, time.Now()) {
+		return
+	}
+	switch p.Code {
+	case ipc.CriticalCodeDNSProtectionFailing:
+		n.send(msgCriticalDNS, "")
+	case criticalCodeHelperUnavailable:
+		n.send(msgCriticalHelper, "")
+	default:
+		n.send(msgCritical, p.Where)
 	}
 }
+
+// criticalCodeHelperUnavailable is the code of the GUI's own
+// helper-unavailable critical_error (helper_lifecycle.go).
+const criticalCodeHelperUnavailable = "helper_unavailable"
 
 // send localises and delivers one message off the caller's goroutine.
 func (n *notifier) send(kind msgKind, arg string) {
@@ -383,36 +398,46 @@ const (
 	msgAuto
 	msgForced
 	msgCritical
+	msgCriticalDNS
+	msgCriticalHelper
 )
 
 var notifyStrings = map[string]map[msgKind]string{
 	"en": {
-		msgUp:       "“%s” connected outside the app.",
-		msgDown:     "“%s” disconnected outside the app.",
-		msgAuto:     "Automation connected “%s”.",
-		msgForced:   "“%s” was disconnected to stop a routing loop. Connect it again manually.",
-		msgCritical: "Helper problem (%s). Restart WireGuide to recover.",
+		msgUp:             "“%s” connected outside the app.",
+		msgDown:           "“%s” disconnected outside the app.",
+		msgAuto:           "Automation connected “%s”.",
+		msgForced:         "“%s” was disconnected to stop a routing loop. Connect it again manually.",
+		msgCritical:       "Helper problem (%s). Restart WireGuide to recover.",
+		msgCriticalDNS:    "DNS protection is turned on but its firewall rules keep failing to apply, so DNS may not be locked to your tunnel.",
+		msgCriticalHelper: "The VPN helper is not responding. Use Repair helper in Settings > Advanced.",
 	},
 	"ko": {
-		msgUp:       "“%s” 터널이 앱 밖에서 연결되었습니다.",
-		msgDown:     "“%s” 터널이 앱 밖에서 연결 해제되었습니다.",
-		msgAuto:     "자동화가 “%s” 터널을 연결했습니다.",
-		msgForced:   "라우팅 루프를 막기 위해 “%s” 터널의 연결을 해제했습니다. 직접 다시 연결하세요.",
-		msgCritical: "헬퍼 문제 (%s). 복구하려면 WireGuide를 다시 시작하세요.",
+		msgUp:             "“%s” 터널이 앱 밖에서 연결되었습니다.",
+		msgDown:           "“%s” 터널이 앱 밖에서 연결 해제되었습니다.",
+		msgAuto:           "자동화가 “%s” 터널을 연결했습니다.",
+		msgForced:         "라우팅 루프를 막기 위해 “%s” 터널의 연결을 해제했습니다. 직접 다시 연결하세요.",
+		msgCritical:       "헬퍼 문제 (%s). 복구하려면 WireGuide를 다시 시작하세요.",
+		msgCriticalDNS:    "DNS 보호가 켜져 있지만 방화벽 규칙 적용이 계속 실패하고 있어 DNS가 터널에 고정되지 않았을 수 있습니다.",
+		msgCriticalHelper: "VPN 헬퍼가 응답하지 않습니다. 설정 > 고급에서 헬퍼 복구를 사용하세요.",
 	},
 	"ja": {
-		msgUp:       "“%s” がアプリ外で接続されました。",
-		msgDown:     "“%s” がアプリ外で切断されました。",
-		msgAuto:     "自動化が “%s” を接続しました。",
-		msgForced:   "ルーティングループを防ぐため “%s” を切断しました。手動で再接続してください。",
-		msgCritical: "ヘルパーの問題 (%s)。復旧するには WireGuide を再起動してください。",
+		msgUp:             "“%s” がアプリ外で接続されました。",
+		msgDown:           "“%s” がアプリ外で切断されました。",
+		msgAuto:           "自動化が “%s” を接続しました。",
+		msgForced:         "ルーティングループを防ぐため “%s” を切断しました。手動で再接続してください。",
+		msgCritical:       "ヘルパーの問題 (%s)。復旧するには WireGuide を再起動してください。",
+		msgCriticalDNS:    "DNS保護はオンですが、ファイアウォールルールの適用が失敗し続けているため、DNSがトンネルに固定されていない可能性があります。",
+		msgCriticalHelper: "VPN ヘルパーが応答していません。設定 > 詳細 の「ヘルパーを修復」を使用してください。",
 	},
 	"zh": {
-		msgUp:       "“%s”已在应用之外连接。",
-		msgDown:     "“%s”已在应用之外断开。",
-		msgAuto:     "自动化已连接“%s”。",
-		msgForced:   "为避免路由环路，已断开“%s”。请手动重新连接。",
-		msgCritical: "辅助程序出现问题（%s）。请重启 WireGuide 以恢复。",
+		msgUp:             "“%s”已在应用之外连接。",
+		msgDown:           "“%s”已在应用之外断开。",
+		msgAuto:           "自动化已连接“%s”。",
+		msgForced:         "为避免路由环路，已断开“%s”。请手动重新连接。",
+		msgCritical:       "辅助程序出现问题（%s）。请重启 WireGuide 以恢复。",
+		msgCriticalDNS:    "DNS 保护已开启，但防火墙规则一直无法应用，DNS 可能没有被锁定到隧道。",
+		msgCriticalHelper: "VPN 辅助程序没有响应。请在 设置 > 高级 中使用“修复辅助程序”。",
 	},
 }
 
@@ -424,7 +449,11 @@ func notifyText(lang string, kind msgKind, arg string) (title, body string) {
 	if !ok {
 		table = notifyStrings["en"]
 	}
-	return "WireGuide", fmt.Sprintf(table[kind], arg)
+	format := table[kind]
+	if !strings.Contains(format, "%s") {
+		return "WireGuide", format
+	}
+	return "WireGuide", fmt.Sprintf(format, arg)
 }
 
 // pickLanguage maps the FIRST language in raw (a Settings value like "ko",
