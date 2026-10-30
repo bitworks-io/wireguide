@@ -20,3 +20,12 @@ type NetworkChangeDetector interface {
 type OnlineReporter interface {
 	Online() bool
 }
+
+// onlineFromPrimaries reports whether the machine has a primary network
+// interface, given the IPv4 primary (already read successfully) and the IPv6
+// primary. An IPv6-only network has no IPv4 key, so either family counts. If
+// the IPv6 read failed the answer is unknown and counts as online: a health
+// check that runs spuriously is harmless, one that never runs is not.
+func onlineFromPrimaries(iface4, iface6 string, ok6 bool) bool {
+	return iface4 != "" || iface6 != "" || !ok6
+}

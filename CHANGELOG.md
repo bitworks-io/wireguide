@@ -5,7 +5,7 @@ All notable changes to WireGuide will be documented in this file.
 ## Unreleased
 
 ### Fixed
-- **Handshake health check after sleep** - time spent asleep (or offline, on macOS) no longer counts as a dead handshake. The check pauses for 90 seconds after a wake, measures handshake age from the wake when the last handshake predates it, skips while macOS reports no primary network interface, and no longer starts a per-tunnel reconnect while a wake or network-change reconnect (or an earlier retry for that tunnel) is still in progress, so DNS protection and the kill switch are not suspended by overlapping retries.
+- **Handshake health check after sleep** - time spent asleep, or offline on macOS (IPv4 or IPv6), no longer counts as a dead handshake, and a stale tunnel no longer restarts a retry already in progress.
 
 ## [0.6.1] - 2026-10-26
 

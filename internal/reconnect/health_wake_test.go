@@ -301,3 +301,39 @@ func TestHealthCheck_StaleTickDuringWakeRetryStartsNoTunnelRetry(t *testing.T) {
 		t.Fatal("per-tunnel retry ran during the wake retry")
 	}
 }
+
+// A stale tick must leave an existing per-tunnel retry alone: restarting it
+// would reset its backoff and re-suspend DNS protection and the kill switch.
+func TestHealthCheck_StaleTickKeepsExistingTunnelRetry(t *testing.T) {
+	rec := &reconnectRecorder{}
+	now := time.Unix(8_000_000, 0)
+	clk := &fakeClock{t: now}
+	mon, _ := healthMonitor(t, rec, clk, now.Add(-4*time.Minute), newOnlineDetector(true))
+
+	cancelled := false
+	existing := &retryState{cancel: func() { cancelled = true }, done: make(chan struct{})}
+	mon.mu.Lock()
+	mon.retries["t1"] = existing
+	mon.mu.Unlock()
+	t.Cleanup(func() {
+		mon.mu.Lock()
+		delete(mon.retries, "t1")
+		mon.mu.Unlock()
+	})
+
+	mon.checkHandshakes(now)
+
+	mon.mu.Lock()
+	current := mon.retries["t1"]
+	mon.mu.Unlock()
+	if current != existing {
+		t.Fatal("stale tick replaced the existing per-tunnel retry")
+	}
+	if cancelled {
+		t.Fatal("stale tick cancelled the existing per-tunnel retry")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if rec.sawName("t1") {
+		t.Fatal("stale tick started a reconnect alongside the existing retry")
+	}
+}
