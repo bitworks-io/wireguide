@@ -71,18 +71,27 @@ export function setAutomationWindowVisible(visible) {
   if (visible) refreshAutomationPreview();
 }
 
+// A focused window is a visible one. The Go side reports reopen through
+// "window_visibility", but a missed event must not leave polling paused
+// for the rest of the session, so focus re-arms it as a safety net.
+function onFocus() {
+  setAutomationWindowVisible(true);
+}
+
 export function startAutomationPolling(TunnelService) {
   stopAutomationPolling();
   service = TunnelService;
   refreshAutomationPreview();
   schedule();
   document.addEventListener('visibilitychange', onVisibility);
+  if (typeof window !== 'undefined') window.addEventListener('focus', onFocus);
 }
 
 export function stopAutomationPolling() {
   if (timer) clearInterval(timer);
   timer = null;
   document.removeEventListener('visibilitychange', onVisibility);
+  if (typeof window !== 'undefined') window.removeEventListener('focus', onFocus);
   service = null;
   lastJSON = '';
   windowHidden = false;

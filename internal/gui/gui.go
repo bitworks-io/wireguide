@@ -324,6 +324,16 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		app.Event.OnApplicationEvent(events.Mac.ApplicationWillTerminate, func(_ *application.ApplicationEvent) {
 			destroyNativeTray()
 		})
+		// A Dock click or a relaunch (Finder, Spotlight, `open -a`) sends an
+		// application reopen to the running process. Wails' default handler
+		// only calls Show() on the window; route it through showDock so the
+		// activation policy, the retry loop and the window_visibility event
+		// match every other way of bringing the window back.
+		app.Event.OnApplicationEvent(events.Mac.ApplicationShouldHandleReopen, func(*application.ApplicationEvent) {
+			if !appQuitting.Load() {
+				showDock()
+			}
+		})
 	}
 
 	// 8. IPC event bridge + helper health monitor.
