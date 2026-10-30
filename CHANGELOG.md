@@ -2,6 +2,14 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## Unreleased
+
+### Added
+- **Inline DNS diagnostics in the config editor** - the editor flags invalid or risky `DNS =` lines as you type (global DNS outside the tunnel's routes, `.local` split domains, split DNS on Windows or without systemd-resolved, missing reverse zones, LAN-only routes with no DNS) with one-click fixes, hover help on the `DNS` key and `~domain` entries, and `DNS =` value completion (gateway and reverse zones derived from AllowedIPs, split-DNS template). Diagnostics never block saving. New-tunnel templates show both DNS modes as commented lines.
+
+### Changed
+- The DNS protection setting hint now notes that tunnels using split DNS or no DNS keep system DNS and are not affected.
+
 ## [0.6.1] - 2026-10-26
 
 ### Added
