@@ -29,7 +29,11 @@
     "recovery_warning": "{name}: retrying restoration of the previous DNS settings. You can still connect new tunnels.",
     "imported_with_warning": "Imported “{name}” — {warning}",
     "helper_unavailable": "The VPN helper is not responding.",
-    "repair_helper": "Repair helper…"
+    "repair_helper": "Repair helper…",
+    "recovery_title": "WireGuide cleaned up after an unexpected stop",
+    "recovery_tunnels": "Removed leftover network settings of: {names}",
+    "recovery_dns": "Restored the DNS settings changed by: {names}",
+    "recovery_firewall": "Removed leftover WireGuide firewall rules."
   },
   "nav": {
     "tunnels": "Tunnels",

@@ -89,6 +89,7 @@ func (h *Helper) handleHelperInfo(params json.RawMessage) (interface{}, error) {
 		SocketPath:       h.socketPath,
 		ActivationReason: h.activationReason,
 		GUIAttached:      h.server != nil && h.server.HasControlConn(),
+		Recovery:         h.recovery,
 	}
 	if !h.startedAt.IsZero() {
 		resp.StartedAt = h.startedAt.UTC().Format(time.RFC3339)

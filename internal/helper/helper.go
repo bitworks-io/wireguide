@@ -70,6 +70,11 @@ type Helper struct {
 	guiSeenCh        chan struct{}
 	guiSeenOnce      sync.Once
 	armedGrace       time.Duration
+
+	// recovery is what startup crash recovery cleaned up (nil: nothing);
+	// set once in Run before the handlers are registered.
+	recovery *ipc.HelperRecovery
+
 	// Startup restore owns a lifetime lease until its first attempts finish.
 	// Guarded by mu; connect rollback and pending registration are separate.
 	restoreInProgress bool
@@ -401,12 +406,17 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired boo
 		return h.server.Broadcast
 	}, dataDir)))
 
+	// Read the WireGuide firewall rules back BEFORE recovery touches them,
+	// so the recovery report can say whether rules were actually flushed.
+	rulesBefore := probeFirewallRules(fw)
+
 	// Crash recovery (now logs via broadcast handler). Pass the helper's
 	// own firewall instance so cleanup reuses its in-memory state
 	// instead of constructing a fresh one inside the tunnel package
 	// (which previously decoupled the cleanup from the helper's view).
-	if recovered := tunnel.RecoverFromCrash(dataDir, fw); len(recovered) > 0 {
-		slog.Warn("recovered from previous crash", "tunnels", recovered)
+	report := tunnel.RecoverFromCrashReport(dataDir, fw)
+	if len(report.Tunnels) > 0 {
+		slog.Warn("recovered from previous crash", "tunnels", report.Tunnels, "dns_restored", report.DNSRestored)
 	}
 	manager.AdoptPendingRecovery()
 
@@ -416,8 +426,17 @@ func Run(addr string, ownerUID int, ownerSID, dataDir string, restoreDesired boo
 	// rules would mask whatever stale state the crashed helper left behind.
 	// No-op on Linux/Windows (their firewall implementations don't persist
 	// state across crashes).
-	if recovered := fw.RecoverFromCrash(); recovered {
+	fwRecovered := fw.RecoverFromCrash()
+	if fwRecovered {
 		slog.Warn("recovered firewall state from previous crash")
+	}
+	// Reported once through Helper.Info; set before the handlers are
+	// registered and never changed afterwards.
+	h.recovery = startupRecovery(report, rulesBefore, probeFirewallRules(fw), fwRecovered)
+	if h.recovery != nil {
+		slog.Info("startup recovery cleaned up after the previous helper",
+			"tunnels", h.recovery.TunnelsRecovered, "dns_restored", h.recovery.DNSRestored,
+			"firewall_flushed", h.recovery.FirewallFlushed)
 	}
 
 	// Reconnect monitor — uses cached config

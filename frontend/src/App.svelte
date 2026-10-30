@@ -27,6 +27,7 @@
   import { uniqueImportName, fileBase64, checkImportSize, warningText, importedMessage, isNotConnectedError, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
   import { criticalRow, isKnownCritical } from './lib/dns-protection.js';
   import { offersRepair } from './lib/helper-info.js';
+  import { recoveryNotice, recoveryLines, readSeen, writeSeen } from './lib/recovery-notice.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -60,6 +61,9 @@
     if (!appEvents.disposed) showToast(errText(error));
   });
   let criticalErrors = []; // array of { where, detail, at } — shown as a persistent banner
+  // What the helper's startup crash recovery cleaned up (Helper.Info), shown
+  // once per helper start as a dismissible info banner.
+  let startupRecovery = null;
 
   // App-level ESC handler: close the editor modal. ConfigEditor wraps
   // a CodeMirror instance whose own keymaps may handle ESC for things
@@ -123,6 +127,7 @@
     if (appEvents.disposed) return;
     await initialLoad(TunnelService);
     if (appEvents.disposed) return;
+    checkStartupRecovery();
     // Refresh status once on launch — the helper's eventLoop only
     // BROADCASTS on diff, so a fresh GUI subscriber connecting to a
     // long-running helper would otherwise see no status events
@@ -137,6 +142,19 @@
     try {
       updateState = await TunnelService.GetUpdateState();
     } catch (_) { /* GetUpdateState is best-effort UI hint */ }
+  }
+
+  // Ask the helper what its startup crash recovery cleaned up and announce it
+  // once per helper start (marked as seen when shown).
+  async function checkStartupRecovery() {
+    let info;
+    try { info = await TunnelService.GetHelperInfo(); } catch (_) { return; }
+    if (appEvents.disposed) return;
+    const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
+    const notice = recoveryNotice(info, readSeen(storage));
+    if (!notice) return;
+    writeSeen(storage, notice.startedAt);
+    startupRecovery = notice;
   }
 
   // Register synchronously so backend events cannot be lost while startup
@@ -205,6 +223,7 @@
       await initialLoad(TunnelService);
       await refreshStatus(TunnelService);
       refreshAutomationPreview();
+      checkStartupRecovery();
     });
 
     // wireguide:// link: pull any queued connect/disconnect requests (also
@@ -788,6 +807,18 @@
       {#if criticalErrors.some((e) => !offersRepair(e) && !isKnownCritical(e.code))}
         <div class="critical-banner-hint">{$t('app.helper_restart_hint')}</div>
       {/if}
+    </div>
+  {/if}
+
+  {#if startupRecovery && criticalErrors.length === 0}
+    <div class="recovery-banner" role="status">
+      <div class="recovery-banner-text">
+        <div class="recovery-banner-title">{$t('app.recovery_title')}</div>
+        {#each recoveryLines($t, startupRecovery) as line}
+          <div class="recovery-banner-line">{line}</div>
+        {/each}
+      </div>
+      <button class="recovery-banner-close" on:click={() => startupRecovery = null} aria-label={$t('app.dismiss')}>×</button>
     </div>
   {/if}
 
@@ -1407,6 +1438,41 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  /* ---------- Startup-recovery info banner (top-centre, dismissible) ---------- */
+  .recovery-banner {
+    position: fixed;
+    top: var(--space-3);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: 390;
+    max-width: 640px;
+    min-width: 320px;
+    font: var(--text-body);
+  }
+  .recovery-banner-text { flex: 1 1 auto; }
+  .recovery-banner-title { font-weight: 600; margin-bottom: var(--space-1); }
+  .recovery-banner-line { font-size: 0.875rem; color: var(--text-secondary); word-break: break-word; }
+  .recovery-banner-close {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 0 var(--space-1);
+    line-height: 1;
   }
 
   /* ---------- Critical helper-failure banner (top-centre, persistent) ---------- */

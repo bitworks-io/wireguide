@@ -29,7 +29,11 @@
     "recovery_warning": "{name}：正在重试恢复之前的 DNS 设置。你仍可连接新的隧道。",
     "imported_with_warning": "已导入“{name}” — {warning}",
     "helper_unavailable": "VPN 辅助程序没有响应。",
-    "repair_helper": "修复辅助程序…"
+    "repair_helper": "修复辅助程序…",
+    "recovery_title": "WireGuide 已清理意外停止后遗留的设置",
+    "recovery_tunnels": "已移除遗留的网络设置：{names}",
+    "recovery_dns": "已恢复以下隧道更改的 DNS 设置：{names}",
+    "recovery_firewall": "已移除遗留的 WireGuide 防火墙规则。"
   },
   "nav": {
     "tunnels": "隧道",

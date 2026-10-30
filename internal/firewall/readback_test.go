@@ -92,26 +92,31 @@ func TestPFReadbackLayouts(t *testing.T) {
 		// Kill switch off: DNS rules are loaded into the MAIN anchor.
 		name: "dns in main anchor",
 		main: pfDNSRulesNamed, inf: pfInfoEnabled,
-		want: Readback{PFEnabled: true, DNSProtectionActive: true, Permits: wantPermits},
+		want: Readback{PFEnabled: true, DNSProtectionActive: true, Permits: wantPermits, RulesLoaded: true},
 	}, {
 		// Kill switch on: DNS rules live in the referenced sub-anchor.
 		name: "dns in sub-anchor with kill switch",
 		main: pfKillSwitchRules, dns: pfDNSRulesNamed, inf: pfInfoEnabled,
-		want: Readback{PFEnabled: true, DNSProtectionActive: true, KillSwitchActive: true, Permits: wantPermits},
+		want: Readback{PFEnabled: true, DNSProtectionActive: true, KillSwitchActive: true, Permits: wantPermits, RulesLoaded: true},
 	}, {
 		name: "kill switch only",
 		main: pfKillSwitchRules, inf: pfInfoEnabled,
-		want: Readback{PFEnabled: true, KillSwitchActive: true, Permits: []DNSPermit{}},
+		want: Readback{PFEnabled: true, KillSwitchActive: true, Permits: []DNSPermit{}, RulesLoaded: true},
 	}, {
 		// A stale sub-anchor that nothing references is never evaluated.
 		name: "unreferenced sub-anchor",
 		dns:  pfDNSRulesNamed, inf: pfInfoEnabled,
-		want: Readback{PFEnabled: true, Permits: []DNSPermit{}},
+		want: Readback{PFEnabled: true, Permits: []DNSPermit{}, RulesLoaded: true},
 	}, {
 		// Rules still loaded but pf stopped (an external `pfctl -d`).
 		name: "pf disabled",
 		main: pfKillSwitchRules, dns: pfDNSRulesNamed, inf: pfInfoDisabled,
-		want: Readback{Permits: wantPermits},
+		want: Readback{Permits: wantPermits, RulesLoaded: true},
+	}, {
+		// Nothing loaded: recovery has nothing to flush.
+		name: "empty anchors",
+		inf:  pfInfoEnabled,
+		want: Readback{PFEnabled: true, Permits: []DNSPermit{}},
 	}}
 	for _, tc := range cases {
 		if got := pfReadback(tc.main, tc.dns, tc.inf); !reflect.DeepEqual(got, tc.want) {

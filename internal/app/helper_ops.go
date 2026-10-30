@@ -31,6 +31,9 @@ type HelperInfo struct {
 	SocketPath       string `json:"socket_path"`
 	ActivationReason string `json:"activation_reason"`
 	GUIAttached      bool   `json:"gui_attached"`
+	// Recovery is what the helper's startup crash recovery cleaned up; nil
+	// when nothing was (or the helper predates IPC 1.14).
+	Recovery *ipc.HelperRecovery `json:"recovery,omitempty"`
 }
 
 // GetHelperInfo describes the running helper. Never an error: the card just
@@ -49,6 +52,7 @@ func (s *TunnelService) GetHelperInfo() HelperInfo {
 			SocketPath:       info.SocketPath,
 			ActivationReason: info.ActivationReason,
 			GUIAttached:      info.GUIAttached,
+			Recovery:         info.Recovery,
 		}
 	}
 	if !isMethodNotFound(err) {

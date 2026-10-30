@@ -581,6 +581,15 @@ export class HelperInfo {
              */
             this["gui_attached"] = false;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Recovery is what the helper's startup crash recovery cleaned up; nil
+             * when nothing was (or the helper predates IPC 1.14).
+             * @member
+             * @type {ipc$0.HelperRecovery | null | undefined}
+             */
+            this["recovery"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -591,7 +600,11 @@ export class HelperInfo {
      * @returns {HelperInfo}
      */
     static createFrom($$source = {}) {
+        const $$createField9_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("recovery" in $$parsedSource) {
+            $$parsedSource["recovery"] = $$createField9_0($$parsedSource["recovery"]);
+        }
         return new HelperInfo(/** @type {Partial<HelperInfo>} */($$parsedSource));
     }
 }
@@ -1094,7 +1107,7 @@ export class TunnelInfo {
      * @returns {TunnelInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType10;
+        const $$createField7_0 = $$createType12;
         const $$createField9_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("warnings" in $$parsedSource) {
@@ -1344,7 +1357,7 @@ export class VerifyRow {
      * @returns {VerifyRow}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType11;
+        const $$createField4_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("detail_params" in $$parsedSource) {
             $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
@@ -1395,7 +1408,7 @@ export class ZipImportResult {
      * @returns {ZipImportResult}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType10;
+        const $$createField2_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("warnings" in $$parsedSource) {
             $$parsedSource["warnings"] = $$createField2_0($$parsedSource["warnings"]);
@@ -1414,6 +1427,8 @@ const $$createType5 = DomainCheck.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = ipc$0.FirewallStatusResponse.createFrom;
 const $$createType8 = $Create.Nullable($$createType7);
-const $$createType9 = config$0.Diagnostic.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Map($Create.Any, $Create.Any);
+const $$createType9 = ipc$0.HelperRecovery.createFrom;
+const $$createType10 = $Create.Nullable($$createType9);
+const $$createType11 = config$0.Diagnostic.createFrom;
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $Create.Map($Create.Any, $Create.Any);

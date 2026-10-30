@@ -29,7 +29,11 @@
     "recovery_warning": "{name}: 元のDNS設定の復旧が保留中です。設定は保持され、新しい接続は利用できます。",
     "imported_with_warning": "「{name}」をインポートしました — {warning}",
     "helper_unavailable": "VPN ヘルパーが応答していません。",
-    "repair_helper": "ヘルパーを修復…"
+    "repair_helper": "ヘルパーを修復…",
+    "recovery_title": "WireGuide が予期しない停止の後片付けを行いました",
+    "recovery_tunnels": "残っていたネットワーク設定を削除: {names}",
+    "recovery_dns": "次のトンネルが変更した DNS 設定を復元: {names}",
+    "recovery_firewall": "残っていた WireGuide のファイアウォールルールを削除しました。"
   },
   "nav": {
     "tunnels": "トンネル",

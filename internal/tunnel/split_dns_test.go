@@ -304,3 +304,36 @@ func TestRecycledInterfaceCannotInheritPendingSplitDNS(t *testing.T) {
 	}
 	_ = mgr.DisconnectTunnel("new")
 }
+
+// The report lists which journals had their DNS change undone and whether
+// the firewall cleanup ran cleanly; a tunnel that never touched system DNS
+// is not reported as restored.
+func TestRecoverFromCrashReport(t *testing.T) {
+	mock := &recoveryMock{}
+	old := newRecoveryManager
+	newRecoveryManager = func() network.NetworkManager { return mock }
+	defer func() { newRecoveryManager = old }()
+	dir := t.TempDir()
+	for _, st := range []*ActiveTunnelState{
+		{TunnelName: "home-vpn", InterfaceName: "utun5", DNSMode: DNSModeGlobal, DNSServers: []string{"10.66.66.1"}},
+		{TunnelName: "office-vpn", InterfaceName: "utun6"},
+	} {
+		if err := SaveActiveState(dir, st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fw := &fakeFirewall{}
+	r := RecoverFromCrashReport(dir, fw)
+	if len(r.Tunnels) != 2 {
+		t.Fatalf("Tunnels = %v", r.Tunnels)
+	}
+	if len(r.DNSRestored) != 1 || r.DNSRestored[0] != "home-vpn" {
+		t.Fatalf("DNSRestored = %v, want [home-vpn]", r.DNSRestored)
+	}
+	if !r.FirewallCleaned || fw.cleanupCalled != 1 {
+		t.Fatalf("FirewallCleaned = %v (cleanup calls %d)", r.FirewallCleaned, fw.cleanupCalled)
+	}
+	if empty := RecoverFromCrashReport(t.TempDir(), fw); empty.Tunnels != nil || empty.FirewallCleaned {
+		t.Fatalf("no journal must report nothing: %+v", empty)
+	}
+}

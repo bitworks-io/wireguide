@@ -6,6 +6,7 @@ export {
     AutomationEventPayload,
     FirewallPermit,
     FirewallStatusResponse,
+    HelperRecovery,
     LogEntry,
     RecoveryWarningPayload,
     ResetDNSResponse,

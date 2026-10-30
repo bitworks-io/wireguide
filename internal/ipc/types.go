@@ -33,6 +33,23 @@ type HelperInfoResponse struct {
 	// connection caused a launchd start.
 	ActivationReason string `json:"activation_reason,omitempty"`
 	GUIAttached      bool   `json:"gui_attached"`
+	// Recovery is what this helper's startup crash recovery cleaned up after
+	// the previous helper process; nil when it found nothing to clean.
+	// Protocol minor >= 14.
+	Recovery *HelperRecovery `json:"recovery,omitempty"`
+}
+
+// HelperRecovery reports startup crash recovery (HelperInfoResponse.Recovery).
+type HelperRecovery struct {
+	// TunnelsRecovered are tunnels whose leftover routes/DNS/interface state
+	// from a previous helper were cleaned up.
+	TunnelsRecovered []string `json:"tunnels_recovered,omitempty"`
+	// DNSRestored are the tunnels whose DNS changes were undone.
+	DNSRestored []string `json:"dns_restored,omitempty"`
+	// FirewallFlushed is true when WireGuide firewall rules were loaded at
+	// startup and recovery removed them. Only known where the helper can
+	// read its rules back (macOS pf).
+	FirewallFlushed bool `json:"firewall_flushed,omitempty"`
 }
 
 // ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 12).

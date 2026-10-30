@@ -52,12 +52,16 @@ func TestGetHelperInfoUsesHelperInfo(t *testing.T) {
 	s := serviceWithHelper(t, map[string]func(json.RawMessage) (interface{}, error){
 		ipc.MethodHelperInfo: func(json.RawMessage) (interface{}, error) {
 			return ipc.HelperInfoResponse{AppVersion: "1.2.3", ProtocolVersion: "1.9", PID: 42,
-				StartedAt: "2026-01-02T03:04:05Z", StartMode: "launchd-socket", SocketPath: "/x", GUIAttached: true}, nil
+				StartedAt: "2026-01-02T03:04:05Z", StartMode: "launchd-socket", SocketPath: "/x", GUIAttached: true,
+				Recovery: &ipc.HelperRecovery{TunnelsRecovered: []string{"home-vpn"}, FirewallFlushed: true}}, nil
 		},
 	})
 	got := s.GetHelperInfo()
 	if !got.Available || got.AppVersion != "1.2.3" || got.PID != 42 || got.StartMode != "launchd-socket" || !got.GUIAttached || got.SocketPath != "/x" {
 		t.Fatalf("info = %+v", got)
+	}
+	if got.Recovery == nil || !got.Recovery.FirewallFlushed || got.Recovery.TunnelsRecovered[0] != "home-vpn" {
+		t.Fatalf("recovery = %+v", got.Recovery)
 	}
 }
 

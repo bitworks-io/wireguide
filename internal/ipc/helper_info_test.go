@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +27,24 @@ func TestCriticalErrorPayloadAdditive(t *testing.T) {
 	_ = json.Unmarshal(b, &m)
 	if m["code"] != "helper_unavailable" || m["action"] != "repair_helper" {
 		t.Fatalf("payload = %s", b)
+	}
+}
+
+// Helper.Info's recovery object (minor 14) is omitted when nothing was
+// cleaned, and uses the documented field names when present.
+func TestHelperInfoRecoveryWireShape(t *testing.T) {
+	if ProtocolMinor < 14 {
+		t.Fatalf("ProtocolMinor = %d, Helper.Info recovery needs >= 14", ProtocolMinor)
+	}
+	b, _ := json.Marshal(HelperInfoResponse{PID: 1})
+	if strings.Contains(string(b), "recovery") {
+		t.Fatalf("nil recovery must be omitted: %s", b)
+	}
+	b, _ = json.Marshal(HelperInfoResponse{Recovery: &HelperRecovery{
+		TunnelsRecovered: []string{"home-vpn"}, DNSRestored: []string{"home-vpn"}, FirewallFlushed: true,
+	}})
+	want := `"recovery":{"tunnels_recovered":["home-vpn"],"dns_restored":["home-vpn"],"firewall_flushed":true}`
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("got %s, want %s", b, want)
 	}
 }

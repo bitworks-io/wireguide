@@ -170,8 +170,29 @@ func LoadActiveState(dataDir string) []*ActiveTunnelState {
 	return []*ActiveTunnelState{&st}
 }
 
+// RecoveryReport says what RecoverFromCrashReport cleaned up.
+type RecoveryReport struct {
+	// Tunnels are the orphaned tunnels found in recovery journals (cleaned
+	// up fully or partly), nil if none.
+	Tunnels []string
+	// DNSRestored are the tunnels whose DNS changes were undone without
+	// error: the pre-modification snapshot restored, DNS reset to the system
+	// default, or split-DNS entries removed. A tunnel that never changed
+	// system DNS is not listed.
+	DNSRestored []string
+	// FirewallCleaned is true when leftover firewall rules were removed
+	// without error (only attempted when a journal was found).
+	FirewallCleaned bool
+}
+
 // RecoverFromCrash checks for orphaned tunnel state and cleans up.
 // Returns the names of the cleaned-up tunnels, or nil if none.
+func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
+	return RecoverFromCrashReport(dataDir, fw).Tunnels
+}
+
+// RecoverFromCrashReport is RecoverFromCrash, also reporting which tunnels
+// had their DNS restored and whether the firewall cleanup succeeded.
 //
 // After a crash the TUN device is already gone (the process that owned it
 // died), but routes, DNS overrides, and firewall rules may still reference
@@ -184,7 +205,8 @@ func LoadActiveState(dataDir string) []*ActiveTunnelState {
 // one here — keeps the firewall's in-memory state (pfWasEnabled,
 // savedDNSInterface/Servers) consistent with what the post-recovery
 // helper code expects. A nil fw is treated as "no firewall cleanup".
-func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
+func RecoverFromCrashReport(dataDir string, fw FirewallCleaner) RecoveryReport {
+	var report RecoveryReport
 	// Split-DNS dynamic-store keys outlive a crashed helper and are not
 	// tied to a journal, so sweep them whether or not one exists. No
 	// tunnels from the dead process remain, so this cannot hit a live one.
@@ -194,7 +216,7 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 
 	states := LoadActiveState(dataDir)
 	if len(states) == 0 {
-		return nil
+		return report
 	}
 
 	var recovered []string
@@ -215,11 +237,15 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 			setter.SetPersistentStateDir(dataDir)
 		}
 		ok := true
+		// dnsRestored: a DNS change was undone; dnsFailed: one was not.
+		dnsRestored, dnsFailed := false, false
 		if state.DNSMode == DNSModeSplit {
 			if r, supported := mgr.(network.SplitDNSRemover); supported {
 				if err := r.RemoveSplitDNS(state.InterfaceName); err != nil {
 					slog.Warn("crash recovery: split DNS removal failed", "error", err)
-					ok = false
+					ok, dnsFailed = false, true
+				} else {
+					dnsRestored = true
 				}
 			}
 		}
@@ -242,20 +268,27 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 				if err := restorer.RestoreDNSFromSnapshot(snap); err != nil {
 					slog.Warn("crash recovery: precise DNS restore failed, falling back to reset", "error", err)
 					if err := mgr.ResetDNSToSystemDefault(); err != nil {
-						ok = false
+						ok, dnsFailed = false, true
+					} else {
+						dnsRestored = true
 					}
 				} else {
 					slog.Info("crash recovery: DNS restored from pre-modification snapshot")
+					dnsRestored = true
 				}
 			} else {
 				if err := mgr.ResetDNSToSystemDefault(); err != nil {
-					ok = false
+					ok, dnsFailed = false, true
+				} else {
+					dnsRestored = true
 				}
 			}
 		} else if needsDNSReset(state) {
 			if err := mgr.ResetDNSToSystemDefault(); err != nil {
 				slog.Warn("crash recovery: DNS reset failed", "error", err)
-				ok = false
+				ok, dnsFailed = false, true
+			} else {
+				dnsRestored = true
 			}
 		} else {
 			slog.Info("crash recovery: tunnel did not override system DNS; leaving it untouched",
@@ -284,6 +317,9 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 		}
 
 		recovered = append(recovered, state.TunnelName)
+		if dnsRestored && !dnsFailed {
+			report.DNSRestored = append(report.DNSRestored, state.TunnelName)
+		}
 		if ok {
 			fullySucceeded = append(fullySucceeded, activeStateKey(state))
 		}
@@ -296,6 +332,8 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 	if fw != nil {
 		if err := fw.Cleanup(); err != nil {
 			slog.Warn("crash recovery: firewall cleanup failed", "error", err)
+		} else {
+			report.FirewallCleaned = true
 		}
 	}
 
@@ -310,7 +348,8 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 	}
 	os.Remove(filepath.Join(dataDir, activeTunnelFile)) // legacy cleanup
 
-	return recovered
+	report.Tunnels = recovered
+	return report
 }
 
 func activeStateKey(state *ActiveTunnelState) string {

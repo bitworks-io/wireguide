@@ -8,7 +8,7 @@ import { Create as $Create } from "@wailsio/runtime";
 
 /**
  * AutomationEventPayload is broadcast as EventAutomation (protocol minor
- * >= 6). RuleIndex is the deciding rule's position in the tunnel's rule
+ * >= 7). RuleIndex is the deciding rule's position in the tunnel's rule
  * list, -1 when no single rule applies (a manual latch). RuleText is an
  * English description of that rule ("SSID is not Home"); GUIs localise
  * from the rule itself when they can. Error is set when an executed
@@ -257,6 +257,65 @@ export class FirewallStatusResponse {
             $$parsedSource["permits"] = $$createField3_0($$parsedSource["permits"]);
         }
         return new FirewallStatusResponse(/** @type {Partial<FirewallStatusResponse>} */($$parsedSource));
+    }
+}
+
+/**
+ * HelperRecovery reports startup crash recovery (HelperInfoResponse.Recovery).
+ */
+export class HelperRecovery {
+    /**
+     * Creates a new HelperRecovery instance.
+     * @param {Partial<HelperRecovery>} [$$source = {}] - The source object to create the HelperRecovery.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * TunnelsRecovered are tunnels whose leftover routes/DNS/interface state
+             * from a previous helper were cleaned up.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["tunnels_recovered"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DNSRestored are the tunnels whose DNS changes were undone.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_restored"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * FirewallFlushed is true when WireGuide firewall rules were loaded at
+             * startup and recovery removed them. Only known where the helper can
+             * read its rules back (macOS pf).
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["firewall_flushed"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperRecovery instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperRecovery}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType2;
+        const $$createField1_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tunnels_recovered" in $$parsedSource) {
+            $$parsedSource["tunnels_recovered"] = $$createField0_0($$parsedSource["tunnels_recovered"]);
+        }
+        if ("dns_restored" in $$parsedSource) {
+            $$parsedSource["dns_restored"] = $$createField1_0($$parsedSource["dns_restored"]);
+        }
+        return new HelperRecovery(/** @type {Partial<HelperRecovery>} */($$parsedSource));
     }
 }
 
