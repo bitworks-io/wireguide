@@ -22,6 +22,7 @@
   import { errText } from './lib/errors.js';
   import { createEventScope } from './lib/event-scope.js';
   import { uniqueImportName, fileBase64, checkImportSize, warningText, importedMessage, isNotConnectedError, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
+  import { criticalRow, isKnownCritical } from './lib/dns-protection.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -243,10 +244,11 @@
     // helper subsystem (status broadcast, latency probe, wifi rules)
     // is permanently dead and the user should restart the helper.
     appEvents.on('critical_error', (event) => {
-      const { where, detail } = event.data || {};
+      const { where, detail, code } = event.data || {};
       const next = [...criticalErrors, {
         where: where || 'unknown',
         detail: detail || '',
+        code: code || '',
         at: new Date().toLocaleTimeString(),
       }];
       // Cap at the 5 most recent entries. A storm of helper goSafe
@@ -686,16 +688,20 @@
 
   {#if criticalErrors.length > 0}
     <div class="critical-banner" role="alert">
-      <div class="critical-banner-title">⚠ {$t('app.helper_subsystem_failure')}</div>
+      <div class="critical-banner-title">⚠ {criticalErrors.every((e) => isKnownCritical(e.code)) ? $t('critical.dns_protection_failing_title') : $t('app.helper_subsystem_failure')}</div>
       {#each criticalErrors as e, i}
         <div class="critical-banner-row">
-          <span class="critical-banner-where">{e.where === 'Helper connection' ? $t('settings.section_connection') : e.where}</span>
-          <span class="critical-banner-detail">{e.where === 'Helper connection' ? $t('app.helper_disconnected') : e.detail}</span>
+          <span class="critical-banner-where">{e.where === 'Helper connection' ? $t('settings.section_connection') : criticalRow($t, e).where}</span>
+          <span class="critical-banner-detail">{e.where === 'Helper connection' ? $t('app.helper_disconnected') : criticalRow($t, e).detail}</span>
           <span class="critical-banner-time">{e.at}</span>
           <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label={$t('app.dismiss')}>×</button>
         </div>
       {/each}
-      <div class="critical-banner-hint">{$t('app.helper_restart_hint')}</div>
+      {#if criticalErrors.every((e) => isKnownCritical(e.code))}
+        <div class="critical-banner-hint">{$t('critical.dns_protection_failing_hint')}</div>
+      {:else}
+        <div class="critical-banner-hint">{$t('app.helper_restart_hint')}</div>
+      {/if}
     </div>
   {/if}
 

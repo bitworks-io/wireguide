@@ -267,7 +267,7 @@ helper over the local socket — so unlike `wg-quick` it needs no per-command
 wireguide ctl start                     # launch WireGuide (app + helper) and wait
 wireguide ctl stop                      # quit WireGuide (app + helper)
 
-wireguide ctl status [--json]           # connection status
+wireguide ctl status [--json]           # connection status (dns=global|split(...)|search|none = intended DNS mode)
 wireguide ctl list [--json]             # list tunnels (● = connected)
 wireguide ctl connect <name>            # connect a tunnel
 wireguide ctl disconnect [name]         # disconnect one (or all)
@@ -292,6 +292,7 @@ wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
 wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
+wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake, routes and split-DNS resolvers; exit 1 on failure
 
 # Teach coding agents (Claude Code, Codex, ...) how to drive the CLI:
 wireguide ctl install-skills

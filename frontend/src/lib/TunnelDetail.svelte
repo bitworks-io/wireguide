@@ -6,10 +6,28 @@
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
   import { createFieldWriter } from './field-writer.js';
-  import { createEventDispatcher, tick, onDestroy } from 'svelte';
+  import { createEventDispatcher, tick, onDestroy, onMount } from 'svelte';
+  import { Events } from '@wailsio/runtime';
+  import { createEventScope } from './event-scope.js';
+  import { protectionState } from './dns-protection.js';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
   import HealthCheckOverride from './HealthCheckOverride.svelte';
+  import VerifyPanel from './VerifyPanel.svelte';
+  import { parseDnsEntries, dnsModeOf, dnsChip, resolveHint } from './dns-mode.js';
+
+  // Whether the user turned DNS protection on. With the helper's live
+  // per-tunnel dns_protected flag it decides the protection chip.
+  let dnsWanted = false;
+  const detailEvents = createEventScope((...args) => Events.On(...args));
+  onMount(() => {
+    TunnelService.GetSettings().then((s) => { dnsWanted = !!s?.dns_protection; }).catch(() => {});
+    detailEvents.on('settings_changed', (event) => {
+      const p = event?.data || {};
+      if (p.dns_protection != null) dnsWanted = p.dns_protection;
+    });
+  });
+  onDestroy(() => detailEvents.dispose());
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -154,21 +172,13 @@
     return { label: sel?.endpoint || '—', fallback: true };
   }
 
-  // Splits an [Interface] DNS= list into servers, search domains and
-  // "~domain" split-DNS (routing-only) domains, mirroring domain.ParseDNSEntries.
-  function parseDnsEntries(list) {
-    const out = { servers: [], search: [], match: [] };
-    for (const raw of list || []) {
-      const tok = String(raw).trim();
-      if (!tok) continue;
-      if (tok.startsWith('~')) out.match.push(tok.slice(1));
-      else if (tok.includes(':') || /^[0-9.]+$/.test(tok)) out.servers.push(tok);
-      else out.search.push(tok);
-    }
-    return out;
-  }
-
   $: dnsInfo = parseDnsEntries(detail?.interface?.dns);
+  // Intended DNS behaviour from the config (not read back from the OS). Once
+  // the detail is loaded it comes from the same parse as the info card below;
+  // until then the backend's classification (the list row's) stands in.
+  $: dnsChipInfo = detail
+    ? dnsChip($t, dnsModeOf(dnsInfo), dnsInfo.match)
+    : dnsChip($t, $selectedTunnel?.dns_mode, $selectedTunnel?.dns_domains || []);
   $: autoLatency = autoLatencyTarget(detail, $selectedTunnel);
   $: latencyTargetDisplay = latencyTargetSaved
     ? latencyTargetSaved
@@ -218,6 +228,7 @@
   $: isConnected = state === 'connected';
   $: isConnecting = state === 'connecting' || state === 'disconnecting';
   $: status = tunnelStatus($connectionStatus, $selectedTunnel?.name) || { state: 'disconnected' };
+  $: protState = isConnected ? protectionState(status, dnsWanted) : '';
   $: noHandshake = isConnected && !status.last_handshake;
 
   let detailGeneration = 0;
@@ -443,6 +454,17 @@
             <span class="hero-endpoint">{$selectedTunnel.endpoint}</span>
           {/if}
         </div>
+        {#if dnsChipInfo}
+          <div class="hero-dns-line">
+            <span class="dns-chip dns-chip-{dnsChipInfo.mode}" title={dnsChipInfo.hint}>{dnsChipInfo.text}</span>
+            {#if protState}
+              <span class="dns-chip dns-chip-prot-{protState}"
+                title={$t(protState === 'protected' ? 'tunnel.dns_protected_hint' : 'tunnel.dns_intended_hint')}>
+                {$t(protState === 'protected' ? 'tunnel.dns_protected' : 'tunnel.dns_intended')}
+              </span>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -584,6 +606,13 @@
           </div>
         {/if}
       </div>
+    {/if}
+
+    <!-- VERIFY: manual post-connect checks -->
+    {#if isConnected}
+      {#key $selectedTunnel.name}
+        <VerifyPanel {TunnelService} tunnelName={$selectedTunnel.name} resolveHint={resolveHint(dnsInfo.match)} />
+      {/key}
     {/if}
 
     <!-- NOTES -->
@@ -864,6 +893,24 @@
   .hero-card.hero-connecting .hero-state-text { color: var(--yellow); }
   .hero-card.hero-warning .hero-state-text { color: var(--orange, #FF9500); }
   .hero-sep { color: var(--text-muted); opacity: 0.6; }
+  .hero-dns-line { margin-top: 6px; min-width: 0; }
+  .dns-chip {
+    display: inline-block;
+    max-width: 100%;
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 0.5px solid var(--border);
+    background: var(--bg-card);
+    font: 500 11px/16px var(--font-sans);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: top;
+  }
+  .dns-chip-split { color: var(--blue, var(--accent)); }
+  .dns-chip-prot-protected { color: var(--green); }
+  .dns-chip-prot-intended { color: var(--orange, #FF9500); }
   .hero-endpoint {
     color: var(--text-secondary);
     font-family: var(--font-mono);

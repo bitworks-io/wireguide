@@ -72,6 +72,7 @@ wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
 wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
+wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake/routes/split-DNS check; exit 1 on failure
 ` + "```" + `
 Every command exits non-zero on failure and prints a one-line error to stderr,
 so it composes in scripts. ` + "`connect`/`disconnect`/`status`/`set`" + ` need the app

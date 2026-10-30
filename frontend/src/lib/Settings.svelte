@@ -10,6 +10,7 @@
   import ErrorNotice from './ErrorNotice.svelte';
   import { loadSettings, patchSettings, settingsErrors, settingRetryValue } from '../stores/settings.js';
   import { errText } from './errors.js';
+  import { firewallDnsLine } from './dns-protection.js';
 
   export let TunnelService;
   export let onClose = () => {};
@@ -240,6 +241,27 @@
       // field instead of guessing with !value or overwriting another edit.
       try { settings[key] = (await loadSettings(TunnelService))[key]; } catch (_) {}
     } finally { busyFields = { ...busyFields, [key]: false }; }
+    // A failed apply broadcasts no settings_changed; re-read the truth.
+    if (key === 'dns_protection' || key === 'kill_switch') refreshFirewall();
+  }
+
+  // ---- DNS protection truth (Advanced tab) ----
+  // Firewall.Status reads pf back on macOS, so it is fetched on demand —
+  // when the Advanced tab opens and after a protection setting changes —
+  // never on a timer. Unavailable (older helper, helper down) shows nothing.
+  let fwStatus = { available: false };
+  let fwSeq = 0;
+  async function refreshFirewall() {
+    const seq = ++fwSeq;
+    let next = { available: false };
+    try { next = (await TunnelService.GetFirewallStatus()) || { available: false }; } catch (_) {}
+    if (seq === fwSeq) fwStatus = next;
+  }
+  $: dnsLine = firewallDnsLine($t, fwStatus, settings.dns_protection, ($connectionStatus?.active_tunnels || []).length > 0);
+  let lastTab = '';
+  $: if (activeTab !== lastTab) {
+    lastTab = activeTab;
+    if (activeTab === 'advanced') refreshFirewall();
   }
 
   let saveTimer = null;
@@ -312,6 +334,7 @@
     const p = event?.data || {};
     if (p.kill_switch != null) settings.kill_switch = p.kill_switch;
     if (p.dns_protection != null) settings.dns_protection = p.dns_protection;
+    if ((p.dns_protection != null || p.kill_switch != null) && activeTab === 'advanced') refreshFirewall();
     if (p.health_check != null) settings.health_check = p.health_check;
     if (p.pin_interface != null) settings.pin_interface = p.pin_interface;
     if (p.log_level != null) settings.log_level = p.log_level;
@@ -492,6 +515,9 @@
                 <div class="setting-info">
                   <label class="setting-label" for="dns-protection">{$t('settings.dns_protection')}</label>
                   <p class="setting-desc">{$t('settings.dns_protection_hint')}</p>
+                  {#if dnsLine}
+                    <p class="setting-live setting-live-{dnsLine.tone}" aria-live="polite">{dnsLine.text}</p>
+                  {/if}
                 </div>
                 <label class="toggle">
                   <input id="dns-protection" disabled={busyFields.dns_protection} type="checkbox"
@@ -851,6 +877,14 @@
     color: var(--text-muted);
     letter-spacing: 0.01em;
   }
+  .setting-live {
+    margin: 4px 0 0;
+    font: 500 11px/15px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    overflow-wrap: anywhere;
+  }
+  .setting-live-ok { color: var(--green); }
+  .setting-live-muted { color: var(--text-secondary); }
+  .setting-live-error { color: var(--red); }
 
   /* ---- Toggle switch (34×20px, 200ms slide) ---- */
   .toggle {

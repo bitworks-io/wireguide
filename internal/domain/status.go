@@ -42,6 +42,15 @@ type ConnectionStatus struct {
 	LatencyMs    float64 `json:"latency_ms,omitempty"`
 	ErrorMessage string  `json:"error_message,omitempty"`
 
+	// DNSMode is how the tunnel's DNS= line is applied (global / split /
+	// search / none), DNSServers its resolver addresses and DNSProtected
+	// whether the helper's applied DNS protection rules cover those
+	// resolvers. Filled by the helper for connected tunnels; an older helper
+	// omits all three, which the GUI treats as unknown.
+	DNSMode      string   `json:"dns_mode,omitempty"`
+	DNSServers   []string `json:"dns_servers,omitempty"`
+	DNSProtected bool     `json:"dns_protected,omitempty"`
+
 	// ActiveTunnels lists the names of all currently connected (or connecting)
 	// tunnels. Populated by the multi-tunnel manager so the frontend can show
 	// which tunnels are active.

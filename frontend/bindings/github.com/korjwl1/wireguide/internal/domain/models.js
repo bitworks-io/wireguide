@@ -136,6 +136,32 @@ export class ConnectionStatus {
         }
         if (/** @type {any} */(false)) {
             /**
+             * DNSMode is how the tunnel's DNS= line is applied (global / split /
+             * search / none), DNSServers its resolver addresses and DNSProtected
+             * whether the helper's applied DNS protection rules cover those
+             * resolvers. Filled by the helper for connected tunnels; an older helper
+             * omits all three, which the GUI treats as unknown.
+             * @member
+             * @type {string | undefined}
+             */
+            this["dns_mode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_servers"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["dns_protected"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * ActiveTunnels lists the names of all currently connected (or connecting)
              * tunnels. Populated by the multi-tunnel manager so the frontend can show
              * which tunnels are active.
@@ -163,14 +189,18 @@ export class ConnectionStatus {
      * @returns {ConnectionStatus}
      */
     static createFrom($$source = {}) {
-        const $$createField10_0 = $$createType0;
-        const $$createField11_0 = $$createType2;
+        const $$createField11_0 = $$createType0;
+        const $$createField13_0 = $$createType0;
+        const $$createField14_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("dns_servers" in $$parsedSource) {
+            $$parsedSource["dns_servers"] = $$createField11_0($$parsedSource["dns_servers"]);
+        }
         if ("active_tunnels" in $$parsedSource) {
-            $$parsedSource["active_tunnels"] = $$createField10_0($$parsedSource["active_tunnels"]);
+            $$parsedSource["active_tunnels"] = $$createField13_0($$parsedSource["active_tunnels"]);
         }
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField11_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField14_0($$parsedSource["tunnels"]);
         }
         return new ConnectionStatus(/** @type {Partial<ConnectionStatus>} */($$parsedSource));
     }

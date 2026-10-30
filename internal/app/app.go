@@ -204,6 +204,11 @@ type TunnelInfo struct {
 	// cross-tunnel duplicate-Address warning) from ImportConfig so the UI
 	// can surface them after a successful import.
 	Warnings []config.Diagnostic `json:"warnings,omitempty"`
+	// DNSMode is the intended DNS behaviour from the config: "global"
+	// (replaces system DNS), "split" (only DNSDomains), "search" (search
+	// domains only) or "none". Intent, not read back from the OS.
+	DNSMode    string   `json:"dns_mode,omitempty"`
+	DNSDomains []string `json:"dns_domains,omitempty"`
 }
 
 // ConnectionStatus is re-exported from the domain package so Wails bindings
