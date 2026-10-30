@@ -20,6 +20,10 @@ let timer = null;
 let service = null;
 let lastJSON = '';
 let inflight = false;
+// Set while the window is hidden to the tray (Go "window_visibility"
+// event). document.visibilityState alone does not cover that case on
+// every platform.
+let windowHidden = false;
 
 export async function refreshAutomationPreview() {
   if (!service || inflight) return;
@@ -52,12 +56,19 @@ export async function refreshAutomationPreview() {
 function schedule() {
   if (timer) clearInterval(timer);
   timer = setInterval(() => {
-    if (document.visibilityState === 'visible') refreshAutomationPreview();
+    if (!windowHidden && document.visibilityState === 'visible') refreshAutomationPreview();
   }, AUTOMATION_POLL_MS);
 }
 
 function onVisibility() {
-  if (document.visibilityState === 'visible') refreshAutomationPreview();
+  if (!windowHidden && document.visibilityState === 'visible') refreshAutomationPreview();
+}
+
+// setAutomationWindowVisible pauses polling while the window is hidden to
+// the tray and refreshes immediately when it is shown again.
+export function setAutomationWindowVisible(visible) {
+  windowHidden = !visible;
+  if (visible) refreshAutomationPreview();
 }
 
 export function startAutomationPolling(TunnelService) {
@@ -74,4 +85,5 @@ export function stopAutomationPolling() {
   document.removeEventListener('visibilitychange', onVisibility);
   service = null;
   lastJSON = '';
+  windowHidden = false;
 }

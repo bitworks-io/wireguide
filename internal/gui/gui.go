@@ -42,6 +42,18 @@ type HelperEvent struct {
 	Message string `json:"message"`
 }
 
+// WindowVisibilityEvent tells the frontend that the main window was hidden
+// to the tray or shown again, so it can pause work nobody can see.
+// document.visibilityState is not guaranteed to change when the window is
+// hidden to the tray, so the frontend must not rely on it alone.
+type WindowVisibilityEvent struct {
+	Visible bool `json:"visible"`
+}
+
+// emitWindowVisibility broadcasts a WindowVisibilityEvent. Run assigns it
+// before the window can be hidden or shown; it is a no-op until then.
+var emitWindowVisibility = func(bool) {}
+
 // Register Wails event payload types. Called once per process from init.
 func init() {
 	application.RegisterEvent[domain.ConnectionStatus]("status")
@@ -56,6 +68,7 @@ func init() {
 	application.RegisterEvent[struct{}]("tunnels_changed")
 	application.RegisterEvent[ipc.RecoveryWarningPayload]("recovery_warning")
 	application.RegisterEvent[ipc.AutomationEventPayload]("automation_event")
+	application.RegisterEvent[WindowVisibilityEvent]("window_visibility")
 }
 
 // Run starts the GUI process. Blocks until the Wails app exits.
@@ -235,6 +248,10 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		win.OnWindowEvent(events.Common.WindowShow, func(*application.WindowEvent) { connectionIndicator.Refresh() })
 	}
 
+	emitWindowVisibility = func(visible bool) {
+		app.Event.Emit("window_visibility", WindowVisibilityEvent{Visible: visible})
+	}
+
 	// macOS standard: close button hides the window instead of destroying it.
 	// The app stays alive in the tray; "Show Window" brings it back.
 	//
@@ -257,6 +274,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 		event.Cancel()
 		win.Hide()
 		hideDock()
+		emitWindowVisibility(false)
 	})
 
 	// Wire the window reference so showDock() can retry showing it.

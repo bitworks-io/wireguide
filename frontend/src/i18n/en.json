@@ -430,7 +430,7 @@
     "remove_rule": "Delete rule",
     "why": {
       "title": "Automation status",
-      "net_ssid": "Network: Wi-Fi: {ssid}",
+      "net_ssid": "Network: {ssid} (Wi-Fi)",
       "net_unknown": "Wi-Fi name unknown — Location Services may be off; \"is not\" rules hold",
       "net_no_wifi": "Network: no Wi-Fi (Ethernet/tethering)",
       "net_offline": "Network: offline",

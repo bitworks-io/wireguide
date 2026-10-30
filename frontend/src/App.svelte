@@ -18,7 +18,7 @@
   import { tunnels, selectedTunnel, refreshTunnels, refreshStatus, subscribeToEvents, unsubscribe, initialLoad, connectionStatus } from './stores/tunnels.js';
   import { applyTheme, initThemeWatcher } from './stores/theme.js';
   import { startLogListener, stopLogListener } from './stores/logs.js';
-  import { startAutomationPolling, stopAutomationPolling, refreshAutomationPreview } from './stores/automation.js';
+  import { startAutomationPolling, stopAutomationPolling, refreshAutomationPreview, setAutomationWindowVisible } from './stores/automation.js';
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
   import { takeExternalRuleChanges } from './stores/automationWatch.js';
@@ -233,11 +233,16 @@
 
     // The helper owns automation; the GUI only reports SSID transitions.
     // Active or pending tunnel intent keeps the helper alive without a GUI.
-    // No toast: a raw "Wi-Fi: X" on every roam is noise. The Automation
-    // status strip and the tunnel chips show the network and the verdict;
-    // just refresh them now rather than at the next poll.
+    // The Automation status strip and the tunnel chips show the network
+    // and the verdict; refresh them now rather than at the next poll.
     appEvents.on('wifi_ssid', () => {
       refreshAutomationPreview();
+    });
+
+    // Close-to-tray hides the window without necessarily changing
+    // document.visibilityState; pause the automation poll while hidden.
+    appEvents.on('window_visibility', (event) => {
+      setAutomationWindowVisible(event.data?.visible !== false);
     });
 
     // Helper auto-connected a tunnel via automation rules.
