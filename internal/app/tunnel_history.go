@@ -151,11 +151,23 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 			tx = txByTunnel[name]
 		}
 		// Fold the reading into the session totals instead of overwriting:
-		// a Connecting/Disconnecting tunnel reports 0/0 while still active,
-		// which used to wipe the real counters one tick before the close.
+		// a Connecting/Disconnecting tunnel reports 0/0 while still active.
 		var prev lastKnownTunnelStats
 		if cached, ok := s.lastKnownStats.Load(name); ok {
 			prev, _ = cached.(lastKnownTunnelStats)
+		}
+		// With no open session this is the first reading of a new one, so a
+		// cache entry left by an earlier session (a Disconnect that never
+		// got a session opened) must not be carried into it. A zeroed
+		// reading proves nothing and keeps the entry: it may be the
+		// pre-disconnect snapshot of the session about to be opened. The
+		// reason hint survives only if the counters did not go backwards.
+		if _, open := s.activeSessions.Load(name); !open && (rx != 0 || tx != 0) {
+			reason := prev.reason
+			if rx < prev.rawRx || tx < prev.rawTx {
+				reason = ""
+			}
+			prev = lastKnownTunnelStats{reason: reason}
 		}
 		s.lastKnownStats.Store(name, prev.merge(rx, tx))
 	}
