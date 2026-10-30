@@ -58,9 +58,11 @@ export function BaseName(path) {
 
 /**
  * CheckConflicts loads a tunnel's config and scans local network interfaces
- * for routing overlaps (e.g. Tailscale, another WireGuard instance). Runs
- * entirely in the GUI process — no IPC needed. The frontend calls this before
- * Connect so it can show a warning dialog if conflicts exist.
+ * for routing overlaps (e.g. Tailscale, another WireGuard instance). The
+ * interface scan runs in the GUI process; the shared-Address check asks the
+ * helper which tunnels are connected (Tunnel.ActiveTunnels) and is skipped if
+ * that call fails. The frontend calls this before Connect so it can show a
+ * warning dialog if conflicts exist.
  * @param {string} name
  * @returns {$CancellablePromise<diag$0.ConflictInfo[]>}
  */
@@ -417,7 +419,8 @@ export function ImportZipData(data) {
  * LintConfigFor returns advisory (non-blocking) editor diagnostics for a raw
  * config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
  * editing is the saved tunnel name being edited ("" for a new tunnel); it is
- * reserved for cross-tunnel checks. It never affects whether a config is
+ * excluded from the cross-tunnel duplicate-Address check so an edit never
+ * "conflicts" with its own saved copy. It never affects whether a config is
  * valid. Content that does not parse yields no diagnostics (ValidateConfig
  * reports the parse error).
  * @param {string} editing

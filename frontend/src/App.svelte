@@ -21,7 +21,7 @@
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
   import { createEventScope } from './lib/event-scope.js';
-  import { uniqueImportName, fileBase64, checkImportSize, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
+  import { uniqueImportName, fileBase64, checkImportSize, warningText, importedMessage, isNotConnectedError, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -320,8 +320,8 @@
       }
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast($t('app.imported', {name}));
+      const info = await TunnelService.ImportConfig(name, content);
+      showToast(importedMessage(name, info?.warnings, $t), info?.warnings?.length ? 8000 : 3000);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast($t('app.import_failed') + ': ' + errText(e));
@@ -335,8 +335,8 @@
     try {
       const baseName = await TunnelService.BaseName(path);
       const name = await uniqueName(baseName || 'tunnel');
-      await TunnelService.ImportQRFromPath(path, name);
-      showToast($t('app.imported', {name}));
+      const info = await TunnelService.ImportQRFromPath(path, name);
+      showToast(importedMessage(name, info?.warnings, $t), info?.warnings?.length ? 8000 : 3000);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast($t('app.qr_import_failed') + ': ' + errText(e));
@@ -350,8 +350,8 @@
       const data = await fileBase64(file, MAX_QR_BYTES);
       const baseName = file.name.replace(/\.[^.]+$/, '') || 'tunnel';
       const name = await uniqueName(baseName);
-      await TunnelService.ImportQRFromBytes(data, name);
-      showToast($t('app.imported', {name}));
+      const info = await TunnelService.ImportQRFromBytes(data, name);
+      showToast(importedMessage(name, info?.warnings, $t), info?.warnings?.length ? 8000 : 3000);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast($t('app.qr_import_failed') + ': ' + errText(e));
@@ -371,8 +371,8 @@
         return;
       }
       const name = await uniqueName(baseName);
-      await TunnelService.ImportConfig(name, content);
-      showToast($t('app.imported', {name}));
+      const info = await TunnelService.ImportConfig(name, content);
+      showToast(importedMessage(name, info?.warnings, $t), info?.warnings?.length ? 8000 : 3000);
       await refreshTunnels(TunnelService);
     } catch (e) {
       showToast($t('app.import_failed') + ': ' + errText(e));
@@ -496,8 +496,10 @@
         editorErrors = errors;
         return;
       }
+      let saveWarning = '';
       if (editorIsNew) {
-        await TunnelService.ImportConfig(saveName, saveContent);
+        const info = await TunnelService.ImportConfig(saveName, saveContent);
+        saveWarning = warningText(info?.warnings, $t);
       } else {
         const renamed = saveName !== originalName;
         if (renamed) {
@@ -528,6 +530,12 @@
         }
       }
       showEditor = false;
+      if (!editorIsNew) {
+        try {
+          saveWarning = warningText(await TunnelService.LintConfigFor(saveName, saveContent), $t);
+        } catch (_) { /* advisory only */ }
+      }
+      if (saveWarning) showToast(saveWarning, 8000);
       await refreshTunnels(TunnelService);
     } catch (err) {
       editorErrors = [errText(err)];
@@ -595,6 +603,28 @@
   async function handleConflictProceed() {
     showConflictWarning = false;
     await doConnectFinal(pendingConnectName);
+  }
+
+  // Address conflict: disconnect the other tunnel(s) sharing this Address,
+  // then connect. Explicit user choice only; nothing is automatic.
+  async function handleConflictDisconnectProceed(e) {
+    const names = e.detail?.names || [];
+    const target = pendingConnectName;
+    showConflictWarning = false;
+    try {
+      for (const n of names) {
+        try {
+          await TunnelService.DisconnectTunnel(n);
+        } catch (err) {
+          // Already disconnected while the dialog was open: the goal is met.
+          if (!isNotConnectedError(errText(err))) throw err;
+        }
+      }
+    } catch (err) {
+      showToast($t('conflict.disconnect_failed', { error: errText(err) }));
+      return;
+    }
+    await doConnectFinal(target);
   }
 
   function handleConflictCancel() {
@@ -843,6 +873,7 @@
     <ConflictWarning
       conflicts={conflictList}
       on:proceed={handleConflictProceed}
+      on:disconnect_proceed={handleConflictDisconnectProceed}
       on:cancel={handleConflictCancel} />
   {/if}
 
@@ -856,7 +887,7 @@
             <div class="zip-result-row">
               <span class="zip-result-icon" class:zip-ok={!r.error} class:zip-err={!!r.error}>{r.error ? '✕' : '✓'}</span>
               <span class="zip-result-name" class:zip-err={!!r.error}>{r.name}</span>
-              {#if r.error}<span class="zip-result-msg">{r.error}</span>{/if}
+              {#if r.error}<span class="zip-result-msg">{r.error}</span>{:else if warningText(r.warnings, $t)}<span class="zip-result-msg">{warningText(r.warnings, $t)}</span>{/if}
             </div>
           {/each}
         </div>
