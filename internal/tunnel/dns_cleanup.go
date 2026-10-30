@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/korjwl1/wireguide/internal/network"
@@ -66,6 +67,56 @@ func (m *Manager) RetryPendingDNSCleanupAt(now time.Time) {
 			}
 		}
 	}
+}
+
+// ForcePendingCleanupRetry runs every retained DNS/network cleanup now,
+// ignoring its backoff ("Reset DNS & firewall"). Only retryAt is reset, so a
+// failure backs off from the same delay as before. The usual rules hold: a
+// journal is removed only when its cleanup succeeded, and nothing is retried
+// while a tunnel is up. Returns how many entries were pending and the tunnel
+// names of those still pending afterwards. Caller holds the helper's connect
+// lock, like RetryPendingDNSCleanup.
+func (m *Manager) ForcePendingCleanupRetry() (attempted int, pending []string) {
+	m.mu.Lock()
+	for key, entry := range m.pendingNetworkCleanup {
+		entry.retryAt = time.Time{}
+		m.pendingNetworkCleanup[key] = entry
+	}
+	for iface, entry := range m.pendingDNSCleanup {
+		entry.retryAt = time.Time{}
+		m.pendingDNSCleanup[iface] = entry
+	}
+	attempted = len(pendingCleanupNamesLocked(m))
+	m.mu.Unlock()
+	if attempted == 0 {
+		return 0, nil
+	}
+	m.RetryPendingDNSCleanupAt(time.Now())
+	m.mu.Lock()
+	pending = pendingCleanupNamesLocked(m)
+	m.mu.Unlock()
+	return attempted, pending
+}
+
+// pendingCleanupNamesLocked lists, sorted and de-duplicated, the tunnels with
+// retained cleanup work. Caller holds m.mu.
+func pendingCleanupNamesLocked(m *Manager) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, entry := range m.pendingNetworkCleanup {
+		add(entry.name)
+	}
+	for _, entry := range m.pendingDNSCleanup {
+		add(entry.name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // prepareInterfaceDNS clears a former owner's supplemental resolver before

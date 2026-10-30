@@ -12,6 +12,7 @@
   import { errText } from './errors.js';
   import { createEventScope } from './event-scope.js';
   import { startModeKey, isRepairBusy } from './helper-info.js';
+  import { stepLabel, stepDetail, refusalNeeds, resetSucceeded } from './reset-dns.js';
 
   export let TunnelService;
   export let onClose = () => {};
@@ -392,6 +393,57 @@
     repairStage = '';
   }
 
+  // ---- Reset DNS & firewall (Advanced) ----
+  // Escape hatch: the helper removes WireGuide's firewall rules and split DNS,
+  // retries any retained DNS recovery and flushes the DNS cache. It refuses
+  // while tunnels are up or the kill switch is on unless the user opts in.
+  let resetStage = ''; // '' | 'confirm' | 'running'
+  let resetForce = false;
+  let resetKsOff = false;
+  let resetShowForce = false;
+  let resetShowKsOff = false;
+  let resetRefusal = null; // refused response from the helper
+  let resetResult = null;
+  let resetError = '';
+  async function askReset() {
+    resetError = '';
+    resetResult = null;
+    resetRefusal = null;
+    resetForce = false;
+    resetKsOff = false;
+    resetShowKsOff = !!settings.kill_switch;
+    resetShowForce = false;
+    try {
+      const list = (await TunnelService.ListTunnels()) || [];
+      resetShowForce = list.some((x) => x.is_connected);
+    } catch (_) {}
+    resetStage = 'confirm';
+  }
+  function cancelReset() {
+    if (resetStage === 'confirm') resetStage = '';
+  }
+  async function doReset() {
+    resetStage = 'running';
+    resetError = '';
+    try {
+      const resp = await TunnelService.ResetDNS(resetForce, resetKsOff);
+      if (resp?.refused) {
+        // The helper also sees wanted and pending-restore tunnels: show the
+        // option it asked for and keep the sheet open.
+        const need = refusalNeeds(resp);
+        resetShowForce = resetShowForce || need.force;
+        resetShowKsOff = resetShowKsOff || need.killSwitchOff;
+        resetRefusal = resp;
+        resetStage = 'confirm';
+        return;
+      }
+      resetResult = resp;
+    } catch (e) {
+      resetError = errText(e);
+    }
+    resetStage = '';
+  }
+
   // Register the listener synchronously and tear it down via
   // onDestroy. An `onMount(async ...)` callback returns a Promise,
   // not a cleanup function, so the cleanup we used to put after the
@@ -615,6 +667,39 @@
           </div>
 
           <div class="settings-section">
+            <h4 class="section-title">{$t('settings.section_reset')}</h4>
+            <div class="settings-card">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <p class="setting-desc">{$t('settings.reset_dns_hint')}</p>
+                  {#if resetError}<ErrorNotice message={resetError} />{/if}
+                </div>
+                <button class="warn-btn warn-proceed" disabled={resetStage !== ''} on:click={askReset}>
+                  {resetStage === 'running' ? $t('settings.reset_dns_running') : $t('settings.reset_dns')}
+                </button>
+              </div>
+              {#if resetResult}
+                <div class="setting-row reset-result">
+                  <div class="setting-info">
+                    <p class={resetSucceeded(resetResult) ? 'setting-live-ok' : 'setting-desc'}>
+                      {resetSucceeded(resetResult) ? $t('settings.reset_dns_done') : $t('settings.reset_dns_partial')}
+                    </p>
+                    <ul class="reset-steps">
+                      {#each resetResult.steps || [] as step}
+                        <li class:failed={!step.ok}>
+                          <span class="reset-mark" aria-hidden="true">{step.ok ? '✓' : '✕'}</span>
+                          <span class="reset-step-name">{stepLabel($t, step.name)}</span>
+                          <span class="reset-step-detail">{stepDetail($t, step)}</span>
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="settings-section">
             <h4 class="section-title">{$t('settings.section_logging')}</h4>
             <div class="settings-card">
               <div class="setting-row">
@@ -725,6 +810,53 @@
         <div class="confirm-footer">
           <button class="dialog-btn dialog-btn-ghost" on:click={cancelRepair}>{$t('confirm.no')}</button>
           <button class="dialog-btn dialog-btn-primary" on:click={doRepair}>{$t('settings.helper_repair_go')}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if resetStage !== ''}
+    <div class="confirm-backdrop" use:backdrop={cancelReset}>
+      <div class="confirm-dialog" use:modal={cancelReset} role="dialog" aria-modal="true" aria-labelledby="reset-confirm-title" tabindex="-1">
+        <div class="dialog-header">
+          <div class="dialog-icon-tile">
+            <Icon name="triangle-alert" size={18} strokeWidth={2} />
+          </div>
+          <div class="dialog-header-text">
+            <h3 id="reset-confirm-title">{$t('settings.reset_dns_title')}</h3>
+          </div>
+        </div>
+        <p class="dialog-message">{$t('settings.reset_dns_intro')}</p>
+        <ul class="reset-list">
+          <li>{$t('settings.reset_dns_item_firewall')}</li>
+          <li>{$t('settings.reset_dns_item_split')}</li>
+          <li>{$t('settings.reset_dns_item_recovery')}</li>
+          <li>{$t('settings.reset_dns_item_cache')}</li>
+        </ul>
+        {#if resetRefusal}
+          <p class="dialog-message reset-refusal" role="alert">
+            {resetRefusal.reason === 'kill_switch_on'
+              ? $t('settings.reset_dns_refused_ks')
+              : $t('settings.reset_dns_refused_tunnels', { tunnels: (resetRefusal.connected_tunnels || []).join(', ') })}
+          </p>
+        {/if}
+        {#if resetShowForce}
+          <label class="reset-option">
+            <input type="checkbox" bind:checked={resetForce} disabled={resetStage === 'running'} />
+            <span>{$t('settings.reset_dns_force')}</span>
+          </label>
+        {/if}
+        {#if resetShowKsOff}
+          <label class="reset-option">
+            <input type="checkbox" bind:checked={resetKsOff} disabled={resetStage === 'running'} />
+            <span>{$t('settings.reset_dns_ks_off')}</span>
+          </label>
+        {/if}
+        <div class="confirm-footer">
+          <button class="dialog-btn dialog-btn-ghost" disabled={resetStage === 'running'} on:click={cancelReset}>{$t('confirm.no')}</button>
+          <button class="dialog-btn dialog-btn-primary" disabled={resetStage === 'running'} on:click={doReset}>
+            {resetStage === 'running' ? $t('settings.reset_dns_running') : $t('settings.reset_dns_go')}
+          </button>
         </div>
       </div>
     </div>
@@ -930,6 +1062,34 @@
     overflow-wrap: anywhere;
   }
   .info-val.mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; }
+  .reset-list {
+    margin: 0 0 12px;
+    padding-left: 18px;
+    font: 400 12px/17px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-secondary);
+  }
+  .reset-refusal { color: var(--orange, #ff9f0a); }
+  .reset-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 10px;
+    font: 400 12px/17px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .reset-steps {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    font: 400 11px/16px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);
+    color: var(--text-secondary);
+  }
+  .reset-steps li { display: flex; gap: 6px; flex-wrap: wrap; }
+  .reset-steps li.failed { color: var(--red, #ff453a); }
+  .reset-mark { width: 12px; flex: none; }
+  .reset-step-name { font-weight: 600; }
+  .reset-step-detail { min-width: 0; overflow-wrap: anywhere; }
   .setting-live-ok {
     margin: 6px 0 0;
     font: 400 11px/15px var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif);

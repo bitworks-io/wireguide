@@ -103,6 +103,133 @@ export class RecoveryWarningPayload {
 }
 
 /**
+ * ResetDNSResponse reports a Network.ResetDNS run. A refused request changed
+ * nothing. Steps run in order; a failed step does not hide the others.
+ */
+export class ResetDNSResponse {
+    /**
+     * Creates a new ResetDNSResponse instance.
+     * @param {Partial<ResetDNSResponse>} [$$source = {}] - The source object to create the ResetDNSResponse.
+     */
+    constructor($$source = {}) {
+        if (!("refused" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["refused"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["reason"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * ConnectedTunnels lists the tunnels that caused a refusal, or that were
+             * still up after a forced disconnect.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["connected_tunnels"] = undefined;
+        }
+        if (!("steps" in $$source)) {
+            /**
+             * @member
+             * @type {ResetDNSStep[]}
+             */
+            this["steps"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResetDNSResponse instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResetDNSResponse}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType0;
+        const $$createField3_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("connected_tunnels" in $$parsedSource) {
+            $$parsedSource["connected_tunnels"] = $$createField2_0($$parsedSource["connected_tunnels"]);
+        }
+        if ("steps" in $$parsedSource) {
+            $$parsedSource["steps"] = $$createField3_0($$parsedSource["steps"]);
+        }
+        return new ResetDNSResponse(/** @type {Partial<ResetDNSResponse>} */($$parsedSource));
+    }
+}
+
+/**
+ * ResetDNSStep is one step of a reset. DetailKey/DetailParams let the GUI
+ * localize the detail; Detail is the English text (CLI, and the fallback).
+ */
+export class ResetDNSStep {
+    /**
+     * Creates a new ResetDNSStep instance.
+     * @param {Partial<ResetDNSStep>} [$$source = {}] - The source object to create the ResetDNSStep.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("ok" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["ok"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["detail_key"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["detail_params"] = undefined;
+        }
+        if (!("detail" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["detail"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ResetDNSStep instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ResetDNSStep}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("detail_params" in $$parsedSource) {
+            $$parsedSource["detail_params"] = $$createField3_0($$parsedSource["detail_params"]);
+        }
+        return new ResetDNSStep(/** @type {Partial<ResetDNSStep>} */($$parsedSource));
+    }
+}
+
+/**
  * SettingsChangedPayload carries a single applied setting so a running
  * GUI can reflect a change made through another client (the CLI). Only
  * the field for the changed setting is non-nil.
@@ -169,3 +296,9 @@ export class SettingsChangedPayload {
         return new SettingsChangedPayload(/** @type {Partial<SettingsChangedPayload>} */($$parsedSource));
     }
 }
+
+// Private type creation functions
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = ResetDNSStep.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = $Create.Map($Create.Any, $Create.Any);

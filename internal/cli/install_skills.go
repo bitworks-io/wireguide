@@ -71,6 +71,11 @@ wireguide ctl set pin-interface <on|off>
 wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
+wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
+                                             # escape hatch: drop WireGuide firewall rules + split DNS,
+                                             # retry pending DNS recovery, flush the DNS cache.
+                                             # Refused while tunnels are up (--force disconnects them)
+                                             # or the kill switch is on (--kill-switch-off).
 ` + "```" + `
 Every command exits non-zero on failure and prints a one-line error to stderr,
 so it composes in scripts. ` + "`connect`/`disconnect`/`status`/`set`" + ` need the app

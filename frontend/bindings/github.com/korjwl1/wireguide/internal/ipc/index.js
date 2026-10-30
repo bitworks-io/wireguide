@@ -5,5 +5,7 @@
 export {
     LogEntry,
     RecoveryWarningPayload,
+    ResetDNSResponse,
+    ResetDNSStep,
     SettingsChangedPayload
 } from "./models.js";

@@ -66,6 +66,8 @@ func Run(args []string) int {
 		return cmdDNSLeak(rest)
 	case "routes":
 		return cmdRoutes(rest)
+	case "reset-dns":
+		return cmdResetDNS(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -111,6 +113,11 @@ Settings & diagnostics:
   wireguide ctl set loglevel <debug|info|warn|error>
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
+  wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
+                                               remove WireGuide's firewall rules and split DNS,
+                                               retry pending DNS recovery, flush the DNS cache
+                                               (--force disconnects tunnels first;
+                                               --kill-switch-off turns the kill switch off)
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]

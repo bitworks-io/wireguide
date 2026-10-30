@@ -38,6 +38,7 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodSetTunnelBackend, h.handleSetTunnelBackend)
 	h.server.Handle(ipc.MethodReportSSID, h.handleReportSSID)
 	h.server.Handle(ipc.MethodAutomationPreview, h.handleAutomationPreview)
+	h.server.Handle(ipc.MethodResetDNS, h.handleResetDNS)
 }
 
 func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) {
@@ -178,18 +179,24 @@ func (h *Helper) handleSetKillSwitch(params json.RawMessage) (interface{}, error
 	if err := json.Unmarshal(params, &req); err != nil {
 		return nil, err
 	}
+	if err := h.setKillSwitchHeld(req.Enabled); err != nil {
+		return nil, err
+	}
+	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{KillSwitch: &req.Enabled})
+	return ipc.Empty{}, nil
+}
+
+// setKillSwitchHeld records the kill switch intent and applies it. Caller
+// holds connectMu.
+func (h *Helper) setKillSwitchHeld(enabled bool) error {
 	h.mu.Lock()
-	h.killSwitchWanted = req.Enabled
+	h.killSwitchWanted = enabled
 	h.ksIntentKnown = true
 	h.mu.Unlock()
 	// Persist the requested setting even when applying it fails. A retry must
 	// follow the last explicit user intent, including Off during reconnect.
 	h.persistDesiredState()
-	if err := h.reconcileKillSwitch(true, time.Now()); err != nil {
-		return nil, err
-	}
-	h.server.Broadcast(ipc.EventSettingsChanged, ipc.SettingsChangedPayload{KillSwitch: &req.Enabled})
-	return ipc.Empty{}, nil
+	return h.reconcileKillSwitch(true, time.Now())
 }
 
 func (h *Helper) handleSetDNSProtection(params json.RawMessage) (interface{}, error) {

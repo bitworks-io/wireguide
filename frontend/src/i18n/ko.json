@@ -195,7 +195,24 @@
     "helper_repair_busy": "먼저 모든 터널을 연결 해제하고 대기 중인 재연결을 취소하세요. 헬퍼를 복구하면 터널이 끊어집니다.",
     "helper_repair_go": "복구",
     "helper_repairing": "복구 중…",
-    "helper_repair_done": "헬퍼를 복구했습니다."
+    "helper_repair_done": "헬퍼를 복구했습니다.",
+    "section_reset": "네트워크 초기화",
+    "reset_dns": "DNS 및 방화벽 초기화…",
+    "reset_dns_hint": "충돌이나 연결 해제 후에도 DNS나 인터넷이 계속 작동하지 않으면, WireGuide가 변경한 모든 것을 되돌립니다. 터널과 설정은 유지됩니다.",
+    "reset_dns_title": "DNS 및 방화벽을 초기화할까요?",
+    "reset_dns_intro": "다음 작업을 수행합니다:",
+    "reset_dns_item_firewall": "WireGuide 방화벽 규칙 제거(킬 스위치 및 DNS 보호)",
+    "reset_dns_item_split": "WireGuide 분할 DNS 항목 제거",
+    "reset_dns_item_recovery": "복원이 대기 중이면 VPN 이전 DNS 설정 복원을 지금 다시 시도",
+    "reset_dns_item_cache": "DNS 캐시 비우기",
+    "reset_dns_force": "먼저 모든 터널 연결 해제(대기 중인 재연결 포함)",
+    "reset_dns_ks_off": "킬 스위치 끄기(끄지 않으면 몇 초 안에 다시 모든 트래픽을 차단합니다)",
+    "reset_dns_refused_tunnels": "연결되었거나 재연결 대기 중인 터널이 있습니다: {tunnels}. 먼저 연결을 해제하도록 선택하세요.",
+    "reset_dns_refused_ks": "먼저 킬 스위치를 끄세요. 초기화 직후 다시 모든 트래픽을 차단합니다.",
+    "reset_dns_go": "초기화",
+    "reset_dns_running": "초기화 중…",
+    "reset_dns_done": "DNS와 방화벽을 초기화했습니다.",
+    "reset_dns_partial": "초기화 중 문제가 발생했습니다:"
   },
   "confirm": {
     "delete_title": "터널을 삭제하시겠습니까?",
@@ -319,5 +336,31 @@
     "saving": "저장 중…",
     "saved": "저장됨",
     "loading": "불러오는 중…"
+  },
+  "reset_dns": {
+    "step": {
+      "disconnect": "터널",
+      "remaining": "터널",
+      "kill_switch": "킬 스위치",
+      "firewall": "방화벽 규칙",
+      "split_dns": "분할 DNS",
+      "dns_recovery": "DNS 복구",
+      "dns_cache": "DNS 캐시"
+    },
+    "detail": {
+      "disconnect_ok": "연결 해제됨: {tunnels}",
+      "disconnect_failed": "연결을 해제할 수 없습니다: {error}",
+      "remaining_failed": "아직 연결되어 있어 다른 작업은 수행하지 않았습니다: {tunnels}",
+      "kill_switch_ok": "킬 스위치를 껐습니다",
+      "kill_switch_failed": "킬 스위치 설정은 꺼졌지만 제거에 실패했습니다: {error}",
+      "firewall_ok": "WireGuide 방화벽 규칙을 제거했습니다",
+      "firewall_failed": "방화벽 규칙을 제거할 수 없습니다: {error}",
+      "split_dns_ok": "분할 DNS 항목을 제거했습니다",
+      "split_dns_failed": "분할 DNS 항목을 제거할 수 없습니다: {error}",
+      "dns_recovery_ok": "대기 중이던 DNS 복구 {count}건을 완료했습니다",
+      "dns_recovery_none": "대기 중인 DNS 복구가 없습니다",
+      "dns_recovery_pending": "{tunnels}의 복구가 아직 대기 중입니다. 저장된 설정은 유지되며 다시 시도합니다",
+      "dns_cache_ok": "DNS 캐시를 비웠습니다"
+    }
   }
 }

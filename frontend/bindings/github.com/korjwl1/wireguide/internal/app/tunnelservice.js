@@ -29,6 +29,9 @@ import * as domain$0 from "../domain/models.js";
 import * as healthcheck$0 from "../healthcheck/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as ipc$0 from "../ipc/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as storage$0 from "../storage/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -540,6 +543,22 @@ export function RepairHelper() {
 }
 
 /**
+ * ResetDNS runs Network.ResetDNS ("Reset DNS & firewall"). A refused request
+ * comes back with Refused set and nothing changed. force disconnects every
+ * connected, wanted or pending-restore tunnel first; killSwitchOff turns the
+ * kill switch setting off, which is also saved here so the next launch does
+ * not push it back on.
+ * @param {boolean} force
+ * @param {boolean} killSwitchOff
+ * @returns {$CancellablePromise<ipc$0.ResetDNSResponse | null>}
+ */
+export function ResetDNS(force, killSwitchOff) {
+    return $Call.ByID(1047447379, force, killSwitchOff).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType30($result);
+    }));
+}
+
+/**
  * RunDNSLeakTest performs a DNS leak test using the currently active tunnel's
  * DNS servers as the expected (VPN) resolvers. If no tunnel is connected, the
  * expected set is empty — all detected resolvers will be flagged as leaks.
@@ -547,7 +566,7 @@ export function RepairHelper() {
  */
 export function RunDNSLeakTest() {
     return $Call.ByID(2469114850).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType30($result);
+        return $$createType32($result);
     }));
 }
 
@@ -785,5 +804,7 @@ const $$createType25 = $Create.Nullable($$createType24);
 const $$createType26 = $models.ZipImportResult.createFrom;
 const $$createType27 = $Create.Array($$createType26);
 const $$createType28 = $Create.Array($$createType24);
-const $$createType29 = $models.DNSLeakResult.createFrom;
+const $$createType29 = ipc$0.ResetDNSResponse.createFrom;
 const $$createType30 = $Create.Nullable($$createType29);
+const $$createType31 = $models.DNSLeakResult.createFrom;
+const $$createType32 = $Create.Nullable($$createType31);
