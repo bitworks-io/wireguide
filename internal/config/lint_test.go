@@ -174,7 +174,7 @@ func TestLintReverseZoneFix(t *testing.T) {
 	if d == nil || d.Fix == nil || d.Fix.Action != FixAppendDNS {
 		t.Fatalf("expected reverse zone info with fix, got %+v", d)
 	}
-	if d.Fix.Value != "~1.168.192.in-addr.arpa, ~0.5.10.in-addr.arpa" {
+	if d.Fix.Value != "~1.168.192.in-addr.arpa" {
 		t.Errorf("fix value %q", d.Fix.Value)
 	}
 	withZone := lintCfg(t, "DNS = 192.168.1.1, ~corp.lan, ~1.168.192.in-addr.arpa\nMTU = 1380", "192.168.1.0/24")
@@ -240,6 +240,10 @@ func TestReverseZonesNeverWiderThanRoute(t *testing.T) {
 	if z := ReverseZones([]string{"172.16.0.0/12", "100.64.0.0/10"}); len(z) != 0 {
 		t.Errorf("wide prefixes must yield no zone, got %v", z)
 	}
+	// Longer than /24: the containing /24 zone would be wider than the route.
+	if z := ReverseZones([]string{"10.0.0.5/32", "10.0.0.128/25", "10.0.0.252/30"}); len(z) != 0 {
+		t.Errorf("prefixes longer than /24 must yield no zone, got %v", z)
+	}
 	z := ReverseZones([]string{"10.1.0.0/22", "10.2.0.0/23"})
 	want := "0.1.10.in-addr.arpa,1.1.10.in-addr.arpa,2.1.10.in-addr.arpa,3.1.10.in-addr.arpa,0.2.10.in-addr.arpa,1.2.10.in-addr.arpa"
 	if strings.Join(z, ",") != want {
@@ -269,7 +273,7 @@ func TestLintGlobalDNSOutsideWithIPv6OnlyDefault(t *testing.T) {
 	}
 }
 
-func TestLintDNSErrorsIncludeUpstreamLimits(t *testing.T) {
+func TestLintDNSErrorsIncludeResolverLimits(t *testing.T) {
 	// Combined match+search cap: 20 match + 20 search, each under the
 	// per-list limit but above 32 in total.
 	entries := []string{"10.0.0.1"}

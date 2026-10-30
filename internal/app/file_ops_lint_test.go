@@ -36,10 +36,13 @@ func TestLintConfigFor(t *testing.T) {
 }
 
 func TestSafeLintRecovers(t *testing.T) {
-	// A config with nil interface slices must not panic; a recovered panic
-	// returns nil rather than propagating.
-	if ds := safeLint(nil, nil); ds != nil {
-		t.Fatalf("nil config: %v", ds)
+	orig := lintConfig
+	t.Cleanup(func() { lintConfig = orig })
+	lintConfig = func(*config.WireGuardConfig, map[string]*config.WireGuardConfig) []config.Diagnostic {
+		panic("lint failure")
+	}
+	if ds := safeLint(&config.WireGuardConfig{}, nil); ds != nil {
+		t.Fatalf("recovered panic must yield nil, got %v", ds)
 	}
 }
 

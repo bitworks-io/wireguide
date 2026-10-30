@@ -202,7 +202,7 @@
     "kill_switch": "Kill switch",
     "kill_switch_hint": "Block traffic outside the VPN. Protection pauses during connection setup and reconnect, and ends when you quit the app.",
     "dns_protection": "DNS protection",
-    "dns_protection_hint": "Block DNS requests to servers not specified by connected tunnels. Applied automatically for full-tunnel connections on Windows. Tunnels using split DNS (~domain) or no DNS keep system DNS and are not affected.",
+    "dns_protection_hint": "Block DNS requests to servers not specified by connected tunnels. Applied automatically for full-tunnel connections on Windows.",
     "health_check": "Check connection and reconnect",
     "health_check_hint": "Reconnect if no new handshake occurs for 180 seconds. Recommended for tunnels with PersistentKeepalive enabled. Time asleep does not count: the check pauses for 90 seconds after waking, and on macOS while no network is available. A tunnel that has never completed a handshake is reconnected only if it has sent traffic, at growing intervals (up to 48 minutes).",
     "pin_interface": "Pin VPN server route",
