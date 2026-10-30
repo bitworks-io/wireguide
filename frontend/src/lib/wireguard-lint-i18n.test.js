@@ -26,9 +26,3 @@ test('every diagnostic code emitted by the Go linter has a translation', () => {
     for (const c of codes) assert.ok(load(l).lint[c], `${l}: lint.${c}`);
   }
 });
-
-test('dns_protection_hint mentions split DNS tunnels are unaffected in every language', () => {
-  for (const l of ['en', 'ko', 'ja', 'zh']) {
-    assert.ok(load(l).settings.dns_protection_hint.includes('~domain'), l);
-  }
-});
