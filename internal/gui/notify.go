@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -46,6 +47,9 @@ const execTimeout = 4 * time.Second
 type notificationBackend interface {
 	start() error
 	requestAuth() (bool, error)
+	// checkAuth reports whether notifications are currently authorized,
+	// without prompting.
+	checkAuth() (bool, error)
 	send(id, title, body string) error
 }
 
@@ -98,6 +102,10 @@ type notifier struct {
 	authAsked   bool
 	authPending bool
 	authDenied  bool
+	// authTimedOut: the authorization request timed out unanswered, so the
+	// service stays usable but the user's choice is unknown. Each later
+	// send re-checks without prompting.
+	authTimedOut bool
 }
 
 func newNotifier(settings *storage.SettingsStore, actions *wgapp.UserActions) *notifier {
@@ -350,11 +358,12 @@ const (
 	// serviceDelivered: the service posted the notification.
 	serviceDelivered serviceResult = iota
 	// serviceDrop: the user has not allowed notifications (denied, or the
-	// authorization prompt is still open); the notification is dropped so
-	// the user's choice is respected.
+	// authorization prompt is still unanswered); the notification is
+	// dropped so the user's choice is respected.
 	serviceDrop
-	// serviceFailed: the service could not start, or authorization or
-	// delivery returned an error; the fallback may post instead.
+	// serviceFailed: the service could not start, or authorization (other
+	// than a timeout) or delivery returned an error; the fallback may post
+	// instead.
 	serviceFailed
 )
 
@@ -377,6 +386,13 @@ func (n *notifier) deliver(title, body string) {
 // while the prompt is open are dropped. A denial holds for the rest of the
 // session: allowing notifications later in System Settings takes effect
 // after a restart.
+//
+// An authorization request the user leaves unanswered times out with
+// context.DeadlineExceeded. That says nothing about the user's choice, so
+// the service stays usable and the notification is dropped; later sends
+// re-check the authorization without prompting and post only once it is
+// granted. Only a start failure or another error sends delivery around the
+// service.
 func (n *notifier) sendViaService(title, body string) serviceResult {
 	n.svcMu.Lock()
 	if !n.svcStarted {
@@ -397,13 +413,34 @@ func (n *notifier) sendViaService(title, body string) serviceResult {
 		return serviceDrop
 	}
 	svc := n.svc
-	if !n.authAsked {
+	if n.authTimedOut {
+		n.svcMu.Unlock()
+		// The check cannot tell "denied" from "not decided yet": both
+		// report not authorized, so neither is latched and a grant made
+		// later is still honoured.
+		ok, err := svc.checkAuth()
+		if err != nil || !ok {
+			if err != nil {
+				slog.Info("notification authorization check failed; dropping", "error", err)
+			}
+			return serviceDrop
+		}
+		n.svcMu.Lock()
+		n.authTimedOut = false
+		n.svcMu.Unlock()
+	} else if !n.authAsked {
 		n.authPending = true
 		n.svcMu.Unlock()
 		ok, err := svc.requestAuth()
 		n.svcMu.Lock()
 		n.authPending = false
 		n.authAsked = true // ask at most once per session, even on error/timeout
+		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Info("notification authorization request timed out; dropping until it is granted", "error", err)
+			n.authTimedOut = true
+			n.svcMu.Unlock()
+			return serviceDrop
+		}
 		if err != nil {
 			slog.Info("notification authorization failed, using fallback", "error", err)
 			n.svcUsable = false
@@ -416,8 +453,10 @@ func (n *notifier) sendViaService(title, body string) serviceResult {
 			n.svcMu.Unlock()
 			return serviceDrop
 		}
+		n.svcMu.Unlock()
+	} else {
+		n.svcMu.Unlock()
 	}
-	n.svcMu.Unlock()
 	if err := svc.send(fmt.Sprintf("wireguide-%d", time.Now().UnixNano()), title, body); err != nil {
 		slog.Info("notification delivery failed, using fallback", "error", err)
 		return serviceFailed
