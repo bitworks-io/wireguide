@@ -256,6 +256,13 @@
     "open_settings": "Open Settings"
   },
   "automation": {
+    "rule_removed": "Rule removed",
+    "undo": "Undo",
+    "restore_previous": "Restore previous rules…",
+    "rule_history": "Rule history",
+    "rule_history_empty": "No earlier rules saved yet.",
+    "rule_history_count": "Rules: {count}",
+    "rules_changed_outside": "Rules for {name} changed outside the app.",
     "title": "Automation",
     "hint": "The first matching rule is applied, from top to bottom. Connecting or disconnecting manually pauses automation until the network changes.",
     "empty": "No rules added. Add a rule to connect or disconnect this tunnel based on your network.",

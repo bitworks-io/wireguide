@@ -20,6 +20,7 @@
   import { startLogListener, stopLogListener } from './stores/logs.js';
   import { compactList, listSort, listActiveOnTop, listPaneWidth, saveListPrefs, LIST_PANE_MIN, LIST_PANE_MAX, LIST_PANE_DEFAULT } from './stores/ui.js';
   import { errText } from './lib/errors.js';
+  import { takeExternalRuleChanges } from './stores/automationWatch.js';
   import { createEventScope } from './lib/event-scope.js';
   import { uniqueImportName, fileBase64, checkImportSize, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
@@ -80,6 +81,7 @@
   // writes is harmless.
   async function applySettingsToUI() {
     const s = await loadSettings(TunnelService);
+    noticeExternalRuleChanges(s);
     applyTheme(s?.theme || 'system');
     compactList.set(s?.compact_list ?? false);
     listSort.set(s?.list_sort || 'name_asc');
@@ -266,6 +268,23 @@
 
   function dismissCriticalError(idx) {
     criticalErrors = criticalErrors.filter((_, i) => i !== idx);
+  }
+
+  // "Rules for X changed outside the app" (the CLI or another process).
+  // The first call only seeds the baseline; the app's own rule writes are
+  // registered before they are made (automationWatch.noteOwnSave) and never
+  // reported. The tunnel list can lag behind config.json, so a tunnel whose
+  // rules vanished is re-checked: a deleted tunnel is not a rules edit.
+  function noticeExternalRuleChanges(s) {
+    const changed = takeExternalRuleChanges(s, new Set(($tunnels || []).map((x) => x.name)));
+    if (!changed.length) return;
+    Promise.all(changed.map((n) => TunnelService.TunnelExists(n).then((ok) => (ok ? n : null), () => n)))
+      .then((names) => {
+        names = names.filter(Boolean);
+        if (names.length && !appEvents.disposed) {
+          showToast($t('automation.rules_changed_outside', { name: names.join(', ') }), 6000);
+        }
+      });
   }
 
   function showToast(msg, ms = 3000) {

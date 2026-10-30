@@ -256,6 +256,13 @@
     "open_settings": "設定を開く"
   },
   "automation": {
+    "rule_removed": "ルールを削除しました",
+    "undo": "元に戻す",
+    "restore_previous": "以前のルールを復元…",
+    "rule_history": "ルールの履歴",
+    "rule_history_empty": "保存された以前のルールはまだありません。",
+    "rule_history_count": "ルール: {count} 件",
+    "rules_changed_outside": "{name} のルールがアプリの外部で変更されました。",
     "title": "オートメーション",
     "hint": "上から最初に一致するルールを適用します。手動で接続または切断すると、ネットワークが変わるまで自動化を一時停止します。",
     "empty": "ルールがありません。ルールを追加すると、ネットワークに応じてこのトンネルを自動的に接続または切断できます。",

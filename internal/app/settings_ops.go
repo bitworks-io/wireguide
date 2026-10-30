@@ -171,6 +171,35 @@ func (s *TunnelService) SaveAutomationRules(tunnel string, rules []automation.Ru
 	})
 }
 
+// ListAutomationHistory lists the rule history snapshots, newest first,
+// with the number of rules each holds for tunnel.
+func (s *TunnelService) ListAutomationHistory(tunnel string) []storage.AutomationHistoryEntry {
+	return s.settingsStore.ListAutomationHistory(tunnel)
+}
+
+// AutomationHistoryRules returns tunnel's rules in the named snapshot
+// (validated; the name cannot leave the history directory) without changing
+// anything, so the GUI can register the write it is about to make as its
+// own before restoring.
+func (s *TunnelService) AutomationHistoryRules(name, tunnel string) ([]automation.Rule, error) {
+	if tunnel == "" {
+		return nil, fmt.Errorf("automation: empty tunnel name")
+	}
+	return s.settingsStore.AutomationHistoryRules(name, tunnel)
+}
+
+// RestoreAutomationHistory replaces tunnel's rules with the ones in the
+// named snapshot. It goes through SaveAutomationRules, so every rule is
+// validated again, and the restore is itself recorded in the history (so
+// it can be undone the same way).
+func (s *TunnelService) RestoreAutomationHistory(name, tunnel string) error {
+	rules, err := s.AutomationHistoryRules(name, tunnel)
+	if err != nil {
+		return err
+	}
+	return s.SaveAutomationRules(tunnel, rules)
+}
+
 // SetLogLevel updates both the GUI's and the helper's slog level
 // immediately. Exposed as a Wails method so the Settings view can call
 // it without waiting for a full SaveSettings round trip.

@@ -256,6 +256,13 @@
     "open_settings": "打开设置"
   },
   "automation": {
+    "rule_removed": "规则已删除",
+    "undo": "撤销",
+    "restore_previous": "恢复以前的规则…",
+    "rule_history": "规则历史",
+    "rule_history_empty": "尚未保存以前的规则。",
+    "rule_history_count": "规则：{count} 条",
+    "rules_changed_outside": "{name} 的规则已在应用外部更改。",
     "title": "自动化",
     "hint": "从上到下应用第一条匹配的规则。手动连接或断开后，自动化将暂停，直到网络发生变化。",
     "empty": "未添加规则。添加规则以根据你的网络连接或断开此隧道。",

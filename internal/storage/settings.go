@@ -259,6 +259,7 @@ func (s *SettingsStore) saveLocked(settings *Settings) error {
 	if err != nil {
 		return err
 	}
+	historyPre := s.previousAutomationForHistory()
 	// Ensure the config directory exists before writing (matches history's
 	// saveLocked). Without this, os.CreateTemp fails when EnsureDirs hasn't
 	// run or the directory was removed out from under us.
@@ -268,6 +269,7 @@ func (s *SettingsStore) saveLocked(settings *Settings) error {
 	if err := atomicfile.WriteFile(s.path, data, 0600); err != nil {
 		return err
 	}
+	s.snapshotAutomationHistory(historyPre, settings.Automation)
 	if retireBackup {
 		if err := os.Remove(s.path + ".automation-v2-backup"); err != nil && !os.IsNotExist(err) {
 			slog.Warn("could not remove retired automation backup", "error", err)

@@ -13,6 +13,8 @@
     MEDIUMS, DEFAULT_MEDIUM, macInvalid, macCanon, commitDraft, rowFromDisk, blankRow,
     cleanedRule, rulesDiffer, rulesFor,
   } from './automationRules.js';
+  import { removeAt, restoreAt, UNDO_MS } from './automationSafety.js';
+  import { noteOwnSave, setRulesBaseline } from '../stores/automationWatch.js';
 
   export let TunnelService;
   export let tunnelName = '';
@@ -56,6 +58,8 @@
     // state change re-runs it and double-invokes load for the same name.
     loadedFor = name;
     const gen = ++loadGen;
+    if (undoItem && undoItem.tunnel !== name) clearUndo();
+    showHistory = false;
     // Persist any pending edit for the tunnel we're leaving BEFORE we
     // overwrite `rules`, so switching tunnels never drops the last change.
     await flush();
@@ -107,9 +111,76 @@
     rules = [...rules, blankRow(++ruleId)];
   }
 
+  // "Rule removed — Undo" for UNDO_MS keeps the removed row and its index,
+  // so Undo puts it back where it was. A newer removal replaces it (one
+  // level). It is bound to the tunnel it came from and cleared on a tunnel
+  // switch or close, so Undo can never insert into another tunnel's rules.
+  let undoItem = null; // { tunnel, row, index }
+  let undoTimer = null;
+  function clearUndo() {
+    if (undoTimer) { clearTimeout(undoTimer); undoTimer = null; }
+    undoItem = null;
+  }
   function removeRule(i) {
-    rules = rules.filter((_, idx) => idx !== i);
+    const r = removeAt(rules, i);
+    if (r.removed === null) return;
+    rules = r.list;
     save();
+    clearUndo();
+    undoItem = { tunnel: tunnelName, row: r.removed, index: r.index };
+    undoTimer = setTimeout(clearUndo, UNDO_MS);
+  }
+  function undoRemove() {
+    if (!undoItem || undoItem.tunnel !== tunnelName) { clearUndo(); return; }
+    rules = restoreAt(rules, undoItem.row, undoItem.index);
+    clearUndo();
+    save();
+  }
+
+  // Rule history ("Restore previous rules…"): the storage layer snapshots
+  // every rules change, including the CLI's. Restoring goes through the
+  // validated SaveAutomationRules path and is itself recorded.
+  let showHistory = false;
+  let history = [];
+  let historyError = '';
+  let historyBusy = false;
+  async function toggleHistory() {
+    showHistory = !showHistory;
+    historyError = '';
+    if (!showHistory) return;
+    const name = tunnelName;
+    try {
+      await flush();
+      const list = (await TunnelService.ListAutomationHistory(name)) || [];
+      if (tunnelName === name) history = list;
+    } catch (e) {
+      history = [];
+      historyError = errText(e);
+    }
+  }
+  async function restoreHistory(entry) {
+    historyError = '';
+    historyBusy = true;
+    const name = tunnelName;
+    try {
+      await flush();
+      // Register the write first so its config_changed echo is never
+      // reported as an outside edit.
+      noteOwnSave(name, (await TunnelService.AutomationHistoryRules(entry.name, name)) || []);
+      await TunnelService.RestoreAutomationHistory(entry.name, name);
+      clearUndo();
+      showHistory = false;
+      loadedFor = ''; // re-run the reactive load for this tunnel
+      try { setRulesBaseline(await TunnelService.GetSettings()); } catch (_) {}
+    } catch (e) {
+      historyError = errText(e);
+    } finally {
+      historyBusy = false;
+    }
+  }
+  function historyTime(entry) {
+    const d = new Date(entry.time);
+    return Number.isNaN(d.getTime()) ? entry.time : d.toLocaleString();
   }
 
   // Lightweight format validation for user feedback. The engine is
@@ -284,8 +355,12 @@
       // update race: a CLI SettingsStore.Update landing between the two
       // IPC calls was clobbered by our stale snapshot of every setting.
       // An empty set removes the tunnel's entry (same semantics as before).
+      // Register the write first so its config_changed echo is never
+      // reported as a change made outside the app.
+      noteOwnSave(snap.name, snap.rules);
       await TunnelService.SaveAutomationRules(snap.name, snap.rules);
     } catch (e) {
+      TunnelService.GetSettings().then(setRulesBaseline).catch(() => {});
       saveError = errText(e);
       console.error('automation save:', e);
     }
@@ -300,6 +375,8 @@
 
   async function close() {
     await flush();
+    clearUndo();
+    showHistory = false;
     open = false;
     loadedFor = '';
   }
@@ -356,6 +433,7 @@
   });
   onDestroy(() => {
     if (cfgChangedUnsub) cfgChangedUnsub();
+    clearUndo();
   });
 </script>
 
@@ -476,9 +554,38 @@
 
       {#if saveError}<ErrorNotice message={saveError}/>{/if}
 
-      <button class="am-add" on:click={addRule} disabled={!rulesLoaded || rules.length >= MAX_RULES}>
-        <Icon name="plus" size={13} strokeWidth={2.25} /> {$t('automation.add_rule')}
-      </button>
+      {#if undoItem && undoItem.tunnel === tunnelName}
+        <div class="am-undo" role="status">
+          <span>{$t('automation.rule_removed')}</span>
+          <button type="button" class="am-link" on:click={undoRemove}>{$t('automation.undo')}</button>
+        </div>
+      {/if}
+
+      {#if showHistory}
+        <div class="am-history" role="region" aria-label={$t('automation.rule_history')}>
+          <div class="am-history-title">{$t('automation.rule_history')}</div>
+          {#if historyError}<ErrorNotice message={historyError}/>{/if}
+          {#if history.length === 0 && !historyError}
+            <div class="am-history-empty">{$t('automation.rule_history_empty')}</div>
+          {:else}
+            {#each history as entry (entry.name)}
+              <button type="button" class="am-history-row" disabled={historyBusy} on:click={() => restoreHistory(entry)}>
+                <span>{historyTime(entry)}</span>
+                <span class="am-history-count">{$t('automation.rule_history_count', { count: entry.rule_count })}</span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
+      <div class="am-actions">
+        <button class="am-add" on:click={addRule} disabled={!rulesLoaded || rules.length >= MAX_RULES}>
+          <Icon name="plus" size={13} strokeWidth={2.25} /> {$t('automation.add_rule')}
+        </button>
+        <button type="button" class="am-link am-history-toggle" aria-expanded={showHistory} on:click={toggleHistory} disabled={!rulesLoaded}>
+          {$t('automation.restore_previous')}
+        </button>
+      </div>
       </fieldset>
     </div>
   </div>
@@ -624,4 +731,32 @@
   }
   .am-add:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .am-add:disabled { opacity: 0.45; cursor: not-allowed; }
+  .am-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+  .am-actions .am-history-toggle { margin-top: 12px; }
+  .am-link {
+    background: transparent; border: 0; padding: 2px 4px; border-radius: 5px; cursor: pointer;
+    font: 500 12px var(--font-sans); color: var(--accent);
+  }
+  .am-link:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+  .am-link:disabled { opacity: 0.45; cursor: not-allowed; }
+  .am-undo {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
+    margin-top: 8px; padding: 6px 10px; border-radius: 8px;
+    font: 400 12px var(--font-sans); color: var(--text-primary);
+    background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  }
+  .am-history {
+    flex-shrink: 0; max-height: 170px; overflow-y: auto; margin-top: 8px; padding: 6px;
+    border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .am-history-title { font: 600 11px var(--font-sans); color: var(--text-secondary); padding: 2px 4px 4px; }
+  .am-history-empty { font: 400 12px var(--font-sans); color: var(--text-muted); padding: 4px; }
+  .am-history-row {
+    display: flex; justify-content: space-between; gap: 8px; text-align: left;
+    background: transparent; border: 0; border-radius: 6px; padding: 5px 6px; cursor: pointer;
+    font: 400 12px var(--font-sans); color: var(--text-primary);
+  }
+  .am-history-row:hover:not(:disabled) { background: var(--bg-hover); }
+  .am-history-row:disabled { opacity: 0.6; cursor: wait; }
+  .am-history-count { color: var(--text-muted); font-feature-settings: "tnum"; }
 </style>

@@ -136,7 +136,12 @@ export function rulesDiffer(disk, local) {
 // (per_tunnel_rules, _v2 for negated rules, _v3 for SSID lists and
 // connection-type rules); merging in tier order matches the Go reader.
 export function rulesFor(settings, name) {
+  return allRules(settings)[name] || [];
+}
+
+// allRules returns every tunnel's persisted rules as one { tunnel: rules }
+// map, merging the storage tiers the same way rulesFor does.
+export function allRules(settings) {
   const a = settings?.automation || {};
-  const per = { ...(a.per_tunnel_rules || {}), ...(a.per_tunnel_rules_v2 || {}), ...(a.per_tunnel_rules_v3 || {}) };
-  return per[name] || [];
+  return { ...(a.per_tunnel_rules || {}), ...(a.per_tunnel_rules_v2 || {}), ...(a.per_tunnel_rules_v3 || {}) };
 }
