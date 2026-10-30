@@ -172,7 +172,12 @@
     "load_failed": "无法加载设置。请重试。",
     "save_failed": "无法保存或应用更改。请重试。",
     "retry": "重试",
-    "list_width": "隧道列表宽度"
+    "list_width": "隧道列表宽度",
+    "export_diagnostics": "导出诊断信息…",
+    "export_diagnostics_hint": "将日志、已隐去密钥的隧道配置、DNS、路由和防火墙状态保存为 zip 文件，便于提交错误报告。私钥和预共享密钥不会被包含。",
+    "export_diagnostics_busy": "正在导出…",
+    "export_diagnostics_done": "已保存到 {path}",
+    "export_diagnostics_failed": "导出失败"
   },
   "confirm": {
     "delete_title": "删除隧道？",

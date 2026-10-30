@@ -66,6 +66,8 @@ func Run(args []string) int {
 		return cmdDNSLeak(rest)
 	case "routes":
 		return cmdRoutes(rest)
+	case "diag":
+		return cmdDiag(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -111,6 +113,9 @@ Settings & diagnostics:
   wireguide ctl set loglevel <debug|info|warn|error>
   wireguide ctl dnsleak                        check whether DNS leaks outside the tunnel
   wireguide ctl routes                         show the OS routing table
+  wireguide ctl diag bundle [--out path]       write a diagnostics zip (logs, redacted configs,
+                                               DNS/route/firewall state); private keys are never
+                                               included. Default: Desktop or Downloads
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]

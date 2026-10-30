@@ -217,3 +217,23 @@ type RecoveryWarningPayload struct {
 	TunnelName string `json:"tunnel_name"`
 	Detail     string `json:"detail"`
 }
+
+// DiagSnapshotResponse is the result of Diag.Snapshot: root-only state the
+// GUI/CLI cannot read itself. Everything is the output of fixed read-only
+// commands; no client-supplied input reaches an exec.
+type DiagSnapshotResponse struct {
+	// Platform is the helper's GOOS.
+	Platform string `json:"platform,omitempty"`
+	// Rulesets holds the WireGuide firewall objects the helper could list:
+	// pf anchors on macOS, nft tables on Linux, none on Windows.
+	Rulesets []DiagRuleset `json:"rulesets,omitempty"`
+}
+
+// DiagRuleset is one firewall object's loaded rules (or why it could not be read).
+type DiagRuleset struct {
+	// Kind is "pf-anchor" or "nft-table".
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Rules string `json:"rules,omitempty"`
+	Error string `json:"error,omitempty"`
+}

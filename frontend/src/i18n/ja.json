@@ -172,7 +172,12 @@
     "load_failed": "設定を読み込めませんでした。再度お試しください。",
     "save_failed": "変更を保存または適用できませんでした。再度お試しください。",
     "retry": "再試行",
-    "list_width": "トンネル一覧の幅"
+    "list_width": "トンネル一覧の幅",
+    "export_diagnostics": "診断情報を書き出す…",
+    "export_diagnostics_hint": "バグ報告用に、ログ、秘密情報を伏せたトンネル設定、DNS、ルート、ファイアウォールの状態を zip で保存します。秘密鍵と事前共有鍵は含まれません。",
+    "export_diagnostics_busy": "書き出し中…",
+    "export_diagnostics_done": "{path} に保存しました",
+    "export_diagnostics_failed": "書き出しに失敗しました"
   },
   "confirm": {
     "delete_title": "トンネルを削除しますか？",

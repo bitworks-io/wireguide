@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"time"
 
+	"github.com/korjwl1/wireguide/internal/firewall"
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/tunnel"
 	"github.com/korjwl1/wireguide/internal/version"
@@ -37,6 +39,23 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodSetTunnelBackend, h.handleSetTunnelBackend)
 	h.server.Handle(ipc.MethodReportSSID, h.handleReportSSID)
 	h.server.Handle(ipc.MethodAutomationPreview, h.handleAutomationPreview)
+	h.server.Handle(ipc.MethodDiagSnapshot, h.handleDiagSnapshot)
+}
+
+// firewallSnapshot is a seam for tests; production lists the WireGuide pf
+// anchors / nft tables.
+var firewallSnapshot = firewall.Snapshot
+
+// handleDiagSnapshot returns read-only, root-only firewall state for the
+// diagnostics bundle. It ignores its parameters and runs only fixed
+// commands, so nothing a client sends reaches an exec. It takes no helper
+// lock: the commands only read kernel state.
+func (h *Helper) handleDiagSnapshot(_ json.RawMessage) (interface{}, error) {
+	resp := ipc.DiagSnapshotResponse{Platform: runtime.GOOS}
+	for _, r := range firewallSnapshot() {
+		resp.Rulesets = append(resp.Rulesets, ipc.DiagRuleset{Kind: r.Kind, Name: r.Name, Rules: r.Rules, Error: r.Error})
+	}
+	return resp, nil
 }
 
 func (h *Helper) handleSetLogLevel(params json.RawMessage) (interface{}, error) {

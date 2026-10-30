@@ -29,9 +29,12 @@ import (
 // CLI status/disconnect/stop even when no GUI or transport is currently up.
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
+// Minor 6 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
+// for the diagnostics bundle); an older helper answers method-not-found and
+// the bundle records the section as unavailable.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 5
+	ProtocolMinor = 6
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -154,6 +157,10 @@ const (
 	// current Automation rules against the current network context and
 	// returns each tunnel's decision WITHOUT connecting/disconnecting.
 	MethodAutomationPreview = "Automation.Preview"
+	// MethodDiagSnapshot is a read-only dump of root-only firewall state
+	// (the WireGuide pf anchors / nft tables) for the diagnostics bundle. It
+	// takes no parameters, so no client input reaches an exec.
+	MethodDiagSnapshot = "Diag.Snapshot"
 	// MethodRequestQuit asks the helper to bring the WHOLE app down —
 	// this is `wireguide ctl stop`. It is deliberately NOT the same as
 	// MethodShutdown: shutting the helper down while the GUI is still
