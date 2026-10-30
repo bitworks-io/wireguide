@@ -134,3 +134,72 @@ func TestReconcileKeepsSnapshotWhenFirstReadingIsZeroed(t *testing.T) {
 		t.Errorf("got rx/tx %d/%d reason %q, want 9000/4000 user", got.RxBytes, got.TxBytes, got.DisconnectReason)
 	}
 }
+
+// A Connect lists the tunnel at 0/0 (Connecting) before any non-zero
+// reading. A snapshot left by an earlier Disconnect must already be gone by
+// then, or the first lower reading counts as a reset and the stale totals
+// become the base of the new session.
+func TestReconcileDropsStaleSnapshotAcrossZeroedFirstTick(t *testing.T) {
+	s := newHistoryTestService(t)
+	s.markUserDisconnect("a", 9_000, 4_000)
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	rx, tx := rxtx("a", 0, 0)
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	rx, tx = rxtx("a", 100, 50)
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	got := lastSession(t, s)
+	if got.RxBytes != 100 || got.TxBytes != 50 || got.DisconnectReason != "reconnect" {
+		t.Errorf("got rx/tx %d/%d reason %q, want 100/50 reconnect", got.RxBytes, got.TxBytes, got.DisconnectReason)
+	}
+}
+
+// A cold snapshot (status did not list the tunnel) leaves a zeroed "user"
+// entry. It must not label the next session once ticks have passed without
+// the tunnel.
+func TestReconcileDropsColdSnapshotReason(t *testing.T) {
+	s := newHistoryTestService(t)
+	s.markUserDisconnect("a", 0, 0)
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	rx, tx := rxtx("a", 0, 0)
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	rx, tx = rxtx("a", 100, 50)
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	got := lastSession(t, s)
+	if got.DisconnectReason != "reconnect" {
+		t.Errorf("reason %q, want reconnect", got.DisconnectReason)
+	}
+}
+
+// A Disconnect followed by the tunnel vanishing before any session opened
+// records nothing and leaves no cache entry behind.
+func TestReconcileStaleSnapshotRecordsNothingWithoutSession(t *testing.T) {
+	s := newHistoryTestService(t)
+	s.markUserDisconnect("a", 9_000, 4_000)
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	for _, sess := range s.historyStore.GetAll() {
+		if sess.TunnelName == "a" {
+			t.Errorf("unexpected session for a: %+v", sess)
+		}
+	}
+	if _, ok := s.lastKnownStats.Load("a"); ok {
+		t.Error("stale lastKnownStats entry for a was kept")
+	}
+}
+
+// A tunnel closing on this tick keeps its counters for RecordDisconnect.
+func TestReconcileKeepsCountersOfClosingSession(t *testing.T) {
+	s := newHistoryTestService(t)
+	rx, tx := rxtx("a", 700, 300)
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	got := lastSession(t, s)
+	if got.RxBytes != 700 || got.TxBytes != 300 {
+		t.Errorf("rx/tx = %d/%d, want 700/300", got.RxBytes, got.TxBytes)
+	}
+}

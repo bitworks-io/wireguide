@@ -157,9 +157,10 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 			prev, _ = cached.(lastKnownTunnelStats)
 		}
 		// With no open session this is the first reading of a new one, so a
-		// cache entry left by an earlier session (a Disconnect that never
-		// got a session opened) must not be carried into it. A zeroed
-		// reading proves nothing and keeps the entry: it may be the
+		// cache entry still left by an earlier session must not be carried
+		// into it (entries of absent tunnels are dropped below, so this
+		// covers a Disconnect clicked while the tunnel was listed). A
+		// zeroed reading proves nothing and keeps the entry: it may be the
 		// pre-disconnect snapshot of the session about to be opened. The
 		// reason hint survives only if the counters did not go backwards.
 		if _, open := s.activeSessions.Load(name); !open && (rx != 0 || tx != 0) {
@@ -171,6 +172,24 @@ func (s *TunnelService) ReconcileHistoryFromStatus(activeNames []string, rxByTun
 		}
 		s.lastKnownStats.Store(name, prev.merge(rx, tx))
 	}
+
+	// A cache entry with no active tunnel and no open session belongs to no
+	// session: it was left by a Disconnect that never got a session opened,
+	// or by a cold snapshot. Drop it here, before the fast path below, so it
+	// cannot seed (or label "user") a later session whose first reading is
+	// a zeroed Connecting tick. A tunnel closing on this tick is still in
+	// activeSessions, so its counters survive for RecordDisconnect.
+	s.lastKnownStats.Range(func(k, _ any) bool {
+		name, _ := k.(string)
+		if _, isActive := active[name]; isActive {
+			return true
+		}
+		if _, open := s.activeSessions.Load(name); open {
+			return true
+		}
+		s.lastKnownStats.Delete(k)
+		return true
+	})
 
 	// Build a stable signature of the active set and compare to the prior
 	// one. If unchanged, we know there are no new appearances or
