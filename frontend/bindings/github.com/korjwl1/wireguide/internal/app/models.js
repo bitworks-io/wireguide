@@ -793,6 +793,122 @@ export class UpdateState {
 }
 
 /**
+ * VerifyOptions are the optional user-chosen probes of Verify.
+ */
+export class VerifyOptions {
+    /**
+     * Creates a new VerifyOptions instance.
+     * @param {Partial<VerifyOptions>} [$$source = {}] - The source object to create the VerifyOptions.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["ping_host"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["resolve_name"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VerifyOptions instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VerifyOptions}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new VerifyOptions(/** @type {Partial<VerifyOptions>} */($$parsedSource));
+    }
+}
+
+/**
+ * VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+ */
+export class VerifyRow {
+    /**
+     * Creates a new VerifyRow instance.
+     * @param {Partial<VerifyRow>} [$$source = {}] - The source object to create the VerifyRow.
+     */
+    constructor($$source = {}) {
+        if (!("check" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["check"] = "";
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+        if (!("detail" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["detail"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+             * @member
+             * @type {string | undefined}
+             */
+            this["detail_key"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string } | undefined}
+             */
+            this["detail_params"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["hint_key"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new VerifyRow instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {VerifyRow}
+     */
+    static createFrom($$source = {}) {
+        const $$createField4_0 = $$createType5;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("detail_params" in $$parsedSource) {
+            $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
+        }
+        return new VerifyRow(/** @type {Partial<VerifyRow>} */($$parsedSource));
+    }
+}
+
+/**
  * ZipImportResult holds the outcome of importing one .conf entry from a zip.
  */
 export class ZipImportResult {
@@ -836,3 +952,4 @@ const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
 const $$createType3 = DomainCheck.createFrom;
 const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $Create.Map($Create.Any, $Create.Any);

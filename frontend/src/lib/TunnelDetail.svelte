@@ -9,7 +9,8 @@
   import { createEventDispatcher, tick, onDestroy } from 'svelte';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
-  import { parseDnsEntries, dnsModeOf, dnsChip } from './dns-mode.js';
+  import VerifyPanel from './VerifyPanel.svelte';
+  import { parseDnsEntries, dnsModeOf, dnsChip, resolveHint } from './dns-mode.js';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -581,6 +582,13 @@
           </div>
         {/if}
       </div>
+    {/if}
+
+    <!-- VERIFY: manual post-connect checks -->
+    {#if isConnected}
+      {#key $selectedTunnel.name}
+        <VerifyPanel {TunnelService} tunnelName={$selectedTunnel.name} resolveHint={resolveHint(dnsInfo.match)} />
+      {/key}
     {/if}
 
     <!-- NOTES -->

@@ -20,5 +20,7 @@ export {
     SettingsPatch,
     TunnelInfo,
     UpdateState,
+    VerifyOptions,
+    VerifyRow,
     ZipImportResult
 } from "./models.js";

@@ -104,8 +104,8 @@ func evaluateSplitDNSPlans(blocks []scutilResolver, plans []domain.DNSEntries) (
 // nameservers is a configured server of a tunnel claiming that domain.
 // Resolver is the nameserver the system routes the domain to (an expected one
 // when registered, otherwise the first unexpected one, "" when there is none).
-// The leak test's missing-domain list and its per-domain rows both derive
-// from this one function so they cannot disagree. Pure.
+// Verify and the leak test both derive their verdicts from this one function
+// so they cannot disagree. Pure.
 func splitDomainChecks(blocks []scutilResolver, plans []domain.DNSEntries) []DomainCheck {
 	expected := make(map[string]map[string]bool)
 	search := make(map[string]bool)

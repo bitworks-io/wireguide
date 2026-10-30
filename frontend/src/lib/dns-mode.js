@@ -1,6 +1,6 @@
-// Pure helpers for the DNS-mode chips and the DNS leak test's per-domain
-// rows and "Try a name" box. Strings are never built here except through the
-// translator `tr` ($t), so every locale goes through i18n keys.
+// Pure helpers for the DNS-mode chips, the Verify panel and the "Try a name"
+// box. Strings are never built here except through the translator `tr` ($t),
+// so every locale goes through i18n keys.
 
 // Splits an [Interface] DNS= list into servers, search domains and
 // "~domain" split-DNS (routing-only) domains, mirroring domain.ParseDNSEntries.
@@ -35,6 +35,23 @@ export function dnsChip(tr, mode, domains = []) {
     text: tr('tunnel.dns_chip_' + mode, { domains: domains.join(', ') }),
     hint: tr('tunnel.dns_chip_' + mode + '_hint'),
   };
+}
+
+// verifyDetail renders a Verify row's detail: the localised key when the
+// backend supplied one, otherwise its language-neutral text. Resolve rows
+// carry the raw resolver / match_domain; their {via} placeholder is filled
+// with the same localised text as "Try a name" (empty when no resolver).
+export function verifyDetail(tr, row) {
+  if (!row.detail_key) return row.detail;
+  const params = { ...(row.detail_params || {}) };
+  params.via = tryVia(tr, { resolver: params.resolver, match_domain: params.match_domain });
+  return tr('verify.detail_' + row.detail_key, params).trim();
+}
+
+// verifyHint renders a row's hint; green rows never show one.
+export function verifyHint(tr, row) {
+  if (row.status === 'green') return '';
+  return row.hint_key ? tr('verify.hint_' + row.hint_key) : row.hint || '';
 }
 
 // tryVia: "via 10.66.66.1 (~corp.example)" for a ResolveHost result.

@@ -13,8 +13,8 @@ import (
 	"github.com/korjwl1/wireguide/internal/sysexec"
 )
 
-// ProbeTimeout bounds every Resolve probe. It runs on user request and must
-// never hang the caller.
+// ProbeTimeout bounds every Verify / Resolve probe. These run on user
+// request from the GUI or CLI and must never hang the caller.
 const ProbeTimeout = 3 * time.Second
 
 // ResolveResult is the outcome of resolving one name through the system

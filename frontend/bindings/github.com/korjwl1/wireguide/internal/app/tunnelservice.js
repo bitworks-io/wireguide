@@ -746,6 +746,21 @@ export function ValidateConfig(content) {
     }));
 }
 
+/**
+ * Verify runs the manual post-connect checks for a tunnel: handshake, a route
+ * per AllowedIPs, split-DNS resolver registration and, when given in opts, a
+ * ping and a name resolve. Read-only; every probe is bounded by 3 s. The
+ * frontend only calls it on an explicit user click.
+ * @param {string} tunnelName
+ * @param {$models.VerifyOptions} opts
+ * @returns {$CancellablePromise<$models.VerifyRow[]>}
+ */
+export function Verify(tunnelName, opts) {
+    return $Call.ByID(2039407192, tunnelName, opts).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType33($result);
+    }));
+}
+
 // Private type creation functions
 const $$createType0 = diag$0.ConflictInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
@@ -779,3 +794,5 @@ const $$createType28 = $models.ResolveResult.createFrom;
 const $$createType29 = $Create.Nullable($$createType28);
 const $$createType30 = $models.DNSLeakResult.createFrom;
 const $$createType31 = $Create.Nullable($$createType30);
+const $$createType32 = $models.VerifyRow.createFrom;
+const $$createType33 = $Create.Array($$createType32);

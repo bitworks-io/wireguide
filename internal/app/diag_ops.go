@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/ipc"
@@ -25,6 +26,24 @@ type DomainCheck struct {
 	Resolver   string `json:"resolver,omitempty"`
 	Registered bool   `json:"registered"`
 	Search     bool   `json:"search,omitempty"`
+}
+
+// VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+type VerifyRow struct {
+	Check  string `json:"check"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	// DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+	DetailKey    string            `json:"detail_key,omitempty"`
+	DetailParams map[string]string `json:"detail_params,omitempty"`
+	Hint         string            `json:"hint,omitempty"`
+	HintKey      string            `json:"hint_key,omitempty"`
+}
+
+// VerifyOptions are the optional user-chosen probes of Verify.
+type VerifyOptions struct {
+	PingHost    string `json:"ping_host,omitempty"`
+	ResolveName string `json:"resolve_name,omitempty"`
 }
 
 // ResolveResult mirrors diag.ResolveResult.
@@ -125,4 +144,28 @@ func (s *TunnelService) ResolveHost(name string) *ResolveResult {
 		Name: r.Name, Addrs: r.Addrs, Resolver: r.Resolver, MatchDomain: r.MatchDomain,
 		NXDomain: r.NXDomain, TimedOut: r.TimedOut, DurationMs: r.DurationMs, Error: r.Error, ErrorCode: r.ErrorCode,
 	}
+}
+
+// Verify runs the manual post-connect checks for a tunnel: handshake, a route
+// per AllowedIPs, split-DNS resolver registration and, when given in opts, a
+// ping and a name resolve. Read-only; every probe is bounded by 3 s. The
+// frontend only calls it on an explicit user click.
+func (s *TunnelService) Verify(tunnelName string, opts VerifyOptions) ([]VerifyRow, error) {
+	cfg, err := s.tunnelStore.Load(tunnelName)
+	if err != nil {
+		return nil, fmt.Errorf("load tunnel: %w", err)
+	}
+	in := diag.NewVerifyInput(tunnelName, cfg)
+	in.PingHost, in.ResolveName = opts.PingHost, opts.ResolveName
+	st, err := s.GetStatus()
+	if err != nil {
+		return nil, err
+	}
+	in.ApplyStatus(*st)
+	res := diag.Verify(context.Background(), in)
+	out := make([]VerifyRow, 0, len(res))
+	for _, r := range res {
+		out = append(out, VerifyRow(r))
+	}
+	return out, nil
 }
