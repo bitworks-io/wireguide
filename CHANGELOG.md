@@ -6,6 +6,7 @@ All notable changes to WireGuide will be documented in this file.
 
 ### Added
 - **Inline DNS diagnostics in the config editor** - the editor flags invalid or risky `DNS =` lines as you type (global DNS outside the tunnel's routes, `.local` split domains, split DNS on Windows or without systemd-resolved, missing reverse zones, LAN-only routes with no DNS) with one-click fixes, hover help on the `DNS` key and `~domain` entries, and `DNS =` value completion (gateway and reverse zones derived from AllowedIPs, split-DNS template). Diagnostics never block saving. New-tunnel templates show both DNS modes as commented lines.
+- **Shared interface Address warning** - importing or saving a tunnel whose interface `Address` is also used by another saved tunnel now shows a non-blocking warning (also in the editor and in the zip import result). Connecting a tunnel whose Address matches a currently connected tunnel shows it in the conflict dialog, with a "Disconnect X and Connect" shortcut. Nothing is disconnected automatically.
 
 ### Changed
 - The DNS protection setting hint now notes that tunnels using split DNS or no DNS keep system DNS and are not affected.

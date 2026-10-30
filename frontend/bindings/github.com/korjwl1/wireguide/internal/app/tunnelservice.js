@@ -417,7 +417,8 @@ export function ImportZipData(data) {
  * LintConfigFor returns advisory (non-blocking) editor diagnostics for a raw
  * config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
  * editing is the saved tunnel name being edited ("" for a new tunnel); it is
- * reserved for cross-tunnel checks. It never affects whether a config is
+ * excluded from the cross-tunnel duplicate-Address check so an edit never
+ * "conflicts" with its own saved copy. It never affects whether a config is
  * valid. Content that does not parse yields no diagnostics (ValidateConfig
  * reports the parse error).
  * @param {string} editing
