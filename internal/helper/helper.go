@@ -146,6 +146,11 @@ type Helper struct {
 	dnsRetryAt    time.Time
 	dnsRetryDelay time.Duration
 	dnsSuspended  bool
+	// fwView mirrors the reconcile outcomes and the suspension for
+	// Firewall.Status and the status DTO, which must never wait on dnsMu or
+	// connectMu (both are held across pfctl calls of up to 15 s). Guarded by
+	// mu; see firewall_status.go.
+	fwView fwStatusView
 
 	// shutdownTimer is a singleton grace-window timer. When the control
 	// connection drops we Reset it; when the GUI reconnects we Stop it. This

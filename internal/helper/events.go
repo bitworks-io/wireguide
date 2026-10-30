@@ -136,6 +136,7 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 			result.Tunnels = append(result.Tunnels, sub)
 		}
 	}
+	h.decorateDNSStatus(&result)
 	return result
 }
 

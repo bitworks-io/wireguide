@@ -25,6 +25,7 @@ func (h *Helper) suspendFirewall() error {
 	h.dnsApplied = ""
 	h.dnsMu.Unlock()
 	h.ksApplied = ""
+	h.setFirewallSuspendedView(true)
 
 	// A failed suspend owns no level: roll back through the same retryable
 	// wanted-state reconciliation the normal resume uses. The defer also
@@ -56,6 +57,7 @@ func (h *Helper) cancelFailedFirewallSuspend() {
 	h.dnsMu.Lock()
 	h.dnsSuspended = false
 	h.dnsMu.Unlock()
+	h.setFirewallSuspendedView(false)
 	if err := h.reconcileKillSwitch(true, time.Now()); err != nil {
 		slog.Error("failed suspend: kill-switch rollback pending", "error", err)
 	}
@@ -79,6 +81,7 @@ func (h *Helper) resumeFirewall() error {
 	h.dnsSuspended = false
 	h.dnsApplied = ""
 	h.dnsMu.Unlock()
+	h.setFirewallSuspendedView(false)
 	ksErr := h.reconcileKillSwitch(true, time.Now())
 	dnsErr := h.reapplyDNSProtection()
 	return errors.Join(ksErr, dnsErr)

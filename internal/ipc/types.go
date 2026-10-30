@@ -166,6 +166,47 @@ type ForcedDisconnectPayload struct {
 type CriticalErrorPayload struct {
 	Where  string `json:"where"`
 	Detail string `json:"detail"`
+	// Code, when set, names a known condition the GUI words itself
+	// ("dns_protection_failing"); Detail stays the untranslated fallback.
+	Code string `json:"code,omitempty"`
+}
+
+// CriticalCodeDNSProtectionFailing: DNS protection is wanted but its rules
+// keep failing to apply past the reconcile backoff.
+const CriticalCodeDNSProtectionFailing = "dns_protection_failing"
+
+// FirewallPermit is one resolver the DNS rules let through. Interface is ""
+// for "any interface" (normal routing). Tunnel names the connected tunnel the
+// resolver belongs to ("" when none matches).
+type FirewallPermit struct {
+	Interface string `json:"interface"`
+	Server    string `json:"server"`
+	Tunnel    string `json:"tunnel,omitempty"`
+}
+
+// FirewallStatusResponse is the read-only result of Firewall.Status.
+type FirewallStatusResponse struct {
+	// DNSProtectionWanted is the user's DNS protection setting.
+	DNSProtectionWanted bool `json:"dns_protection_wanted"`
+	// DNSProtectionActive is read back from pf on macOS (Source "pf"); on
+	// other platforms, or when the read-back failed, it is the helper's view
+	// of its last successful apply (Source "cached").
+	DNSProtectionActive bool             `json:"dns_protection_active"`
+	Source              string           `json:"source"`
+	Permits             []FirewallPermit `json:"permits"`
+	KillSwitchWanted    bool             `json:"kill_switch_wanted"`
+	KillSwitchActive    bool             `json:"kill_switch_active"`
+	// Suspended is true while a reconnect has the rules lifted on purpose;
+	// the resume reapplies them.
+	Suspended bool `json:"suspended"`
+	// LastReconcileError is the most recent failed apply (DNS or kill
+	// switch); DNSReconcileError only the DNS protection step's.
+	LastReconcileError string `json:"last_reconcile_error,omitempty"`
+	DNSReconcileError  string `json:"dns_reconcile_error,omitempty"`
+	LastReconcileAt    string `json:"last_reconcile_at,omitempty"` // RFC3339
+	// ReconcileFailures counts consecutive failed applies (DNS + kill switch).
+	ReconcileFailures int    `json:"reconcile_failures,omitempty"`
+	ReadBackError     string `json:"read_back_error,omitempty"`
 }
 
 // SettingsChangedPayload carries a single applied setting so a running

@@ -9,6 +9,9 @@ import { Create as $Create } from "@wailsio/runtime";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as domain$0 from "../domain/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as ipc$0 from "../ipc/models.js";
 
 /**
  * ConnectionStatus is re-exported from the domain package so Wails bindings
@@ -258,6 +261,51 @@ export class DomainCheck {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new DomainCheck(/** @type {Partial<DomainCheck>} */($$parsedSource));
+    }
+}
+
+/**
+ * FirewallStatus wraps Firewall.Status for the Settings DNS Protection line.
+ * Available is false when the helper could not answer — including an older
+ * helper without the method — which the GUI shows as "unknown" (nothing),
+ * never as "not applied".
+ */
+export class FirewallStatus {
+    /**
+     * Creates a new FirewallStatus instance.
+     * @param {Partial<FirewallStatus>} [$$source = {}] - The source object to create the FirewallStatus.
+     */
+    constructor($$source = {}) {
+        if (!("available" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["available"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {ipc$0.FirewallStatusResponse | null | undefined}
+             */
+            this["status"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FirewallStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {FirewallStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType6;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("status" in $$parsedSource) {
+            $$parsedSource["status"] = $$createField1_0($$parsedSource["status"]);
+        }
+        return new FirewallStatus(/** @type {Partial<FirewallStatus>} */($$parsedSource));
     }
 }
 
@@ -899,7 +947,7 @@ export class VerifyRow {
      * @returns {VerifyRow}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType5;
+        const $$createField4_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("detail_params" in $$parsedSource) {
             $$parsedSource["detail_params"] = $$createField4_0($$parsedSource["detail_params"]);
@@ -952,4 +1000,6 @@ const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $Create.Array($Create.Any);
 const $$createType3 = DomainCheck.createFrom;
 const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = $Create.Map($Create.Any, $Create.Any);
+const $$createType5 = ipc$0.FirewallStatusResponse.createFrom;
+const $$createType6 = $Create.Nullable($$createType5);
+const $$createType7 = $Create.Map($Create.Any, $Create.Any);

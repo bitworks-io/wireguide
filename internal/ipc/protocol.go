@@ -29,9 +29,13 @@ import (
 // CLI status/disconnect/stop even when no GUI or transport is currently up.
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
+// Minor 6 adds the read-only Firewall.Status method, the per-tunnel
+// dns_mode / dns_servers / dns_protected status fields and
+// CriticalErrorPayload.Code. An older helper answers Firewall.Status with
+// method-not-found and omits the fields, which the GUI reports as unknown.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 5
+	ProtocolMinor = 6
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -146,6 +150,9 @@ const (
 	MethodDelete           = "Tunnel.Delete"
 	MethodSetKillSwitch    = "Firewall.SetKillSwitch"
 	MethodSetDNSProtection = "Firewall.SetDNSProtection"
+	// MethodFirewallStatus is read-only: the wanted vs actually loaded DNS
+	// protection and kill-switch state (read back from pf on macOS).
+	MethodFirewallStatus   = "Firewall.Status"
 	MethodSetHealthCheck   = "Monitor.SetHealthCheck"
 	MethodSetPinInterface  = "Network.SetPinInterface"
 	MethodSetTunnelBackend = "Network.SetTunnelBackend"

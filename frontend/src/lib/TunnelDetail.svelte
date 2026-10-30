@@ -6,11 +6,27 @@
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
   import { createFieldWriter } from './field-writer.js';
-  import { createEventDispatcher, tick, onDestroy } from 'svelte';
+  import { createEventDispatcher, tick, onDestroy, onMount } from 'svelte';
+  import { Events } from '@wailsio/runtime';
+  import { createEventScope } from './event-scope.js';
+  import { protectionState } from './dns-protection.js';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
   import VerifyPanel from './VerifyPanel.svelte';
   import { parseDnsEntries, dnsModeOf, dnsChip, resolveHint } from './dns-mode.js';
+
+  // Whether the user turned DNS protection on. With the helper's live
+  // per-tunnel dns_protected flag it decides the protection chip.
+  let dnsWanted = false;
+  const detailEvents = createEventScope((...args) => Events.On(...args));
+  onMount(() => {
+    TunnelService.GetSettings().then((s) => { dnsWanted = !!s?.dns_protection; }).catch(() => {});
+    detailEvents.on('settings_changed', (event) => {
+      const p = event?.data || {};
+      if (p.dns_protection != null) dnsWanted = p.dns_protection;
+    });
+  });
+  onDestroy(() => detailEvents.dispose());
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -211,6 +227,7 @@
   $: isConnected = state === 'connected';
   $: isConnecting = state === 'connecting' || state === 'disconnecting';
   $: status = tunnelStatus($connectionStatus, $selectedTunnel?.name) || { state: 'disconnected' };
+  $: protState = isConnected ? protectionState(status, dnsWanted) : '';
   $: noHandshake = isConnected && !status.last_handshake;
 
   let detailGeneration = 0;
@@ -439,6 +456,12 @@
         {#if dnsChipInfo}
           <div class="hero-dns-line">
             <span class="dns-chip dns-chip-{dnsChipInfo.mode}" title={dnsChipInfo.hint}>{dnsChipInfo.text}</span>
+            {#if protState}
+              <span class="dns-chip dns-chip-prot-{protState}"
+                title={$t(protState === 'protected' ? 'tunnel.dns_protected_hint' : 'tunnel.dns_intended_hint')}>
+                {$t(protState === 'protected' ? 'tunnel.dns_protected' : 'tunnel.dns_intended')}
+              </span>
+            {/if}
           </div>
         {/if}
       </div>
@@ -884,6 +907,8 @@
     vertical-align: top;
   }
   .dns-chip-split { color: var(--blue, var(--accent)); }
+  .dns-chip-prot-protected { color: var(--green); }
+  .dns-chip-prot-intended { color: var(--orange, #FF9500); }
   .hero-endpoint {
     color: var(--text-secondary);
     font-family: var(--font-mono);

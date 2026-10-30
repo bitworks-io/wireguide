@@ -101,7 +101,11 @@
     "dns_chip_search": "DNS: 検索ドメインのみ",
     "dns_chip_global_hint": "接続中はトンネルのDNSサーバがシステムDNSを置き換えるため、すべての名前解決がトンネルのDNSに送られます。",
     "dns_chip_split_hint": "これらのドメインだけがトンネルのDNSサーバに送られます。それ以外は引き続きシステムDNSが応答します。",
-    "dns_chip_search_hint": "この設定は検索ドメインのみを指定し、DNSサーバは指定しません。システムのDNSサーバは維持されますが、接続中はシステムの検索ドメインが変更されます。"
+    "dns_chip_search_hint": "この設定は検索ドメインのみを指定し、DNSサーバは指定しません。システムのDNSサーバは維持されますが、接続中はシステムの検索ドメインが変更されます。",
+    "dns_protected": "DNS保護中",
+    "dns_protected_hint": "DNS保護が有効です: このトンネルのリゾルバ以外へのDNSはブロックされます。",
+    "dns_intended": "DNS保護: 有効だが未適用",
+    "dns_intended_hint": "DNS保護はオンですが、現在ファイアウォールはこのトンネルのDNSを固定していません。設定 > 詳細を確認してください。"
   },
   "import": {
     "zip_result_title": "インポート結果",
@@ -173,7 +177,15 @@
     "load_failed": "設定を読み込めませんでした。再度お試しください。",
     "save_failed": "変更を保存または適用できませんでした。再度お試しください。",
     "retry": "再試行",
-    "list_width": "トンネル一覧の幅"
+    "list_width": "トンネル一覧の幅",
+    "dns_protection_allowing": "現在許可中: {list}",
+    "dns_protection_blocking": "有効: ローカルリゾルバ以外のDNSはすべてブロックされます。",
+    "dns_protection_inactive": "未適用 — スプリットDNSまたはDNSなし",
+    "dns_protection_idle": "オンです。DNSサーバーを持つトンネルが接続されると適用されます。",
+    "dns_protection_suspended": "トンネル再接続中は一時停止しています。",
+    "dns_protection_error": "DNS保護を適用できませんでした: {error}",
+    "dns_permit_any": "{who}（すべてのインターフェース）",
+    "dns_permit_iface": "{who}（{iface}）"
   },
   "confirm": {
     "delete_title": "トンネルを削除しますか？",
@@ -359,5 +371,11 @@
     "hint_route_unmanaged": "Tableが設定されているため、WireGuideはメインテーブルにルートを追加しません。手動で追加してください。",
     "hint_resolver_mismatch": "このドメインには別のリゾルバが登録されています。それを所有するトンネルまたはアプリを切断してください。",
     "detail_resolver_mismatch": "{domain} -> {resolver}: このトンネルのDNSサーバではありません"
+  },
+  "critical": {
+    "dns_protection_failing_title": "DNS保護が適用されていません",
+    "dns_protection_failing_where": "DNS保護",
+    "dns_protection_failing": "DNS保護はオンですが、ファイアウォールルールの適用が失敗し続けているため、DNSがトンネルに固定されていない可能性があります。",
+    "dns_protection_failing_hint": "WireGuideは再試行を続けます。設定 > 詳細で現在の状態と最後のエラーを確認できます。"
   }
 }

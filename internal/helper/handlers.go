@@ -32,6 +32,7 @@ func (h *Helper) registerHandlers() {
 	h.server.Handle(ipc.MethodDelete, h.handleDelete)
 	h.server.Handle(ipc.MethodSetKillSwitch, h.handleSetKillSwitch)
 	h.server.Handle(ipc.MethodSetDNSProtection, h.handleSetDNSProtection)
+	h.server.Handle(ipc.MethodFirewallStatus, h.handleFirewallStatus)
 	h.server.Handle(ipc.MethodSetHealthCheck, h.handleSetHealthCheck)
 	h.server.Handle(ipc.MethodSetPinInterface, h.handleSetPinInterface)
 	h.server.Handle(ipc.MethodSetTunnelBackend, h.handleSetTunnelBackend)
