@@ -153,6 +153,32 @@ type AutomationSkippedPayload struct {
 	Reason     string `json:"reason"`
 }
 
+// Automation actions carried by AutomationEventPayload.Action.
+const (
+	AutomationActionConnect        = "connect"
+	AutomationActionDisconnect     = "disconnect"
+	AutomationActionHeld           = "held"
+	AutomationActionLatched        = "latched"
+	AutomationActionSkippedOverlap = "skipped_overlap"
+)
+
+// AutomationEventPayload is broadcast as EventAutomation (protocol minor
+// >= 6). RuleIndex is the deciding rule's position in the tunnel's rule
+// list, -1 when no single rule applies (a manual latch). RuleText is an
+// English description of that rule ("SSID is not Home"); GUIs localise
+// from the rule itself when they can. Error is set when an executed
+// connect/disconnect failed. At is RFC3339 (UTC).
+type AutomationEventPayload struct {
+	Tunnel    string `json:"tunnel"`
+	Action    string `json:"action"`
+	RuleIndex int    `json:"rule_index"`
+	RuleText  string `json:"rule_text"`
+	SSID      string `json:"ssid"`
+	Settled   bool   `json:"settled"`
+	Error     string `json:"error,omitempty"`
+	At        string `json:"at"`
+}
+
 // ForcedDisconnectPayload names a tunnel the helper tore down on its own
 // and why (EventForcedDisconnect).
 type ForcedDisconnectPayload struct {

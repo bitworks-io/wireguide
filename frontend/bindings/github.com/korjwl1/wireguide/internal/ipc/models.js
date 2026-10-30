@@ -7,171 +7,87 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
- * FirewallPermit is one resolver the DNS rules let through. Interface is ""
- * for "any interface" (normal routing). Tunnel names the connected tunnel the
- * resolver belongs to ("" when none matches).
+ * AutomationEventPayload is broadcast as EventAutomation (protocol minor
+ * >= 6). RuleIndex is the deciding rule's position in the tunnel's rule
+ * list, -1 when no single rule applies (a manual latch). RuleText is an
+ * English description of that rule ("SSID is not Home"); GUIs localise
+ * from the rule itself when they can. Error is set when an executed
+ * connect/disconnect failed. At is RFC3339 (UTC).
  */
-export class FirewallPermit {
+export class AutomationEventPayload {
     /**
-     * Creates a new FirewallPermit instance.
-     * @param {Partial<FirewallPermit>} [$$source = {}] - The source object to create the FirewallPermit.
+     * Creates a new AutomationEventPayload instance.
+     * @param {Partial<AutomationEventPayload>} [$$source = {}] - The source object to create the AutomationEventPayload.
      */
     constructor($$source = {}) {
-        if (!("interface" in $$source)) {
+        if (!("tunnel" in $$source)) {
             /**
              * @member
              * @type {string}
              */
-            this["interface"] = "";
+            this["tunnel"] = "";
         }
-        if (!("server" in $$source)) {
+        if (!("action" in $$source)) {
             /**
              * @member
              * @type {string}
              */
-            this["server"] = "";
+            this["action"] = "";
+        }
+        if (!("rule_index" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["rule_index"] = 0;
+        }
+        if (!("rule_text" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["rule_text"] = "";
+        }
+        if (!("ssid" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["ssid"] = "";
+        }
+        if (!("settled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["settled"] = false;
         }
         if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {string | undefined}
              */
-            this["tunnel"] = undefined;
+            this["error"] = undefined;
+        }
+        if (!("at" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["at"] = "";
         }
 
         Object.assign(this, $$source);
     }
 
     /**
-     * Creates a new FirewallPermit instance from a string or object.
+     * Creates a new AutomationEventPayload instance from a string or object.
      * @param {any} [$$source = {}]
-     * @returns {FirewallPermit}
+     * @returns {AutomationEventPayload}
      */
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new FirewallPermit(/** @type {Partial<FirewallPermit>} */($$parsedSource));
-    }
-}
-
-/**
- * FirewallStatusResponse is the read-only result of Firewall.Status.
- */
-export class FirewallStatusResponse {
-    /**
-     * Creates a new FirewallStatusResponse instance.
-     * @param {Partial<FirewallStatusResponse>} [$$source = {}] - The source object to create the FirewallStatusResponse.
-     */
-    constructor($$source = {}) {
-        if (!("dns_protection_wanted" in $$source)) {
-            /**
-             * DNSProtectionWanted is the user's DNS protection setting.
-             * @member
-             * @type {boolean}
-             */
-            this["dns_protection_wanted"] = false;
-        }
-        if (!("dns_protection_active" in $$source)) {
-            /**
-             * DNSProtectionActive is read back from pf on macOS (Source "pf"); on
-             * other platforms, or when the read-back failed, it is the helper's view
-             * of its last successful apply (Source "cached").
-             * @member
-             * @type {boolean}
-             */
-            this["dns_protection_active"] = false;
-        }
-        if (!("source" in $$source)) {
-            /**
-             * @member
-             * @type {string}
-             */
-            this["source"] = "";
-        }
-        if (!("permits" in $$source)) {
-            /**
-             * @member
-             * @type {FirewallPermit[]}
-             */
-            this["permits"] = [];
-        }
-        if (!("kill_switch_wanted" in $$source)) {
-            /**
-             * @member
-             * @type {boolean}
-             */
-            this["kill_switch_wanted"] = false;
-        }
-        if (!("kill_switch_active" in $$source)) {
-            /**
-             * @member
-             * @type {boolean}
-             */
-            this["kill_switch_active"] = false;
-        }
-        if (!("suspended" in $$source)) {
-            /**
-             * Suspended is true while a reconnect has the rules lifted on purpose;
-             * the resume reapplies them.
-             * @member
-             * @type {boolean}
-             */
-            this["suspended"] = false;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * LastReconcileError is the most recent failed apply (DNS or kill
-             * switch); DNSReconcileError only the DNS protection step's.
-             * @member
-             * @type {string | undefined}
-             */
-            this["last_reconcile_error"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["dns_reconcile_error"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * RFC3339
-             * @member
-             * @type {string | undefined}
-             */
-            this["last_reconcile_at"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * ReconcileFailures counts consecutive failed applies (DNS + kill switch).
-             * @member
-             * @type {number | undefined}
-             */
-            this["reconcile_failures"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
-             * @member
-             * @type {string | undefined}
-             */
-            this["read_back_error"] = undefined;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new FirewallStatusResponse instance from a string or object.
-     * @param {any} [$$source = {}]
-     * @returns {FirewallStatusResponse}
-     */
-    static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType1;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("permits" in $$parsedSource) {
-            $$parsedSource["permits"] = $$createField3_0($$parsedSource["permits"]);
-        }
-        return new FirewallStatusResponse(/** @type {Partial<FirewallStatusResponse>} */($$parsedSource));
+        return new AutomationEventPayload(/** @type {Partial<AutomationEventPayload>} */($$parsedSource));
     }
 }
 
@@ -338,7 +254,3 @@ export class SettingsChangedPayload {
         return new SettingsChangedPayload(/** @type {Partial<SettingsChangedPayload>} */($$parsedSource));
     }
 }
-
-// Private type creation functions
-const $$createType0 = FirewallPermit.createFrom;
-const $$createType1 = $Create.Array($$createType0);

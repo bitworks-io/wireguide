@@ -82,6 +82,9 @@ func (h *Helper) handleRename(params json.RawMessage) (interface{}, error) {
 		h.latencyByTunnel[req.NewName] = lat
 	}
 	h.latencyMu.Unlock()
+	// The last automation decision and rules digest follow the tunnel too
+	// (autoEvMu is a leaf lock, fine under connectMu).
+	h.renameAutomationState(req.OldName, req.NewName)
 
 	// Keep the desired-state key in sync (issue #44). Active tunnels can't
 	// be renamed, but a pending (restore-failed) one can.
@@ -138,5 +141,6 @@ func (h *Helper) handleDelete(params json.RawMessage) (interface{}, error) {
 	h.latencyMu.Lock()
 	delete(h.latencyByTunnel, req.TunnelName)
 	h.latencyMu.Unlock()
+	h.dropAutomationState(req.TunnelName)
 	return ipc.Empty{}, nil
 }

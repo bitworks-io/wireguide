@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/korjwl1/wireguide/internal/automation"
 	"github.com/korjwl1/wireguide/internal/domain"
 	"github.com/korjwl1/wireguide/internal/tunnel"
 )
@@ -80,7 +81,7 @@ func TestForcedDisconnectBlocksAutomationAfterRestart(t *testing.T) {
 	}
 	// A blocked automationConnect must return before it reaches the Manager.
 	restarted.manager = nil
-	restarted.automationConnect("vpn1", "ssid-change", "test")
+	restarted.automationConnect("vpn1", "ssid-change", automation.NetworkContext{SSID: "test"}, nil, -1)
 
 	// Manual Connect acknowledges the trip and allows future automation.
 	restarted.activeCfgs["vpn1"] = &domain.WireGuardConfig{Name: "vpn1"}

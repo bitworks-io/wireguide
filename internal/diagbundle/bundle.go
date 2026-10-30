@@ -487,7 +487,7 @@ func (b *builder) addHelperSnapshot() {
 	var snap ipc.DiagSnapshotResponse
 	if err := b.src.Helper.Call(ipc.MethodDiagSnapshot, nil, &snap); err != nil {
 		b.note("%s: unavailable (%v)", file, err)
-		b.add(file, []byte(fmt.Sprintf("unavailable: %v\n(a helper older than IPC 1.6 has no Diag.Snapshot)\n", err)))
+		b.add(file, []byte(fmt.Sprintf("unavailable: %v\n(a helper older than IPC 1.8 has no Diag.Snapshot)\n", err)))
 		return
 	}
 	var sb strings.Builder

@@ -211,6 +211,21 @@ type Helper struct {
 	previewDriftLast time.Time
 	previewDriftNow  func() time.Time
 
+	// lastAutoEvent is the (action, rule) last recorded per tunnel for
+	// event.automation, so held/latched states are reported only when they
+	// change; rulesHash is a digest of each tunnel's rules at the last
+	// evaluation, for the change-only "rules loaded" log. Both guarded by
+	// autoEvMu, a leaf lock (taken under connectMu by rename/delete, never
+	// held while taking another lock or broadcasting).
+	autoEvMu      sync.Mutex
+	lastAutoEvent map[string]autoDecision
+	rulesHash     map[string]string
+	// emitAutomationFn replaces the broadcast of automation events, and
+	// automationActiveFn the active-tunnel list automation evaluates
+	// against (tests only).
+	emitAutomationFn   func(ipc.AutomationEventPayload)
+	automationActiveFn func() []string
+
 	// settle tracks how long the network fingerprint has been stable so
 	// negated rules can wait out roam blips; settleTimer re-triggers a
 	// held evaluation when the window elapses. Both guarded by settleMu.
