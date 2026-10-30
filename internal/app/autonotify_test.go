@@ -33,6 +33,7 @@ func TestShouldNotify(t *testing.T) {
 		{"auto_connected always", true, NotifyEvent{NotifyAutoConnected, "a"}, true},
 		{"critical", true, NotifyEvent{NotifyCriticalError, ""}, true},
 		{"forced disconnect", true, NotifyEvent{NotifyForcedDisconnect, "a"}, true},
+		{"automation disconnect", true, NotifyEvent{NotifyAutoDisconnected, "a"}, true},
 		{"toggle off", false, NotifyEvent{NotifyCriticalError, ""}, false},
 		{"toggle off auto", false, NotifyEvent{NotifyTunnelUp, "b"}, false},
 	}

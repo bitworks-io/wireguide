@@ -231,6 +231,7 @@ func TestNilNotifierSafe(t *testing.T) {
 	n.onAutoConnected("a")
 	n.onForcedDisconnect("a")
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "a"})
+	n.onAutomationEvent(ipc.AutomationEventPayload{Tunnel: "a", Action: ipc.AutomationActionConnect})
 	n.reset()
 	n.stop()
 }

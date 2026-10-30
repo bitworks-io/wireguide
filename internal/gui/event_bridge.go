@@ -181,6 +181,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			slog.Debug("event bridge: unmarshal automation failed", "error", err)
 		} else {
 			b.app.Event.Emit("automation_event", payload)
+			b.notify.onAutomationEvent(payload)
 		}
 	case ipc.EventForcedDisconnect:
 		// The helper tore a tunnel down on its own (loop watchdog, issue
