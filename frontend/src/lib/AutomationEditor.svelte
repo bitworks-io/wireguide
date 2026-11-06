@@ -179,6 +179,9 @@
       // reported as an outside edit.
       noteOwnSave(name, (await TunnelService.AutomationHistoryRules(entry.name, name)) || []);
       await TunnelService.RestoreAutomationHistory(entry.name, name);
+      // A restore can add or remove every rule; re-read the verdict so the
+      // poller switches cadence now, as after a normal save.
+      refreshAutomationPreview();
       clearUndo();
       showHistory = false;
       loadedFor = ''; // re-run the reactive load for this tunnel
@@ -370,6 +373,9 @@
       // reported as a change made outside the app.
       noteOwnSave(snap.name, snap.rules);
       await TunnelService.SaveAutomationRules(snap.name, snap.rules);
+      // Re-read the verdict now: adding the first rule moves the poller to
+      // its fast cadence, and removing the last one back to the slow one.
+      refreshAutomationPreview();
     } catch (e) {
       TunnelService.GetSettings().then(setRulesBaseline).catch(() => {});
       saveError = errText(e);
