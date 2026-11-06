@@ -24,7 +24,19 @@ func findGlobalOutside(ds []Diagnostic) *Diagnostic {
 	if d := find(ds, "dns_global_outside"); d != nil {
 		return d
 	}
+	if d := find(ds, "dns_global_outside_windows"); d != nil {
+		return d
+	}
 	return find(ds, "dns_global_outside_adapter")
+}
+
+// setLintGOOS pins the platform the linter reasons about for one test, so
+// results do not depend on the OS running the tests.
+func setLintGOOS(t *testing.T, goos string) {
+	t.Helper()
+	old := lintGOOS
+	lintGOOS = goos
+	t.Cleanup(func() { lintGOOS = old })
 }
 
 func find(ds []Diagnostic, code string) *Diagnostic {
@@ -86,6 +98,10 @@ func TestLintGlobalDNSOutsideAllowedIPs(t *testing.T) {
 		t.Errorf("darwin diagnostic: %+v", g)
 	}
 	lintGOOS = "windows"
+	if g := findGlobalOutside(Lint(cfg, nil)); g.Code != "dns_global_outside_windows" || strings.Contains(g.Message, "network service") || strings.Contains(g.Message, "~") {
+		t.Errorf("windows diagnostic: %+v", g)
+	}
+	lintGOOS = "linux"
 	if g := findGlobalOutside(Lint(cfg, nil)); g.Code != "dns_global_outside_adapter" || strings.Contains(g.Message, "network service") {
 		t.Errorf("non-darwin diagnostic: %+v", g)
 	}
@@ -105,6 +121,7 @@ func TestLintGlobalDNSOutsideAllowedIPs(t *testing.T) {
 }
 
 func TestLintMDNSAndWindows(t *testing.T) {
+	setLintGOOS(t, "darwin")
 	cfg := lintCfg(t, "DNS = 192.168.1.1, ~foo.local\nMTU = 1380", "192.168.1.0/24")
 	if find(Lint(cfg, nil), "dns_mdns") == nil {
 		t.Error("missing mdns warning")
@@ -153,6 +170,7 @@ func TestLintMTU(t *testing.T) {
 }
 
 func TestLintLANOnlyNoDNS(t *testing.T) {
+	setLintGOOS(t, "darwin")
 	d := find(Lint(lintCfg(t, "MTU = 1380", "192.168.1.0/24"), nil), "dns_lan_none")
 	if d == nil || d.Severity != SeverityInfo || d.Args["gateway"] != "192.168.1.1" {
 		t.Fatalf("expected LAN info with gateway, got %+v", d)
@@ -169,6 +187,7 @@ func TestLintLANOnlyNoDNS(t *testing.T) {
 }
 
 func TestLintReverseZoneFix(t *testing.T) {
+	setLintGOOS(t, "darwin")
 	cfg := lintCfg(t, "DNS = 192.168.1.1, ~corp.lan\nMTU = 1380", "192.168.1.0/24, 10.5.0.9/32")
 	d := find(Lint(cfg, nil), "dns_no_reverse")
 	if d == nil || d.Fix == nil || d.Fix.Action != FixAppendDNS {
@@ -335,5 +354,58 @@ func TestSharedAddresses(t *testing.T) {
 	}
 	if got := SharedAddresses(nil, []string{"10.0.0.2/24"}); len(got) != 0 {
 		t.Errorf("unexpected %v", got)
+	}
+}
+
+// TestLintWindowsNeverSuggestsSplitDNS: split DNS fails the connect on
+// Windows, so no Windows diagnostic may recommend a ~domain entry.
+func TestLintWindowsNeverSuggestsSplitDNS(t *testing.T) {
+	old := lintGOOS
+	defer func() { lintGOOS = old }()
+	none := lintCfg(t, "MTU = 1380", "192.168.50.0/24")
+	outside := lintCfg(t, "DNS = 1.1.1.1\nMTU = 1380", "192.168.50.0/24")
+	split := lintCfg(t, "DNS = 192.168.50.1, ~corp.example\nMTU = 1380", "192.168.50.0/24")
+	mdns := lintCfg(t, "DNS = 192.168.50.1, ~office.local\nMTU = 1380", "192.168.50.0/24")
+
+	lintGOOS = "windows"
+	d := find(Lint(none, nil), "dns_lan_none_windows")
+	if d == nil || d.Severity != SeverityInfo || d.Args["gateway"] != "192.168.50.1" {
+		t.Fatalf("expected windows LAN info, got %+v", Lint(none, nil))
+	}
+	if find(Lint(none, nil), "dns_lan_none") != nil {
+		t.Error("split-DNS advice dns_lan_none on windows")
+	}
+	g := find(Lint(outside, nil), "dns_global_outside_windows")
+	if g == nil || g.Fix == nil || g.Fix.Action != FixRemoveDNS {
+		t.Fatalf("expected windows global-outside warning, got %+v", Lint(outside, nil))
+	}
+	var ds []Diagnostic
+	for _, c := range []*WireGuardConfig{none, outside, split, mdns} {
+		ds = append(ds, Lint(c, nil)...)
+	}
+	for _, d := range ds {
+		if strings.Contains(d.Message, "~") && d.Code != "dns_split_windows" {
+			t.Errorf("windows diagnostic suggests split DNS: %+v", d)
+		}
+		if d.Fix != nil && d.Fix.Action == FixAppendDNS {
+			t.Errorf("windows diagnostic offers to add ~ entries: %+v", d)
+		}
+	}
+	if find(Lint(split, nil), "dns_split_windows") == nil {
+		t.Error("missing windows split warning")
+	}
+
+	for _, goos := range []string{"darwin", "linux"} {
+		lintGOOS = goos
+		d := find(Lint(none, nil), "dns_lan_none")
+		if d == nil || !strings.Contains(d.Message, "~<domain>") {
+			t.Errorf("%s: expected split-DNS advice, got %+v", goos, Lint(none, nil))
+		}
+		if find(Lint(none, nil), "dns_lan_none_windows") != nil {
+			t.Errorf("%s: windows advice", goos)
+		}
+		if find(Lint(split, nil), "dns_no_reverse") == nil {
+			t.Errorf("%s: missing reverse-zone fix", goos)
+		}
 	}
 }
