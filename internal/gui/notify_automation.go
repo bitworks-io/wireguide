@@ -19,6 +19,9 @@ func (n *notifier) onAutomationEvent(ev ipc.AutomationEventPayload) {
 	if n == nil || ev.Tunnel == "" || ev.Error != "" {
 		return
 	}
+	// Captured before the preference is read, so a disable that lands in
+	// between still drops this message.
+	gen := n.generation()
 	var up bool
 	kind := wgapp.NotifyAutoConnected
 	switch ev.Action {
@@ -44,7 +47,7 @@ func (n *notifier) onAutomationEvent(ev ipc.AutomationEventPayload) {
 		return
 	}
 	rule := n.ruleFor(ev)
-	n.sendRendered(func(lang string) (string, string) {
+	n.sendRendered(gen, func(lang string) (string, string) {
 		return "WireGuide", automationNotifyText(lang, up, ev.Tunnel, rule, ev.SSID)
 	})
 }
