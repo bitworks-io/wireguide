@@ -6,8 +6,8 @@ import (
 )
 
 func TestProtocolMinorCoversHelperInfo(t *testing.T) {
-	if ProtocolMinor < 6 {
-		t.Fatalf("ProtocolMinor = %d, Helper.Info needs >= 6", ProtocolMinor)
+	if ProtocolMinor < 11 {
+		t.Fatalf("ProtocolMinor = %d, Helper.Info needs >= 11", ProtocolMinor)
 	}
 	if MethodHelperInfo != "Helper.Info" {
 		t.Fatalf("MethodHelperInfo = %q", MethodHelperInfo)
