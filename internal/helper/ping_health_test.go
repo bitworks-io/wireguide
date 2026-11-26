@@ -97,3 +97,38 @@ func TestSavedPingSettingsInvalidatePendingRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestHandshakeHealthCheckForAppliesSidecarOverride(t *testing.T) {
+	store := storage.NewTunnelStore(t.TempDir())
+	cfg := &config.WireGuardConfig{Name: "review"}
+	cfg.Interface.PrivateKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	cfg.Interface.Address = []string{"10.0.0.2/24"}
+	cfg.Peers = []config.PeerConfig{{PublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", AllowedIPs: []string{"10.0.0.0/24"}}}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	h := &Helper{userTunnelStore: store}
+	for _, tc := range []struct {
+		override string
+		global   bool
+		want     bool
+	}{
+		{"", true, true}, {"", false, false},
+		{storage.HealthCheckOn, false, true}, {storage.HealthCheckOn, true, true},
+		{storage.HealthCheckOff, true, false}, {storage.HealthCheckOff, false, false},
+	} {
+		if err := store.UpdateMeta("review", func(m *storage.TunnelMeta) { m.HealthCheck = tc.override }); err != nil {
+			t.Fatal(err)
+		}
+		if got := h.handshakeHealthCheckFor("review", tc.global); got != tc.want {
+			t.Errorf("override %q global %v: got %v want %v", tc.override, tc.global, got, tc.want)
+		}
+	}
+	// Unknown tunnel (no sidecar) and no store both follow the global setting.
+	if !h.handshakeHealthCheckFor("missing", true) || h.handshakeHealthCheckFor("missing", false) {
+		t.Error("missing sidecar should follow global")
+	}
+	if !(&Helper{}).handshakeHealthCheckFor("x", true) {
+		t.Error("nil store should follow global")
+	}
+}

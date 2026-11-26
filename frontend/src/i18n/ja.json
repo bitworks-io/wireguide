@@ -102,7 +102,12 @@
     "dns_chip_search": "DNS: 検索ドメインのみ",
     "dns_chip_global_hint": "この設定は、接続中にトンネルの DNS サーバーでシステム DNS を置き換えるよう要求するため、すべての名前解決がトンネルの DNS に送られます。",
     "dns_chip_split_hint": "この設定は、指定したドメインだけをトンネルの DNS サーバーに送り、それ以外はシステム DNS が応答するよう要求します。macOS と systemd-resolved を使用する Linux で対応しており、Windows では接続に失敗します。",
-    "dns_chip_search_hint": "この設定は検索ドメインのみを指定し、DNS サーバーは指定しません。システムの DNS サーバーを維持したまま、接続中はシステムの検索ドメインを変更するよう要求します。検索ドメインは macOS と Linux で適用され、Windows では無視されます。"
+    "dns_chip_search_hint": "この設定は検索ドメインのみを指定し、DNS サーバーは指定しません。システムの DNS サーバーを維持したまま、接続中はシステムの検索ドメインを変更するよう要求します。検索ドメインは macOS と Linux で適用され、Windows では無視されます。",
+    "health_check_override": "ハンドシェイクのヘルスチェック",
+    "health_check_inherit": "設定に従う",
+    "health_check_on": "オン",
+    "health_check_off": "オフ",
+    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。ハンドシェイクが180秒以上古くなるとトンネルを再接続します。スリープ中やオフラインの時間は数えません。"
   },
   "import": {
     "zip_result_title": "インポート結果",

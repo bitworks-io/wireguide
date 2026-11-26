@@ -13,6 +13,7 @@
   import { parseDnsEntries, dnsChip, resolveHint } from './dns-mode.js';
   import { automationVerdicts } from '../stores/automation.js';
   import { verdictText, verdictTone } from './automationLine.js';
+  import HealthCheckOverride from './HealthCheckOverride.svelte';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -623,6 +624,7 @@
 
     {#key $selectedTunnel.name}
       <PingHealthSettings {TunnelService} tunnelName={$selectedTunnel.name} />
+      <HealthCheckOverride {TunnelService} tunnelName={$selectedTunnel.name} />
     {/key}
 
     <!-- SECONDARY ACTIONS: 4-up icon button grid -->

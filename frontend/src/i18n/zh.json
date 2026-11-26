@@ -102,7 +102,12 @@
     "dns_chip_search": "DNS：仅搜索域",
     "dns_chip_global_hint": "此配置要求连接期间用隧道的 DNS 服务器替换系统 DNS，因此所有名称查询都会发往它们。",
     "dns_chip_split_hint": "此配置要求仅将这些域发往隧道的 DNS 服务器，其他名称仍由系统 DNS 应答。在 macOS 和搭载 systemd-resolved 的 Linux 上受支持；在 Windows 上连接会失败。",
-    "dns_chip_search_hint": "此配置只设置了搜索域，没有 DNS 服务器。它要求保留系统 DNS 服务器，并在连接期间修改系统搜索域。搜索域在 macOS 和 Linux 上生效，Windows 会忽略。"
+    "dns_chip_search_hint": "此配置只设置了搜索域，没有 DNS 服务器。它要求保留系统 DNS 服务器，并在连接期间修改系统搜索域。搜索域在 macOS 和 Linux 上生效，Windows 会忽略。",
+    "health_check_override": "握手健康检查",
+    "health_check_inherit": "跟随设置",
+    "health_check_on": "开启",
+    "health_check_off": "关闭",
+    "health_check_override_hint": "仅为此隧道覆盖设置中的健康检查。握手超过 180 秒未更新时会重新连接隧道。睡眠或离线期间的时间不计入。"
   },
   "import": {
     "zip_result_title": "导入结果",
