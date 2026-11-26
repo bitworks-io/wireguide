@@ -4,7 +4,7 @@
 	},
 	"info": {
 		"0000": {
-			"ProductVersion": "0.7.0",
+			"ProductVersion": "0.7.0-bitworks.1",
 			"CompanyName": "korjwl1",
 			"FileDescription": "WireGuide - cross-platform WireGuard VPN desktop client",
 			"LegalCopyright": "© 2026 korjwl1",

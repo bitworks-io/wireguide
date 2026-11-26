@@ -342,12 +342,22 @@ func (s *TunnelService) DismissUpdate(version string) error {
 // can drive RunUpdate's routing without network access or installing.
 var applyUpdate = update.Apply
 
-const releasesPageURL = "https://github.com/korjwl1/wireguide/releases/latest"
+// isBrewInstall reports a Homebrew-managed install; a seam for tests.
+var isBrewInstall = update.IsBrewInstall
+
+// releasesPageURL is this build's latest-release page (the fork's).
+const releasesPageURL = update.RepoURL + "/releases/latest"
+
+// GetRepoURL is the GitHub address of this build's repository, for the
+// About links.
+func (s *TunnelService) GetRepoURL() string { return update.RepoURL }
 
 // RunUpdate performs the update end-to-end:
 //
 //   - Homebrew installs → `brew update && brew upgrade --cask wireguide`,
-//     then verifying the installed version and restarting the app.
+//     then verifying the installed version and restarting the app. Only
+//     for upstream builds: the cask is upstream's, so a fork build under
+//     Homebrew opens its own release page instead.
 //   - Direct-download installs (Windows NSIS install, macOS .app in a
 //     user-writable folder) → update.Apply: re-fetch the release in the
 //     backend, download, verify SHA256SUMS + its Ed25519 signature, then
@@ -371,7 +381,13 @@ func (s *TunnelService) RunUpdate(info *update.UpdateInfo) error {
 	}
 	defer s.updateRunning.Store(false)
 
-	if runtime.GOOS == "darwin" && update.IsBrewInstall() {
+	// The Homebrew path installs upstream's cask, so a fork build never
+	// takes it: under Homebrew it opens the fork's release page instead.
+	if runtime.GOOS == "darwin" && isBrewInstall() && !update.UsesUpstreamRelease() {
+		slog.Info("update: Homebrew install of a fork build, opening the release page")
+		return s.OpenURL(releasesPageURL)
+	}
+	if runtime.GOOS == "darwin" && isBrewInstall() {
 		brewBin := update.BrewPath()
 
 		// `brew update` is pure-network (git fetch on tap repos); 90 s is

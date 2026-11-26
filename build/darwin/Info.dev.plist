@@ -16,7 +16,7 @@
         <key>CFBundleGetInfoString</key>
             <string>WireGuide - WireGuard VPN Client (dev)</string>
         <key>CFBundleShortVersionString</key>
-            <string>0.7.0</string>
+            <string>0.7.0-bitworks.1</string>
         <key>CFBundleIconFile</key>
             <string>icons</string>
         <key>LSMinimumSystemVersion</key>
