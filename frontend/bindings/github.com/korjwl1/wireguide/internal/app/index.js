@@ -15,6 +15,7 @@ export {
     DNSLeakResult,
     DNSServer,
     DomainCheck,
+    FirewallStatus,
     KnownSSIDs,
     ProfileMutationResult,
     ResolveResult,

@@ -107,7 +107,11 @@
     "health_check_inherit": "Use Settings",
     "health_check_on": "On",
     "health_check_off": "Off",
-    "health_check_override_hint": "Overrides the Settings health check for this tunnel only. Reconnects the tunnel when its handshake goes stale (180 seconds). Time asleep or offline does not count."
+    "health_check_override_hint": "Overrides the Settings health check for this tunnel only. Reconnects the tunnel when its handshake goes stale (180 seconds). Time asleep or offline does not count.",
+    "dns_protected": "DNS protected",
+    "dns_protected_hint": "DNS protection is active: DNS to anything except this tunnel's resolvers is blocked.",
+    "dns_intended": "DNS protection: intended, not applied",
+    "dns_intended_hint": "DNS protection is turned on, but the firewall is not pinning this tunnel's DNS right now. See Settings > Advanced."
   },
   "import": {
     "zip_result_title": "Import Results",
@@ -224,7 +228,15 @@
     "export_diagnostics_hint": "Saves a zip with logs, redacted tunnel configs, DNS, routes and firewall state for bug reports. Private and preshared keys are never included.",
     "export_diagnostics_busy": "Exporting…",
     "export_diagnostics_done": "Saved to {path}",
-    "export_diagnostics_failed": "Export failed"
+    "export_diagnostics_failed": "Export failed",
+    "dns_protection_allowing": "Currently allowing: {list}",
+    "dns_protection_blocking": "Active: all DNS is blocked except local resolvers.",
+    "dns_protection_inactive": "Not applied — split DNS or no DNS",
+    "dns_protection_idle": "Turned on. Nothing to protect until a tunnel with DNS servers connects.",
+    "dns_protection_suspended": "Paused while a tunnel reconnects.",
+    "dns_protection_error": "Could not apply DNS protection: {error}",
+    "dns_permit_any": "{who} on all interfaces",
+    "dns_permit_iface": "{who} on {iface}"
   },
   "confirm": {
     "delete_title": "Delete tunnel?",
@@ -458,5 +470,11 @@
     "detail_resolve_nxdomain": "{name}: no such name (NXDOMAIN, {ms} ms) {via}",
     "detail_resolve_timeout": "{name}: no answer within {s} s {via}",
     "detail_resolve_failed": "{name}: {err} {via}"
+  },
+  "critical": {
+    "dns_protection_failing_title": "DNS protection is not applied",
+    "dns_protection_failing_where": "DNS Protection",
+    "dns_protection_failing": "DNS protection is turned on but its firewall rules keep failing to apply, so DNS may not be locked to your tunnel.",
+    "dns_protection_failing_hint": "WireGuide keeps retrying. Settings > Advanced shows the current state and the last error."
   }
 }

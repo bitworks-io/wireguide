@@ -55,13 +55,22 @@ func (h *Helper) dnsProtectionNeeded() bool {
 		if st == nil || st.State != domain.StateConnected {
 			continue
 		}
-		if cfg := cfgs[st.TunnelName]; cfg != nil && !cfg.Interface.IsSplitDNS() && len(cfg.Interface.ParseDNS().Servers) > 0 {
-			if wanted || (!autoOff && fullTunnelForcesDNSProtection && cfg.IsFullTunnel()) {
-				return true
-			}
+		if tunnelWantsDNSProtection(cfgs[st.TunnelName], wanted, autoOff) {
+			return true
 		}
 	}
 	return false
+}
+
+// tunnelWantsDNSProtection is the per-tunnel half of dnsProtectionNeeded:
+// whether this connected tunnel asks for the DNS rules. Split-DNS and
+// DNS-less tunnels keep system DNS and never do. Shared with the status
+// reporting so "protected" can never disagree with what reconcile installs.
+func tunnelWantsDNSProtection(cfg *domain.WireGuardConfig, wanted, autoOff bool) bool {
+	if cfg == nil || cfg.Interface.IsSplitDNS() || len(cfg.Interface.ParseDNS().Servers) == 0 {
+		return false
+	}
+	return wanted || (!autoOff && fullTunnelForcesDNSProtection && cfg.IsFullTunnel())
 }
 
 // reapplyDNSProtection installs DNS rules for the current tunnel set, or
@@ -113,6 +122,7 @@ func (h *Helper) reconcileDNSProtection(force bool, now time.Time) error {
 		slog.Debug("DNS protection: applying", "tunnels", len(allow))
 		err = h.firewall.EnableDNSProtection(allow)
 	}
+	h.recordDNSReconcile(needed, allow, h.firewall.IsDNSProtectionEnabled(), err, now)
 	if err != nil {
 		h.dnsApplied = ""
 		h.dnsRetryDelay = min(30*time.Second, max(time.Second, h.dnsRetryDelay*2))
@@ -134,6 +144,8 @@ func (h *Helper) dnsReconcileLoop() {
 			return
 		case now := <-ticker.C:
 			h.reconcileFirewallTick(now)
+			// After connectMu is released: never emit IPC under it.
+			h.maybeAlertDNSProtectionFailing()
 		}
 	}
 }

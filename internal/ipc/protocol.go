@@ -33,9 +33,13 @@ import (
 // Minor 9 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
 // for the diagnostics bundle); an older helper answers method-not-found and
 // the bundle records the section as unavailable.
+// Minor 10 adds the read-only Firewall.Status method, the per-tunnel
+// dns_mode / dns_servers / dns_protected status fields and
+// CriticalErrorPayload.Code. An older helper answers Firewall.Status with
+// method-not-found and omits the fields, which the GUI reports as unknown.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 9
+	ProtocolMinor = 10
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -151,6 +155,9 @@ const (
 	MethodDelete           = "Tunnel.Delete"
 	MethodSetKillSwitch    = "Firewall.SetKillSwitch"
 	MethodSetDNSProtection = "Firewall.SetDNSProtection"
+	// MethodFirewallStatus is read-only: the wanted vs actually loaded DNS
+	// protection and kill-switch state (read back from pf on macOS).
+	MethodFirewallStatus   = "Firewall.Status"
 	MethodSetHealthCheck   = "Monitor.SetHealthCheck"
 	MethodSetPinInterface  = "Network.SetPinInterface"
 	MethodSetTunnelBackend = "Network.SetTunnelBackend"

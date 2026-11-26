@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/ipc"
@@ -168,4 +169,27 @@ func (s *TunnelService) Verify(tunnelName string, opts VerifyOptions) ([]VerifyR
 		out = append(out, VerifyRow(r))
 	}
 	return out, nil
+}
+
+// FirewallStatus wraps Firewall.Status for the Settings DNS Protection line.
+// Available is false when the helper could not answer — including an older
+// helper without the method — which the GUI shows as "unknown" (nothing),
+// never as "not applied".
+type FirewallStatus struct {
+	Available bool                        `json:"available"`
+	Status    *ipc.FirewallStatusResponse `json:"status,omitempty"`
+}
+
+// GetFirewallStatus asks the helper what DNS protection and the kill switch
+// actually have loaded (read back from pf on macOS). Read-only; the GUI calls
+// it on demand, never on a timer.
+func (s *TunnelService) GetFirewallStatus() FirewallStatus {
+	var resp ipc.FirewallStatusResponse
+	if err := s.call(ipc.MethodFirewallStatus, nil, &resp); err != nil {
+		if !isMethodNotFound(err) {
+			slog.Debug("Firewall.Status failed", "error", err)
+		}
+		return FirewallStatus{}
+	}
+	return FirewallStatus{Available: true, Status: &resp}
 }

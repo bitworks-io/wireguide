@@ -107,7 +107,11 @@
     "health_check_inherit": "設定に従う",
     "health_check_on": "オン",
     "health_check_off": "オフ",
-    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。ハンドシェイクが180秒以上古くなるとトンネルを再接続します。スリープ中やオフラインの時間は数えません。"
+    "health_check_override_hint": "このトンネルだけ設定のヘルスチェックを上書きします。ハンドシェイクが180秒以上古くなるとトンネルを再接続します。スリープ中やオフラインの時間は数えません。",
+    "dns_protected": "DNS保護中",
+    "dns_protected_hint": "DNS保護が有効です: このトンネルのリゾルバ以外へのDNSはブロックされます。",
+    "dns_intended": "DNS保護: 有効だが未適用",
+    "dns_intended_hint": "DNS保護はオンですが、現在ファイアウォールはこのトンネルのDNSを固定していません。設定 > 詳細を確認してください。"
   },
   "import": {
     "zip_result_title": "インポート結果",
@@ -224,7 +228,15 @@
     "export_diagnostics_hint": "バグ報告用に、ログ、秘密情報を伏せたトンネル設定、DNS、ルート、ファイアウォールの状態を zip で保存します。秘密鍵と事前共有鍵は含まれません。",
     "export_diagnostics_busy": "書き出し中…",
     "export_diagnostics_done": "{path} に保存しました",
-    "export_diagnostics_failed": "書き出しに失敗しました"
+    "export_diagnostics_failed": "書き出しに失敗しました",
+    "dns_protection_allowing": "現在許可中: {list}",
+    "dns_protection_blocking": "有効: ローカルリゾルバ以外のDNSはすべてブロックされます。",
+    "dns_protection_inactive": "未適用 — スプリットDNSまたはDNSなし",
+    "dns_protection_idle": "オンです。DNSサーバーを持つトンネルが接続されると適用されます。",
+    "dns_protection_suspended": "トンネル再接続中は一時停止しています。",
+    "dns_protection_error": "DNS保護を適用できませんでした: {error}",
+    "dns_permit_any": "{who}（すべてのインターフェース）",
+    "dns_permit_iface": "{who}（{iface}）"
   },
   "confirm": {
     "delete_title": "トンネルを削除しますか？",
@@ -458,5 +470,11 @@
     "detail_resolve_nxdomain": "{name}: その名前は存在しません (NXDOMAIN, {ms} ms) {via}",
     "detail_resolve_timeout": "{name}: {s} 秒以内に応答なし {via}",
     "detail_resolve_failed": "{name}: {err} {via}"
+  },
+  "critical": {
+    "dns_protection_failing_title": "DNS保護が適用されていません",
+    "dns_protection_failing_where": "DNS保護",
+    "dns_protection_failing": "DNS保護はオンですが、ファイアウォールルールの適用が失敗し続けているため、DNSがトンネルに固定されていない可能性があります。",
+    "dns_protection_failing_hint": "WireGuideは再試行を続けます。設定 > 詳細で現在の状態と最後のエラーを確認できます。"
   }
 }

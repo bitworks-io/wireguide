@@ -107,7 +107,11 @@
     "health_check_inherit": "跟随设置",
     "health_check_on": "开启",
     "health_check_off": "关闭",
-    "health_check_override_hint": "仅为此隧道覆盖设置中的健康检查。握手超过 180 秒未更新时会重新连接隧道。睡眠或离线期间的时间不计入。"
+    "health_check_override_hint": "仅为此隧道覆盖设置中的健康检查。握手超过 180 秒未更新时会重新连接隧道。睡眠或离线期间的时间不计入。",
+    "dns_protected": "DNS 已保护",
+    "dns_protected_hint": "DNS 保护已生效：除此隧道的解析服务器外，所有 DNS 均被阻止。",
+    "dns_intended": "DNS 保护：已开启但未生效",
+    "dns_intended_hint": "DNS 保护已开启，但防火墙目前没有锁定此隧道的 DNS。请查看 设置 > 高级。"
   },
   "import": {
     "zip_result_title": "导入结果",
@@ -224,7 +228,15 @@
     "export_diagnostics_hint": "将日志、已隐去密钥的隧道配置、DNS、路由和防火墙状态保存为 zip 文件，便于提交错误报告。私钥和预共享密钥不会被包含。",
     "export_diagnostics_busy": "正在导出…",
     "export_diagnostics_done": "已保存到 {path}",
-    "export_diagnostics_failed": "导出失败"
+    "export_diagnostics_failed": "导出失败",
+    "dns_protection_allowing": "当前允许：{list}",
+    "dns_protection_blocking": "已生效：除本地解析器外的所有 DNS 均被阻止。",
+    "dns_protection_inactive": "未生效 — 分离 DNS 或无 DNS",
+    "dns_protection_idle": "已开启。连接带有 DNS 服务器的隧道后生效。",
+    "dns_protection_suspended": "隧道重新连接期间已暂停。",
+    "dns_protection_error": "无法应用 DNS 保护：{error}",
+    "dns_permit_any": "{who}（所有接口）",
+    "dns_permit_iface": "{who}（{iface}）"
   },
   "confirm": {
     "delete_title": "删除隧道？",
@@ -458,5 +470,11 @@
     "detail_resolve_nxdomain": "{name}：没有此名称（NXDOMAIN，{ms} ms）{via}",
     "detail_resolve_timeout": "{name}：{s} 秒内无应答 {via}",
     "detail_resolve_failed": "{name}：{err} {via}"
+  },
+  "critical": {
+    "dns_protection_failing_title": "DNS 保护未生效",
+    "dns_protection_failing_where": "DNS 保护",
+    "dns_protection_failing": "DNS 保护已开启，但防火墙规则一直无法应用，DNS 可能没有被锁定到隧道。",
+    "dns_protection_failing_hint": "WireGuide 会持续重试。可在 设置 > 高级 中查看当前状态和最近的错误。"
   }
 }

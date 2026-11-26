@@ -107,7 +107,11 @@
     "health_check_inherit": "설정 따르기",
     "health_check_on": "켜기",
     "health_check_off": "끄기",
-    "health_check_override_hint": "이 터널에만 설정의 상태 점검을 덮어씁니다. 핸드셰이크가 180초 이상 오래되면 터널을 다시 연결합니다. 절전 중이거나 오프라인인 시간은 포함되지 않습니다."
+    "health_check_override_hint": "이 터널에만 설정의 상태 점검을 덮어씁니다. 핸드셰이크가 180초 이상 오래되면 터널을 다시 연결합니다. 절전 중이거나 오프라인인 시간은 포함되지 않습니다.",
+    "dns_protected": "DNS 보호됨",
+    "dns_protected_hint": "DNS 보호가 활성화되어 있습니다: 이 터널의 DNS 서버를 제외한 모든 DNS가 차단됩니다.",
+    "dns_intended": "DNS 보호: 설정됨, 적용 안 됨",
+    "dns_intended_hint": "DNS 보호가 켜져 있지만 현재 방화벽이 이 터널의 DNS를 고정하지 않고 있습니다. 설정 > 고급을 확인하세요."
   },
   "import": {
     "zip_result_title": "가져오기 결과",
@@ -224,7 +228,15 @@
     "export_diagnostics_hint": "버그 신고용으로 로그, 비밀 값을 가린 터널 설정, DNS, 라우팅, 방화벽 상태를 zip으로 저장합니다. 개인 키와 사전 공유 키는 포함되지 않습니다.",
     "export_diagnostics_busy": "내보내는 중…",
     "export_diagnostics_done": "{path}에 저장했습니다",
-    "export_diagnostics_failed": "내보내기에 실패했습니다"
+    "export_diagnostics_failed": "내보내기에 실패했습니다",
+    "dns_protection_allowing": "현재 허용 중: {list}",
+    "dns_protection_blocking": "활성: 로컬 리졸버를 제외한 모든 DNS가 차단됩니다.",
+    "dns_protection_inactive": "적용 안 됨 — 분할 DNS 또는 DNS 없음",
+    "dns_protection_idle": "켜져 있습니다. DNS 서버가 있는 터널이 연결되면 적용됩니다.",
+    "dns_protection_suspended": "터널 재연결 중 일시 중지됨.",
+    "dns_protection_error": "DNS 보호를 적용할 수 없습니다: {error}",
+    "dns_permit_any": "{who} (모든 인터페이스)",
+    "dns_permit_iface": "{who} ({iface})"
   },
   "confirm": {
     "delete_title": "터널을 삭제하시겠습니까?",
@@ -458,5 +470,11 @@
     "detail_resolve_nxdomain": "{name}: 해당 이름 없음 (NXDOMAIN, {ms} ms) {via}",
     "detail_resolve_timeout": "{name}: {s}초 내 응답 없음 {via}",
     "detail_resolve_failed": "{name}: {err} {via}"
+  },
+  "critical": {
+    "dns_protection_failing_title": "DNS 보호가 적용되지 않음",
+    "dns_protection_failing_where": "DNS 보호",
+    "dns_protection_failing": "DNS 보호가 켜져 있지만 방화벽 규칙 적용이 계속 실패하고 있어 DNS가 터널에 고정되지 않았을 수 있습니다.",
+    "dns_protection_failing_hint": "WireGuide가 계속 재시도합니다. 설정 > 고급에서 현재 상태와 마지막 오류를 확인할 수 있습니다."
   }
 }

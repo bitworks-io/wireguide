@@ -85,6 +85,7 @@ func (h *Helper) reconcileKillSwitch(force bool, now time.Time) error {
 			clear(h.ksIfaces)
 		}
 	}
+	h.recordKillSwitchReconcile(h.firewall.IsKillSwitchEnabled(), err, now)
 	if err != nil {
 		h.ksApplied = ""
 		h.ksRetryDelay = min(30*time.Second, max(time.Second, h.ksRetryDelay*2))
