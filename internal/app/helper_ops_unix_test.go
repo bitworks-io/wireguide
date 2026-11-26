@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/storage"
 )
 
 func serviceWithHelper(t *testing.T, handlers map[string]func(json.RawMessage) (interface{}, error)) *TunnelService {
@@ -101,5 +102,53 @@ func TestRepairHelperDelegatesAndErrorsWhenUnregistered(t *testing.T) {
 	helperRepairer.Store(func(context.Context) error { called = true; return want })
 	if err := s.RepairHelper(); !called || !errors.Is(err, want) {
 		t.Fatalf("RepairHelper = %v, called=%v", err, called)
+	}
+}
+
+func TestResetDNSPassesFlagsAndSavesKillSwitchOff(t *testing.T) {
+	var got ipc.ResetDNSRequest
+	s := serviceWithHelper(t, map[string]func(json.RawMessage) (interface{}, error){
+		ipc.MethodResetDNS: func(raw json.RawMessage) (interface{}, error) {
+			_ = json.Unmarshal(raw, &got)
+			return ipc.ResetDNSResponse{Steps: []ipc.ResetDNSStep{{Name: "kill_switch", OK: true}, {Name: "firewall", OK: true}}}, nil
+		},
+	})
+	s.settingsStore = storage.NewSettingsStore(t.TempDir())
+	if err := s.settingsStore.Update(func(st *storage.Settings) error { st.KillSwitch = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := s.ResetDNS(true, true)
+	if err != nil || resp == nil || len(resp.Steps) != 2 {
+		t.Fatalf("resp=%+v err=%v", resp, err)
+	}
+	if !got.Force || !got.KillSwitchOff {
+		t.Fatalf("request = %+v", got)
+	}
+	if st, _ := s.settingsStore.Load(); st.KillSwitch {
+		t.Fatal("kill switch off was not saved to settings")
+	}
+}
+
+func TestResetDNSRefusedKeepsKillSwitchSetting(t *testing.T) {
+	s := serviceWithHelper(t, map[string]func(json.RawMessage) (interface{}, error){
+		ipc.MethodResetDNS: func(json.RawMessage) (interface{}, error) {
+			return ipc.ResetDNSResponse{Refused: true, Reason: ipc.ResetRefusedTunnels, ConnectedTunnels: []string{"home-vpn"}}, nil
+		},
+	})
+	s.settingsStore = storage.NewSettingsStore(t.TempDir())
+	_ = s.settingsStore.Update(func(st *storage.Settings) error { st.KillSwitch = true; return nil })
+	resp, err := s.ResetDNS(false, true)
+	if err != nil || !resp.Refused {
+		t.Fatalf("resp=%+v err=%v", resp, err)
+	}
+	if st, _ := s.settingsStore.Load(); !st.KillSwitch {
+		t.Fatal("a refused reset changed the saved kill switch setting")
+	}
+}
+
+func TestResetDNSOldHelper(t *testing.T) {
+	s := serviceWithHelper(t, nil)
+	if _, err := s.ResetDNS(false, false); !errors.Is(err, errResetDNSTooOld) {
+		t.Fatalf("err = %v, want too-old", err)
 	}
 }

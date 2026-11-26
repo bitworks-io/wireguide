@@ -32,6 +32,9 @@ import * as domain$0 from "../domain/models.js";
 import * as healthcheck$0 from "../healthcheck/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as ipc$0 from "../ipc/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as storage$0 from "../storage/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -659,6 +662,22 @@ export function RepairHelper() {
 }
 
 /**
+ * ResetDNS runs Network.ResetDNS ("Reset DNS & firewall"). A refused request
+ * comes back with Refused set and nothing changed. force disconnects every
+ * connected, wanted or pending-restore tunnel first; killSwitchOff turns the
+ * kill switch setting off, which is also saved here so the next launch does
+ * not push it back on.
+ * @param {boolean} force
+ * @param {boolean} killSwitchOff
+ * @returns {$CancellablePromise<ipc$0.ResetDNSResponse | null>}
+ */
+export function ResetDNS(force, killSwitchOff) {
+    return $Call.ByID(1047447379, force, killSwitchOff).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType40($result);
+    }));
+}
+
+/**
  * ResolveHost resolves name through the system resolver path (getaddrinfo),
  * the same one browsers use, and reports which resolver answered. Unlike
  * dig/nslookup it honours split-DNS supplemental resolvers. Bounded by 3 s.
@@ -667,7 +686,7 @@ export function RepairHelper() {
  */
 export function ResolveHost(name) {
     return $Call.ByID(3083149897, name).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType40($result);
+        return $$createType42($result);
     }));
 }
 
@@ -705,7 +724,7 @@ export function RestoreAutomationV3Backup() {
  */
 export function RunDNSLeakTest() {
     return $Call.ByID(2469114850).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType42($result);
+        return $$createType44($result);
     }));
 }
 
@@ -901,7 +920,7 @@ export function SplitDNSSupported() {
  */
 export function TakeURLActions() {
     return $Call.ByID(1243665022).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType44($result);
+        return $$createType46($result);
     }));
 }
 
@@ -959,7 +978,7 @@ export function ValidateConfig(content) {
  */
 export function Verify(tunnelName, opts) {
     return $Call.ByID(2039407192, tunnelName, opts).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType46($result);
+        return $$createType48($result);
     }));
 }
 
@@ -1003,11 +1022,13 @@ const $$createType35 = $Create.Array($$createType34);
 const $$createType36 = storage$0.AutomationHistoryEntry.createFrom;
 const $$createType37 = $Create.Array($$createType36);
 const $$createType38 = $Create.Array($$createType30);
-const $$createType39 = $models.ResolveResult.createFrom;
+const $$createType39 = ipc$0.ResetDNSResponse.createFrom;
 const $$createType40 = $Create.Nullable($$createType39);
-const $$createType41 = $models.DNSLeakResult.createFrom;
+const $$createType41 = $models.ResolveResult.createFrom;
 const $$createType42 = $Create.Nullable($$createType41);
-const $$createType43 = $models.URLAction.createFrom;
-const $$createType44 = $Create.Array($$createType43);
-const $$createType45 = $models.VerifyRow.createFrom;
+const $$createType43 = $models.DNSLeakResult.createFrom;
+const $$createType44 = $Create.Nullable($$createType43);
+const $$createType45 = $models.URLAction.createFrom;
 const $$createType46 = $Create.Array($$createType45);
+const $$createType47 = $models.VerifyRow.createFrom;
+const $$createType48 = $Create.Array($$createType47);

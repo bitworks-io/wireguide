@@ -70,6 +70,8 @@ func Run(args []string) int {
 		return cmdVerify(rest)
 	case "diag":
 		return cmdDiag(rest)
+	case "reset-dns":
+		return cmdResetDNS(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -126,6 +128,11 @@ Settings & diagnostics:
   wireguide ctl diag bundle [--out path]       write a diagnostics zip (logs, redacted configs,
                                                DNS/route/firewall state); private keys are never
                                                included. Default: Desktop or Downloads
+  wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
+                                               remove WireGuide's firewall rules and split DNS,
+                                               retry pending DNS recovery, flush the DNS cache
+                                               (--force disconnects tunnels first;
+                                               --kill-switch-off turns the kill switch off)
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]

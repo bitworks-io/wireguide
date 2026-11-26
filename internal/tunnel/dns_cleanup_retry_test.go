@@ -203,3 +203,55 @@ func TestEarlyConnectFailureRetainsCleanupJournal(t *testing.T) {
 		t.Fatal("failure before DNS would reset untouched DNS")
 	}
 }
+
+// "Reset DNS & firewall" forces the retained cleanup past its backoff. A
+// failed attempt keeps the journal and reports the tunnel; only a successful
+// one removes the journal.
+func TestForcePendingCleanupRetryIgnoresBackoffAndKeepsJournalOnFailure(t *testing.T) {
+	n := &restoreRetryNetwork{restoreErr: errors.New("DNS write denied")}
+	m := newTestManagerWithDir(&n.mockNetworkManager, succeedingFactory(), t.TempDir())
+	m.netMgrFactory = func() network.NetworkManager { return n }
+	if err := m.Connect(globalCfg("office-vpn")); err != nil {
+		t.Fatal(err)
+	}
+	m.CapturePreModDNS(network.DNSSnapshot{Servers: map[string][]string{"Wi-Fi": {"192.0.2.1"}}})
+	if err := m.DisconnectTunnel("office-vpn"); err != nil {
+		t.Fatal(err)
+	}
+	before := n.restores
+
+	// The entry's backoff has not elapsed, so the periodic retry skips it.
+	m.RetryPendingDNSCleanupAt(time.Now())
+	if n.restores != before {
+		t.Fatal("periodic retry ran before its backoff; test premise broken")
+	}
+
+	attempted, pending := m.ForcePendingCleanupRetry()
+	if n.restores != before+1 {
+		t.Fatalf("forced retry did not run the cleanup (restores %d -> %d)", before, n.restores)
+	}
+	if attempted != 1 || len(pending) != 1 || pending[0] != "office-vpn" {
+		t.Fatalf("attempted=%d pending=%v, want 1 [office-vpn]", attempted, pending)
+	}
+	if len(LoadActiveState(m.dataDir)) != 1 {
+		t.Fatal("failed forced retry removed the recovery journal")
+	}
+	if _, ok := m.PreModDNSSnapshot(); !ok {
+		t.Fatal("failed forced retry discarded the original DNS baseline")
+	}
+
+	// A second forced retry ignores the backoff the failure just set.
+	n.restoreErr = nil
+	attempted, pending = m.ForcePendingCleanupRetry()
+	if attempted != 1 || len(pending) != 0 {
+		t.Fatalf("attempted=%d pending=%v after success", attempted, pending)
+	}
+	if len(LoadActiveState(m.dataDir)) != 0 {
+		t.Fatal("successful forced retry left the recovery journal")
+	}
+
+	// Idempotent: nothing left to do.
+	if attempted, pending = m.ForcePendingCleanupRetry(); attempted != 0 || pending != nil {
+		t.Fatalf("idle forced retry = %d %v", attempted, pending)
+	}
+}

@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
+	"github.com/korjwl1/wireguide/internal/storage"
 )
 
 // helperRepairer is set by internal/gui at startup (it owns the client
@@ -76,4 +78,46 @@ func (s *TunnelService) RepairHelper() error {
 		return errors.New("helper repair is not available")
 	}
 	return f(context.Background())
+}
+
+// errResetDNSTooOld is returned when the helper predates Network.ResetDNS.
+var errResetDNSTooOld = errors.New("the helper is too old to reset DNS — update the app (or use Repair helper)")
+
+// ResetDNS runs Network.ResetDNS ("Reset DNS & firewall"). A refused request
+// comes back with Refused set and nothing changed. force disconnects every
+// connected, wanted or pending-restore tunnel first; killSwitchOff turns the
+// kill switch setting off, which is also saved here so the next launch does
+// not push it back on.
+func (s *TunnelService) ResetDNS(force, killSwitchOff bool) (*ipc.ResetDNSResponse, error) {
+	var resp ipc.ResetDNSResponse
+	// A forced reset can tear tunnels down (seconds each): mark the RPC in
+	// flight so the health monitor does not take the busy helper for dead.
+	s.clients.MarkInflight()
+	defer s.clients.UnmarkInflight()
+	if err := s.callLong(ipc.MethodResetDNS, ipc.ResetDNSRequest{Force: force, KillSwitchOff: killSwitchOff}, &resp); err != nil {
+		if isMethodNotFound(err) {
+			return nil, errResetDNSTooOld
+		}
+		return nil, err
+	}
+	if resetTurnedKillSwitchOff(resp) && s.settingsStore != nil {
+		if err := s.settingsStore.Update(func(st *storage.Settings) error { st.KillSwitch = false; return nil }); err != nil {
+			slog.Warn("reset DNS: could not save kill switch off", "error", err)
+		}
+	}
+	return &resp, nil
+}
+
+// resetTurnedKillSwitchOff reports whether the helper turned the kill switch
+// setting off (it persists the intent even when applying it failed).
+func resetTurnedKillSwitchOff(resp ipc.ResetDNSResponse) bool {
+	if resp.Refused {
+		return false
+	}
+	for _, st := range resp.Steps {
+		if st.Name == "kill_switch" {
+			return true
+		}
+	}
+	return false
 }

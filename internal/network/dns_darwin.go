@@ -312,6 +312,10 @@ var flushDNSCache = func() {
 	}
 }
 
+// FlushDNSCache drops mDNSResponder's cache (best-effort, as above). Used by
+// the "Reset DNS & firewall" escape hatch.
+func FlushDNSCache() { flushDNSCache() }
+
 // validHostnameRegex matches RFC 1123 hostname characters plus '.'.
 // Reject anything else so a malicious DNS entry like `foo;rm -rf ~`
 // can't end up in `networksetup -setsearchdomains` arguments (even
