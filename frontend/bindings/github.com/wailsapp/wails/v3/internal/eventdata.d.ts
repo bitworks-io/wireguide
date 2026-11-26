@@ -22,6 +22,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "automation_changed": {};
+            "automation_event": ipc$0.AutomationEventPayload;
             "config_changed": {};
             "files-dropped": { [_ in string]?: any };
             "helper": gui$0.HelperEvent;

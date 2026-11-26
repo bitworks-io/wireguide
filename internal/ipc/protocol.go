@@ -40,9 +40,11 @@ import (
 // Minor 11 adds the read-only Helper.Info method and the optional action
 // field on event.critical_error, so the GUI can offer a user-initiated
 // "Repair helper" instead of telling the user to quit and reopen.
+// Minor 12 adds event.automation (per-tunnel Automation decisions). The older
+// event.automation_skipped is still sent alongside it.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 11
+	ProtocolMinor = 12
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -197,6 +199,11 @@ const (
 	EventAutomationChanged = "event.automation_changed"
 	EventAutoConnect       = "event.auto_connect"
 	EventAutomationSkipped = "event.automation_skipped"
+	// EventAutomation reports an Automation decision: every executed
+	// rule-driven connect/disconnect (success or failure), and a
+	// held/latched/skipped_overlap decision when it changes for a tunnel.
+	// Protocol minor >= 12.
+	EventAutomation = "event.automation"
 	// EventForcedDisconnect tells the GUI the helper tore a tunnel down on
 	// its own — the endpoint-route watchdog found a routing loop (#49) —
 	// so the user learns why it went down and that it won't come back by

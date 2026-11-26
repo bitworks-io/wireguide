@@ -304,7 +304,7 @@ func TestAutomationConnectSkipsLANOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := captureLogs(t)
-	h.automationConnect("lan", "test", "x")
+	h.automationConnect("lan", "test", automation.NetworkContext{SSID: "x"}, nil, -1)
 	if !strings.Contains(logs.String(), "overlap the local network") || strings.Contains(logs.String(), "rule connect") {
 		t.Errorf("automation must skip the overlapping tunnel:\n%s", logs)
 	}
