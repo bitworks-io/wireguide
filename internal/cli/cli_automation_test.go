@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/korjwl1/wireguide/internal/automation"
@@ -29,6 +30,18 @@ func TestParseCondition(t *testing.T) {
 		{spec: "not-mac:zz", wantErr: true},
 		{spec: "not-bogus:x", wantErr: true},
 		{spec: "ssid", wantErr: true},
+		{spec: "ssid:A|B", want: automation.Condition{Type: automation.CondSSID, SSIDs: []string{"A", "B"}}},
+		{spec: "ssid: A | B ", want: automation.Condition{Type: automation.CondSSID, SSIDs: []string{"A", "B"}}},
+		{spec: "not-ssid:A|B|C", want: automation.Condition{Type: automation.CondSSID, Negate: true, SSIDs: []string{"A", "B", "C"}}},
+		{spec: "ssid:A|", wantErr: true},
+		{spec: "ssid:|A", wantErr: true},
+		{spec: "ssid:A||B", wantErr: true},
+		{spec: "medium:wifi", want: automation.Condition{Type: automation.CondMedium, Medium: "wifi"}},
+		{spec: "medium:Wired", want: automation.Condition{Type: automation.CondMedium, Medium: "wired"}},
+		{spec: "not-medium:tethered", want: automation.Condition{Type: automation.CondMedium, Negate: true, Medium: "tethered"}},
+		{spec: "medium:ethernet", wantErr: true},
+		{spec: "medium:wifi|wired", wantErr: true},
+		{spec: "not-medium:", wantErr: true},
 	}
 	for _, tc := range cases {
 		got, err := parseCondition(tc.spec)
@@ -42,7 +55,7 @@ func TestParseCondition(t *testing.T) {
 			t.Errorf("%q: %v", tc.spec, err)
 			continue
 		}
-		if got != tc.want {
+		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: got %+v want %+v", tc.spec, got, tc.want)
 		}
 		if err := got.Validate(); err != nil {
@@ -63,6 +76,12 @@ func TestFormatCondition(t *testing.T) {
 		{automation.Condition{Type: automation.CondNetwork, GatewayMAC: "aa:bb:cc:dd:ee:ff"}, "network(mac)=aa:bb:cc:dd:ee:ff"},
 		{automation.Condition{Type: automation.CondNetwork, Negate: true, GatewayMAC: "aa:bb:cc:dd:ee:ff"}, "network(mac)!=aa:bb:cc:dd:ee:ff"},
 		{automation.Condition{Type: automation.CondNoneMatch}, "otherwise"},
+		{automation.Condition{Type: automation.CondSSID, SSIDs: []string{"A", "B"}}, "ssid in {A, B}"},
+		{automation.Condition{Type: automation.CondSSID, Negate: true, SSIDs: []string{"A", "B"}}, "ssid not in {A, B}"},
+		{automation.Condition{Type: automation.CondSSID, SSIDs: []string{"A"}}, "ssid=A"},
+		{automation.Condition{Type: automation.CondSSID, SSID: "A", SSIDs: []string{"a", "B"}}, "ssid in {A, B}"},
+		{automation.Condition{Type: automation.CondMedium, Medium: "wired"}, "medium=wired"},
+		{automation.Condition{Type: automation.CondMedium, Negate: true, Medium: "wifi"}, "medium!=wifi"},
 	}
 	for _, tc := range cases {
 		if got := formatCondition(tc.c); got != tc.want {

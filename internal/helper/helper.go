@@ -237,6 +237,15 @@ type Helper struct {
 	settleMu    sync.Mutex
 	settle      *automation.SettleTracker
 	settleTimer *time.Timer
+	// mediumRetryIface / mediumRetrySince track how long the primary
+	// interface's medium has been unknown, for the bounded re-evaluation
+	// retry (see mediumRetryDue). Guarded by reevalMu.
+	mediumRetryIface string
+	mediumRetrySince time.Time
+	// Test seams for mediumRetryDue (per Helper, so background timers of
+	// other helpers never race on package state).
+	mediumRetryForce bool
+	mediumRetryClock func() time.Time
 
 	// manualOverride latches an explicit user connect/disconnect per tunnel
 	// (with the network identity it was made on) so automation doesn't undo

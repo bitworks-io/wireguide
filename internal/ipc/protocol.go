@@ -42,9 +42,11 @@ import (
 // "Repair helper" instead of telling the user to quit and reopen.
 // Minor 12 adds event.automation (per-tunnel Automation decisions). The older
 // event.automation_skipped is still sent alongside it.
+// Minor 13 adds AutomationPreviewResponse.Medium (connection type of the primary
+// interface) for connection-type automation rules.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 12
+	ProtocolMinor = 13
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in

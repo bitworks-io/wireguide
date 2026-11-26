@@ -21,6 +21,8 @@ type AutomationBackupStatus struct {
 	Different      bool   `json:"different"`
 	RecoveryCopies int    `json:"recovery_copies"`
 	Error          string `json:"error,omitempty"`
+	// V3 reports the separate tier-3 recovery copy (automation_backup_v3.go).
+	V3 AutomationV3BackupStatus `json:"v3"`
 }
 
 func extendedAutomation(a *automation.Automation) bool {
@@ -110,10 +112,10 @@ func writeAutomationBackup(path string, data []byte) error {
 
 // AutomationBackupStatus exposes recovery copies without activating them.
 // It is queried on demand, so rule polling does not emit repeated warnings.
-func (s *SettingsStore) AutomationBackupStatus() AutomationBackupStatus {
+func (s *SettingsStore) AutomationBackupStatus() (status AutomationBackupStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var status AutomationBackupStatus
+	defer func() { status.V3 = s.automationV3BackupStatus() }()
 	archives, err := filepath.Glob(s.path + automationBackupSuffix + ".recovery-*")
 	if err != nil {
 		status.Error = err.Error()

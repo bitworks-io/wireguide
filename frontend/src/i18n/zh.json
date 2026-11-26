@@ -165,6 +165,9 @@
   "settings": {
     "automation_backup_recovery": "设置文件夹中提供了早期自动化规则的备份。恢复规则前请先检查。",
     "automation_backup_error": "无法备份自动化规则。安装旧版本前请保存副本。",
+    "automation_v3_recoverable": "{names} 的规则使用了 Wi-Fi 名称列表或连接类型，已被旧版 WireGuide 删除。可从备份恢复。",
+    "automation_v3_restore": "恢复规则",
+    "automation_v3_restore_failed": "无法恢复规则。",
     "title": "设置",
     "general": "常规",
     "auto_start": "登录时启动 WireGuide",
@@ -427,7 +430,15 @@
       "net_unknown_denied": "WireGuide 的定位服务被拒绝 — 无法获取 Wi-Fi 名称，“不是” SSID 规则暂缓",
       "net_unknown_not_allowed": "尚未允许 WireGuide 使用定位服务 — 无法获取 Wi-Fi 名称，“不是” SSID 规则暂缓",
       "net_unknown_roaming": "Wi-Fi 名称暂时不可用（正在重连或漫游）— “不是”规则暂缓"
-    }
+    },
+    "cond_medium": "连接类型",
+    "medium_wifi": "Wi-Fi",
+    "medium_wired": "有线 (以太网)",
+    "medium_tethered": "共享网络 (手机 USB/蓝牙)",
+    "ssid_add_placeholder": "再添加一个…",
+    "ssid_tags_hint": "Wi-Fi 名称。按 Enter 键或输入逗号可继续添加；匹配其中任意一个即应用此规则。",
+    "remove_ssid": "移除 {ssid}",
+    "medium_windows_note": "Windows 无法检测连接类型，因此此规则在这里不会生效。"
   },
   "ping_health": {
     "title": "无响应时重新连接",
