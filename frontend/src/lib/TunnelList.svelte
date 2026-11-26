@@ -6,14 +6,17 @@
   import { compactList, listSort, listActiveOnTop, saveListPrefs } from '../stores/ui.js';
   import { t } from '../i18n/index.js';
   import { dnsChip } from './dns-mode.js';
-  import { automationPreview } from '../stores/automation.js';
-  import { verdictFor, verdictText, verdictTone } from './automationLine.js';
+  import { automationVerdicts } from '../stores/automation.js';
+  import { sortTunnels } from './tunnel-list.js';
+  import { verdictText, verdictTone } from './automationLine.js';
 
   const dispatch = createEventDispatcher();
   let search = '';
 
+  $: searchQuery = search.toLowerCase();
+  $: dnsChips = new Map(($tunnels || []).map(tun => [tun.name, dnsChip($t, tun.dns_mode, tun.dns_domains || [])]));
   $: filtered = ($tunnels || []).filter(tun =>
-    tun.name.toLowerCase().includes(search.toLowerCase())
+    tun.name.toLowerCase().includes(searchQuery)
   );
 
   // Connected indicators exclude setup and teardown intent.
@@ -21,27 +24,7 @@
 
   // Sorted view. Array.sort is stable, so sorting by the chosen key first
   // and then stably floating active tunnels keeps key order within groups.
-  function nameCmp(a, b) {
-    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
-  }
-  $: sorted = (() => {
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      switch ($listSort) {
-        case 'name_desc': return -nameCmp(a, b);
-        // Newest first; ties (or missing timestamps) fall back to name.
-        case 'added_desc': return (b.created_at_unix || 0) - (a.created_at_unix || 0) || nameCmp(a, b);
-        case 'added_asc':  return (a.created_at_unix || 0) - (b.created_at_unix || 0) || nameCmp(a, b);
-        case 'used_desc':  return (b.last_used_unix || 0) - (a.last_used_unix || 0) || nameCmp(a, b);
-        case 'name_asc':
-        default:           return nameCmp(a, b);
-      }
-    });
-    if ($listActiveOnTop) {
-      arr.sort((a, b) => (activeSet.has(b.name) ? 1 : 0) - (activeSet.has(a.name) ? 1 : 0));
-    }
-    return arr;
-  })();
+  $: sorted = sortTunnels(filtered, $listSort, $listActiveOnTop, activeSet);
 
   function onSortChange(e) {
     listSort.set(e.target.value);
@@ -120,6 +103,8 @@
       </div>
     {:else}
       {#each sorted as tun (tun.name)}
+        {@const chip = dnsChips.get(tun.name)}
+        {@const av = $automationVerdicts.get(tun.name)}
         <button
           class="tunnel-item"
           class:active={$selectedTunnel?.name === tun.name}
@@ -135,12 +120,10 @@
             {#if tun.endpoint}
               <span class="tunnel-meta">{tun.endpoint}</span>
             {/if}
-            {#if dnsChip($t, tun.dns_mode, tun.dns_domains || [])}
-              {@const chip = dnsChip($t, tun.dns_mode, tun.dns_domains || [])}
+            {#if chip}
               <span class="tunnel-dns" title={chip.hint}>{chip.text}</span>
             {/if}
-            {#if verdictFor($automationPreview, tun.name)}
-              {@const av = verdictFor($automationPreview, tun.name)}
+            {#if av}
               {@const line = verdictText($t, av)}
               {#if line}
                 <span class="tunnel-auto tunnel-auto-{verdictTone(av)}" title={line}>{line}</span>
@@ -448,7 +431,6 @@
     color: var(--text-muted);
   }
   .tunnel-auto-warn { color: var(--orange, #FF9500); }
-
   .list-items.compact .tunnel-meta,
   .list-items.compact .tunnel-dns,
   .list-items.compact .tunnel-auto {

@@ -30,32 +30,31 @@ import (
 // Minor 4 adds serialized profile deletion in the helper.
 // Minor 5 adds WireGuard backend selection and its settings-change event field.
 // Minor 6 adds AutomationTunnelDecision.Blocked (loop-watchdog block) to Automation.Preview.
-// Minor 7 adds event.automation (per-tunnel Automation decisions). The older
-// event.automation_skipped is still sent alongside it.
-// Minor 8 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
+// Minor 9 adds the read-only Diag.Snapshot (WireGuide pf anchors / nft tables
 // for the diagnostics bundle); an older helper answers method-not-found and
 // the bundle records the section as unavailable.
-// Minor 9 adds the read-only Helper.Info method and the optional code/action
-// fields on event.critical_error, so the GUI can offer a user-initiated
-// "Repair helper" instead of telling the user to quit and reopen.
 // Minor 10 adds the read-only Firewall.Status method, the per-tunnel
-// dns_mode / dns_servers / dns_protected status fields and the
-// dns_protection_failing critical-error code. An older helper answers
-// Firewall.Status with method-not-found and omits the fields, which the GUI
-// reports as unknown.
-// Minor 11 adds AutomationPreviewResponse.Medium (connection type of the primary
+// dns_mode / dns_servers / dns_protected status fields and
+// CriticalErrorPayload.Code. An older helper answers Firewall.Status with
+// method-not-found and omits the fields, which the GUI reports as unknown.
+// Minor 11 adds the read-only Helper.Info method and the optional action
+// field on event.critical_error, so the GUI can offer a user-initiated
+// "Repair helper" instead of telling the user to quit and reopen.
+// Minor 12 adds event.automation (per-tunnel Automation decisions). The older
+// event.automation_skipped is still sent alongside it.
+// Minor 13 adds AutomationPreviewResponse.Medium (connection type of the primary
 // interface) for connection-type automation rules.
-// Minor 12 adds Network.ResetDNS, the "Reset DNS & firewall" escape hatch; an
+// Minor 14 adds Network.ResetDNS, the "Reset DNS & firewall" escape hatch; an
 // older helper answers method-not-found and clients say it must be updated.
-// Minor 13 adds the status fields last_change_reason / last_change_at (why a
+// Minor 15 adds the status fields last_change_reason / last_change_at (why a
 // tunnel came up) and the top-level recent_disconnects map (why a tunnel
 // recently went down), used for change reasons in the connection history.
-// Minor 14 adds Helper.Info's optional recovery object (what startup crash
+// Minor 16 adds Helper.Info's optional recovery object (what startup crash
 // recovery cleaned up: tunnels, DNS, firewall rules); an older helper omits
 // it.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 14
+	ProtocolMinor = 16
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -143,6 +142,7 @@ const (
 	ErrCodeInvalidParams  = -32602
 	ErrCodeInternalError  = -32603
 	ErrCodeAppError       = -32000
+	ErrCodeNotConnected   = -32001
 )
 
 // RPC method names
@@ -196,12 +196,12 @@ const (
 	MethodRequestQuit = "Helper.RequestQuit"
 	// MethodHelperInfo is a read-only description of the running helper
 	// (version, how it was started, socket, pid) for the Settings status
-	// card. Minor 9; an older helper answers method-not-found.
+	// card. Minor 6; an older helper answers method-not-found.
 	MethodHelperInfo = "Helper.Info"
 	// MethodResetDNS flushes WireGuide's firewall rules and split-DNS keys,
 	// retries any retained DNS recovery journal now and flushes the DNS
 	// cache. Refused while a tunnel is connected, wanted or pending restore
-	// (unless forced) or while the kill switch is wanted. Minor 12.
+	// (unless forced) or while the kill switch is wanted. Minor 7.
 	MethodResetDNS = "Network.ResetDNS"
 )
 
@@ -211,12 +211,13 @@ const (
 	EventReconnect         = "event.reconnect"
 	EventLog               = "event.log"
 	EventWifiSSID          = "event.wifi_ssid"
+	EventAutomationChanged = "event.automation_changed"
 	EventAutoConnect       = "event.auto_connect"
 	EventAutomationSkipped = "event.automation_skipped"
 	// EventAutomation reports an Automation decision: every executed
 	// rule-driven connect/disconnect (success or failure), and a
 	// held/latched/skipped_overlap decision when it changes for a tunnel.
-	// Protocol minor >= 7.
+	// Protocol minor >= 12.
 	EventAutomation = "event.automation"
 	// EventForcedDisconnect tells the GUI the helper tore a tunnel down on
 	// its own — the endpoint-route watchdog found a routing loop (#49) —

@@ -156,7 +156,7 @@ func Build(w io.Writer, src Sources) error {
 	b.addGUILogs()
 	b.addNetwork()
 	b.addHelperSnapshot()
-	b.addHelperJSON("helper-info.json", ipc.MethodHelperInfo, "1.9")
+	b.addHelperJSON("helper-info.json", ipc.MethodHelperInfo, "1.11")
 	b.addHelperJSON("firewall-status.json", ipc.MethodFirewallStatus, "1.10")
 	b.addAutomation()
 	b.addDNSLeak()
@@ -490,7 +490,7 @@ func (b *builder) addHelperSnapshot() {
 	var snap ipc.DiagSnapshotResponse
 	if err := b.src.Helper.Call(ipc.MethodDiagSnapshot, nil, &snap); err != nil {
 		b.note("%s: unavailable (%v)", file, err)
-		b.add(file, []byte(fmt.Sprintf("unavailable: %v\n(a helper older than IPC 1.8 has no Diag.Snapshot)\n", err)))
+		b.add(file, []byte(fmt.Sprintf("unavailable: %v\n(a helper older than IPC 1.9 has no Diag.Snapshot)\n", err)))
 		return
 	}
 	var sb strings.Builder

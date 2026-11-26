@@ -584,7 +584,7 @@ export class HelperInfo {
         if (/** @type {any} */(false)) {
             /**
              * Recovery is what the helper's startup crash recovery cleaned up; nil
-             * when nothing was (or the helper predates IPC 1.14).
+             * when nothing was (or the helper predates IPC 1.16).
              * @member
              * @type {ipc$0.HelperRecovery | null | undefined}
              */
@@ -1072,16 +1072,6 @@ export class TunnelInfo {
         }
         if (/** @type {any} */(false)) {
             /**
-             * Warnings carries non-blocking lint findings (currently the
-             * cross-tunnel duplicate-Address warning) from ImportConfig so the UI
-             * can surface them after a successful import.
-             * @member
-             * @type {config$0.Diagnostic[] | undefined}
-             */
-            this["warnings"] = undefined;
-        }
-        if (/** @type {any} */(false)) {
-            /**
              * DNSMode is the intended DNS behaviour from the config: "global"
              * (replaces system DNS), "split" (only DNSDomains), "search" (search
              * domains only) or "none". Intent, not read back from the OS.
@@ -1097,6 +1087,16 @@ export class TunnelInfo {
              */
             this["dns_domains"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * Warnings carries non-blocking lint findings (currently the
+             * cross-tunnel duplicate-Address warning) from ImportConfig so the UI
+             * can surface them after a successful import.
+             * @member
+             * @type {config$0.Diagnostic[] | undefined}
+             */
+            this["warnings"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1107,14 +1107,14 @@ export class TunnelInfo {
      * @returns {TunnelInfo}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType12;
-        const $$createField9_0 = $$createType4;
+        const $$createField8_0 = $$createType4;
+        const $$createField9_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("warnings" in $$parsedSource) {
-            $$parsedSource["warnings"] = $$createField7_0($$parsedSource["warnings"]);
-        }
         if ("dns_domains" in $$parsedSource) {
-            $$parsedSource["dns_domains"] = $$createField9_0($$parsedSource["dns_domains"]);
+            $$parsedSource["dns_domains"] = $$createField8_0($$parsedSource["dns_domains"]);
+        }
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField9_0($$parsedSource["warnings"]);
         }
         return new TunnelInfo(/** @type {Partial<TunnelInfo>} */($$parsedSource));
     }

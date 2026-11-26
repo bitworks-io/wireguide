@@ -380,9 +380,11 @@ func (n *notifier) schedule(key string, kind msgKind, tunnel string, gen uint64)
 		n.mu.Lock()
 		// A timer that fired after being replaced or cancelled must not
 		// remove its successor.
-		if n.pending[key] == timer {
-			delete(n.pending, key)
+		if n.pending[key] != timer {
+			n.mu.Unlock()
+			return
 		}
+		delete(n.pending, key)
 		skip := !n.liveLocked(gen) || n.claimedLocked(key, time.Now())
 		n.mu.Unlock()
 		// Checkpoint at expiry: the toggle may have been turned off (here
@@ -437,7 +439,8 @@ func (n *notifier) cancelPending(key string) bool {
 		return false
 	}
 	delete(n.pending, key)
-	return t.Stop()
+	t.Stop()
+	return true
 }
 
 // onAutoConnected handles the helper's auto_connected event: it names the
@@ -512,6 +515,9 @@ func (n *notifier) sendRendered(gen uint64, render func(lang string) (title, bod
 		return
 	}
 	n.spawn(func() {
+		if !n.current(gen) {
+			return
+		}
 		title, body := render(n.language())
 		n.post(gen, title, body)
 	})
@@ -586,6 +592,10 @@ func (n *notifier) deliver(gen uint64, title, body string) {
 // service.
 func (n *notifier) sendViaService(gen uint64, title, body string) serviceResult {
 	n.svcMu.Lock()
+	if !n.current(gen) {
+		n.svcMu.Unlock()
+		return serviceDrop
+	}
 	if !n.svcStarted {
 		n.svcStarted = true
 		n.svc = n.newBackend()
@@ -594,6 +604,10 @@ func (n *notifier) sendViaService(gen uint64, title, body string) serviceResult 
 		} else {
 			n.svcUsable = true
 		}
+	}
+	if !n.current(gen) {
+		n.svcMu.Unlock()
+		return serviceDrop
 	}
 	if !n.svcUsable {
 		n.svcMu.Unlock()

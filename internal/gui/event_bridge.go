@@ -26,10 +26,9 @@ type eventBridge struct {
 	// onReconcileHistory is called on every status event with the active
 	// tunnel set + per-tunnel rx/tx so the history store can record sessions
 	// that were started or ended by the helper itself (auto-reconnect on
-	// wake, wifi rules, health-check recovery), plus the helper's start/end
-	// reasons and the GUI's current SSID (see historyInput). nil when the
-	// bridge runs without a history store.
-	onReconcileHistory reconcileHistoryFunc
+	// wake, wifi rules, health-check recovery). nil when the bridge runs
+	// without a history store.
+	onReconcileHistory func(status domain.ConnectionStatus, source *ipc.Client)
 	// onQuitRequested terminates the app. Fired for ipc.EventQuit, which
 	// the helper broadcasts when someone runs `wireguide ctl stop`.
 	onQuitRequested func()
@@ -45,7 +44,7 @@ func newEventBridge(
 	app *application.App,
 	clients *ipc.ClientHolder,
 	onStatusChange func(activeNames []string, handshakeMap map[string]bool),
-	onReconcileHistory reconcileHistoryFunc,
+	onReconcileHistory func(status domain.ConnectionStatus, source *ipc.Client),
 	onQuitRequested func(),
 ) *eventBridge {
 	return &eventBridge{
@@ -94,7 +93,7 @@ func (b *eventBridge) resubscribe() bool {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		if b.subscribedTo == c && b.clients.Get() == c {
-			b.handleEvent(method, params)
+			b.handleEvent(method, params, c)
 		}
 	}); err != nil {
 		slog.Warn("event subscription failed", "error", err)
@@ -104,7 +103,7 @@ func (b *eventBridge) resubscribe() bool {
 	return true
 }
 
-func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
+func (b *eventBridge) handleEvent(method string, params json.RawMessage, sources ...*ipc.Client) {
 	switch method {
 	case ipc.EventStatus:
 		var status domain.ConnectionStatus
@@ -118,8 +117,11 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 				b.onStatusChange(names, handshakes)
 			}
 			if b.onReconcileHistory != nil {
-				in := historyInput(status)
-				b.onReconcileHistory(status.ActiveTunnels, in.rx, in.tx, "", in.startReasons, in.endReasons, getCurrentSSID())
+				var source *ipc.Client
+				if len(sources) > 0 {
+					source = sources[0]
+				}
+				b.onReconcileHistory(status, source)
 			}
 		}
 	case ipc.EventReconnect:
@@ -154,6 +156,8 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			setCurrentSSID(payload.NewSSID)
 			b.app.Event.Emit("wifi_ssid", payload)
 		}
+	case ipc.EventAutomationChanged:
+		b.app.Event.Emit("automation_changed", struct{}{})
 	case ipc.EventAutoConnect:
 		// Helper auto-connected a tunnel via Wi-Fi rules. Frontend must run
 		// the same post-connect refresh (refreshTunnels + refreshStatus) as
@@ -173,7 +177,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage) {
 			b.app.Event.Emit("automation_skipped", payload)
 		}
 	case ipc.EventAutomation:
-		// An Automation decision (protocol minor >= 7): executed rule
+		// An Automation decision (protocol minor >= 12): executed rule
 		// connects/disconnects and held/latched/skipped_overlap changes.
 		// The helper sends it before the matching auto_connect.
 		var payload ipc.AutomationEventPayload
@@ -246,51 +250,4 @@ func (b *eventBridge) clearConnectionIndicators() {
 	if b.onStatusChange != nil {
 		b.onStatusChange(nil, nil)
 	}
-}
-
-// reconcileHistoryFunc is TunnelService.ReconcileHistoryFromStatus.
-type reconcileHistoryFunc func(activeNames []string, rx, tx map[string]int64, reason string, startReasons, endReasons map[string]string, ssid string)
-
-// historyReconcileInput is one status event's per-tunnel history input.
-type historyReconcileInput struct {
-	rx, tx                   map[string]int64
-	startReasons, endReasons map[string]string
-}
-
-// historyInput extracts the history reconcile input from a status event:
-// per-tunnel counters, the helper's start reasons (last_change_reason —
-// on the primary itself, since Tunnels is only filled with more than one
-// tunnel) and its recent end reasons (recent_disconnects). The reason maps
-// stay nil with an older helper.
-func historyInput(status domain.ConnectionStatus) historyReconcileInput {
-	in := historyReconcileInput{
-		rx: make(map[string]int64, len(status.Tunnels)+1),
-		tx: make(map[string]int64, len(status.Tunnels)+1),
-	}
-	add := func(ts domain.ConnectionStatus) {
-		in.rx[ts.TunnelName] = ts.RxBytes
-		in.tx[ts.TunnelName] = ts.TxBytes
-		if ts.LastChangeReason != "" {
-			if in.startReasons == nil {
-				in.startReasons = map[string]string{}
-			}
-			in.startReasons[ts.TunnelName] = ts.LastChangeReason
-		}
-	}
-	for _, ts := range status.Tunnels {
-		add(ts)
-	}
-	if status.TunnelName != "" {
-		add(status)
-	}
-	for name, c := range status.RecentDisconnects {
-		if c.Reason == "" {
-			continue
-		}
-		if in.endReasons == nil {
-			in.endReasons = map[string]string{}
-		}
-		in.endReasons[name] = c.Reason
-	}
-	return in
 }

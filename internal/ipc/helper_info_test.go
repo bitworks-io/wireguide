@@ -7,8 +7,8 @@ import (
 )
 
 func TestProtocolMinorCoversHelperInfo(t *testing.T) {
-	if ProtocolMinor < 9 {
-		t.Fatalf("ProtocolMinor = %d, Helper.Info needs >= 9", ProtocolMinor)
+	if ProtocolMinor < 11 {
+		t.Fatalf("ProtocolMinor = %d, Helper.Info needs >= 11", ProtocolMinor)
 	}
 	if MethodHelperInfo != "Helper.Info" {
 		t.Fatalf("MethodHelperInfo = %q", MethodHelperInfo)
@@ -30,11 +30,11 @@ func TestCriticalErrorPayloadAdditive(t *testing.T) {
 	}
 }
 
-// Helper.Info's recovery object (minor 14) is omitted when nothing was
+// Helper.Info's recovery object (minor 16) is omitted when nothing was
 // cleaned, and uses the documented field names when present.
 func TestHelperInfoRecoveryWireShape(t *testing.T) {
-	if ProtocolMinor < 14 {
-		t.Fatalf("ProtocolMinor = %d, Helper.Info recovery needs >= 14", ProtocolMinor)
+	if ProtocolMinor < 16 {
+		t.Fatalf("ProtocolMinor = %d, Helper.Info recovery needs >= 16", ProtocolMinor)
 	}
 	b, _ := json.Marshal(HelperInfoResponse{PID: 1})
 	if strings.Contains(string(b), "recovery") {

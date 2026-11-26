@@ -1,6 +1,9 @@
 package ipc
 
-import "github.com/korjwl1/wireguide/internal/domain"
+import (
+	"github.com/korjwl1/wireguide/internal/automation"
+	"github.com/korjwl1/wireguide/internal/domain"
+)
 
 // Empty is used for requests/responses with no payload.
 type Empty struct{}
@@ -18,7 +21,7 @@ type PingResponse struct {
 func (p PingResponse) GUIKnown() bool { return MinorOf(p.Version) >= 2 }
 
 // HelperInfoResponse is the read-only result of Helper.Info (protocol minor
-// >= 6).
+// >= 11).
 type HelperInfoResponse struct {
 	AppVersion      string `json:"app_version"`
 	ProtocolVersion string `json:"protocol_version"`
@@ -35,7 +38,7 @@ type HelperInfoResponse struct {
 	GUIAttached      bool   `json:"gui_attached"`
 	// Recovery is what this helper's startup crash recovery cleaned up after
 	// the previous helper process; nil when it found nothing to clean.
-	// Protocol minor >= 14.
+	// Protocol minor >= 16.
 	Recovery *HelperRecovery `json:"recovery,omitempty"`
 }
 
@@ -52,7 +55,7 @@ type HelperRecovery struct {
 	FirewallFlushed bool `json:"firewall_flushed,omitempty"`
 }
 
-// ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 12).
+// ResetDNSRequest is the parameter for Network.ResetDNS (protocol minor >= 14).
 type ResetDNSRequest struct {
 	// Force disconnects every connected, wanted or pending-restore tunnel
 	// first, as an explicit user Off.
@@ -236,7 +239,7 @@ const (
 )
 
 // AutomationEventPayload is broadcast as EventAutomation (protocol minor
-// >= 7). RuleIndex is the deciding rule's position in the tunnel's rule
+// >= 12). RuleIndex is the deciding rule's position in the tunnel's rule
 // list, -1 when no single rule applies (a manual latch). RuleText is an
 // English description of that rule ("SSID is not Home"); GUIs localise
 // from the rule itself when they can. Error is set when an executed
@@ -269,7 +272,7 @@ type CriticalErrorPayload struct {
 	// "dns_protection_failing") the GUI maps to a translated message; Detail
 	// stays the English fallback. Action optionally names a remedy the GUI
 	// can offer ("repair_helper"). Both are additive (Code since protocol
-	// minor 9, dns_protection_failing since 10).
+	// minor 10, Action since 11).
 	Code   string `json:"code,omitempty"`
 	Action string `json:"action,omitempty"`
 }
@@ -359,7 +362,14 @@ type AutomationTunnelDecision struct {
 	Latched  bool   `json:"latched,omitempty"`
 	// Blocked is true when the loop watchdog has blocked this tunnel from
 	// automatic (re)connects; a "connect" decision is then not acted on.
-	Blocked bool `json:"blocked,omitempty"`
+	Blocked    bool                      `json:"blocked,omitempty"`
+	Evaluation *AutomationRuleEvaluation `json:"evaluation,omitempty"`
+}
+
+type AutomationRuleEvaluation struct {
+	RuleIndex       int                   `json:"rule_index"`
+	Condition       *automation.Condition `json:"condition,omitempty"`
+	HasNegatedRules bool                  `json:"has_negated_rules"`
 }
 
 // RecoveryWarningPayload reports retained OS cleanup without disabling new connections.

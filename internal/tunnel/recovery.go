@@ -44,6 +44,10 @@ type ActiveTunnelState struct {
 	// which is the correct behaviour for the common no-custom-domains
 	// setup and strictly better than leaking tunnel domains.
 	PreModSearch map[string][]string `json:"pre_mod_search,omitempty"`
+
+	// KernelIfindex identifies a kernel WireGuard link created with a random
+	// requested index. Zero means a legacy or userspace journal.
+	KernelIfindex int32 `json:"kernel_ifindex,omitempty"`
 }
 
 // DNS modes recorded in ActiveTunnelState.DNSMode.
@@ -206,6 +210,7 @@ func RecoverFromCrash(dataDir string, fw FirewallCleaner) []string {
 // savedDNSInterface/Servers) consistent with what the post-recovery
 // helper code expects. A nil fw is treated as "no firewall cleanup".
 func RecoverFromCrashReport(dataDir string, fw FirewallCleaner) RecoveryReport {
+	recoverKernelLinkIntents(dataDir)
 	var report RecoveryReport
 	// Split-DNS dynamic-store keys outlive a crashed helper and are not
 	// tied to a journal, so sweep them whether or not one exists. No
@@ -233,6 +238,7 @@ func RecoverFromCrashReport(dataDir string, fw FirewallCleaner) RecoveryReport {
 		// per-tunnel state across iterations and double-restored
 		// overlapping services).
 		mgr := newRecoveryManager()
+		installKernelLinkGuard(mgr, state)
 		if setter, mok := mgr.(network.PersistentStateDirSetter); mok {
 			setter.SetPersistentStateDir(dataDir)
 		}

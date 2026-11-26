@@ -23,7 +23,7 @@ const (
 type fakeHelper struct {
 	failSnapshot bool
 	// oldHelper answers Helper.Info and Firewall.Status with
-	// method-not-found, as a helper before IPC 1.9 / 1.10 does.
+	// method-not-found, as a helper before IPC 1.11 / 1.10 does.
 	oldHelper bool
 }
 

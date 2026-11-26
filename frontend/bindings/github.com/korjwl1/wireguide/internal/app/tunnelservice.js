@@ -189,11 +189,6 @@ export function Disconnect() {
 }
 
 /**
- * DisconnectTunnel disconnects a specific tunnel by name. Mirrors
- * Disconnect()'s "client closed" retry: a helper recovery during a
- * per-tunnel disconnect (e.g. user clicks the tray's per-tunnel
- * item right when the health monitor swaps clients) should be
- * transparent, not surfaced as a confusing error.
  * @param {string} name
  * @returns {$CancellablePromise<void>}
  */
@@ -528,7 +523,7 @@ export function ImportZipData(data) {
 }
 
 /**
- * LintConfigFor returns advisory (non-blocking) editor diagnostics for a raw
+ * LintConfig returns advisory (non-blocking) editor diagnostics for a raw
  * config string: DNS errors mirroring ValidateConfig, plus warnings and hints.
  * editing is the saved tunnel name being edited ("" for a new tunnel); it is
  * excluded from the cross-tunnel duplicate-Address check so an edit never
@@ -539,8 +534,8 @@ export function ImportZipData(data) {
  * @param {string} content
  * @returns {$CancellablePromise<config$0.Diagnostic[]>}
  */
-export function LintConfigFor(editing, content) {
-    return $Call.ByID(527601885, editing, content).then(/** @type {($result: any) => any} */(($result) => {
+export function LintConfig(editing, content) {
+    return $Call.ByID(165708614, editing, content).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType35($result);
     }));
 }
@@ -622,13 +617,15 @@ export function ReadFile(path) {
  *     rules engine / sleep-wake)
  *   - closes a session for any tracked tunnel that has disappeared (using
  *     cached rx/tx from lastKnownStats). The end reason is, in order: the
- *     helper's recorded reason (endReasons, from the status's
+ *     helper's recorded reason (reasons.end, from the status's
  *     recent_disconnects), the cached "user" hint, then disappearReason —
  *     defaults to "reconnect"
  * 
- * New sessions record the helper's start reason (startReasons, from each
+ * New sessions record the helper's start reason (reasons.start, from each
  * tunnel's last_change_reason) and the GUI's current Wi-Fi SSID. All three
- * are empty with an older helper / off Wi-Fi.
+ * are empty with an older helper / off Wi-Fi. Reasons only label sessions;
+ * which session opens or closes, and with which counters, is decided by the
+ * counter-epoch and session-fencing logic alone.
  * 
  * Stats cache is always refreshed for currently-active tunnels so disconnect
  * closes have ≤ 1 status-event-tick stale counters. Reason hints set by
@@ -643,13 +640,10 @@ export function ReadFile(path) {
  * @param {{ [_ in string]?: number }} rxByTunnel
  * @param {{ [_ in string]?: number }} txByTunnel
  * @param {string} disappearReason
- * @param {{ [_ in string]?: string }} startReasons
- * @param {{ [_ in string]?: string }} endReasons
- * @param {string} ssid
  * @returns {$CancellablePromise<void>}
  */
-export function ReconcileHistoryFromStatus(activeNames, rxByTunnel, txByTunnel, disappearReason, startReasons, endReasons, ssid) {
-    return $Call.ByID(1482043575, activeNames, rxByTunnel, txByTunnel, disappearReason, startReasons, endReasons, ssid);
+export function ReconcileHistoryFromStatus(activeNames, rxByTunnel, txByTunnel, disappearReason) {
+    return $Call.ByID(1482043575, activeNames, rxByTunnel, txByTunnel, disappearReason);
 }
 
 /**

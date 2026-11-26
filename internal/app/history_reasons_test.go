@@ -1,20 +1,34 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/korjwl1/wireguide/internal/domain"
+)
+
+// reconcileWithReasons runs one status reconcile carrying the helper's
+// start/end reasons and the GUI's SSID.
+func reconcileWithReasons(s *TunnelService, active []string, rx, tx map[string]int64, start, end map[string]string, ssid string) {
+	samples := make(map[string]counterSample, len(active))
+	for _, name := range active {
+		samples[name] = counterSample{name: name, rx: rx[name], tx: tx[name]}
+	}
+	s.reconcileHistoryFromStatus(active, samples, "", historyReasons{start: start, end: end, ssid: ssid})
+}
 
 // A session opened by a status event records the helper's start reason and
 // the GUI's SSID; its close uses the helper's recent_disconnects reason.
 func TestReconcileRecordsStartReasonSSIDAndHelperEndReason(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 100, 50)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", map[string]string{"a": "automation"}, nil, "HomeWiFi")
+	reconcileWithReasons(s, []string{"a"}, rx, tx, map[string]string{"a": "automation"}, nil, "HomeWiFi")
 	open := lastSession(t, s)
 	if open.StartReason != "automation" || open.SSID != "HomeWiFi" {
 		t.Fatalf("open session start_reason=%q ssid=%q", open.StartReason, open.SSID)
 	}
 	// Later ticks with another reason / SSID don't rewrite an open session.
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", map[string]string{"a": "wake"}, nil, "CafeWiFi")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, map[string]string{"a": "watchdog"}, "CafeWiFi")
+	reconcileWithReasons(s, []string{"a"}, rx, tx, map[string]string{"a": "wake"}, nil, "CafeWiFi")
+	reconcileWithReasons(s, nil, nil, nil, nil, map[string]string{"a": "watchdog"}, "CafeWiFi")
 	closed := lastSession(t, s)
 	if closed.StartReason != "automation" || closed.SSID != "HomeWiFi" {
 		t.Fatalf("closed session start_reason=%q ssid=%q", closed.StartReason, closed.SSID)
@@ -43,15 +57,15 @@ func TestReconcileEndReasonPriority(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newHistoryTestService(t)
 			rx, tx := rxtx("a", 1000, 500)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+			reconcileWithReasons(s, []string{"a"}, rx, tx, nil, nil, "")
 			if tc.userHint {
 				s.markUserDisconnect("a", 0, 0)
 			}
 			zrx, ztx := rxtx("a", 0, 0)
-			s.ReconcileHistoryFromStatus([]string{"a"}, zrx, ztx, "", nil, nil, "") // teardown 0/0 tick
+			reconcileWithReasons(s, []string{"a"}, zrx, ztx, nil, nil, "") // teardown 0/0 tick
 			rrx, rtx := rxtx("a", 10, 5)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rrx, rtx, "", nil, nil, "") // counter reset tick
-			s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, tc.endReasons, "")
+			reconcileWithReasons(s, []string{"a"}, rrx, rtx, nil, nil, "") // counter reset tick
+			reconcileWithReasons(s, nil, nil, nil, nil, tc.endReasons, "")
 			got := lastSession(t, s)
 			if got.DisconnectReason != tc.want {
 				t.Fatalf("end reason = %q, want %q", got.DisconnectReason, tc.want)
@@ -70,5 +84,42 @@ func TestMergeCarriesReasonHint(t *testing.T) {
 	st = st.merge(5, 5)
 	if st.reason != "user" {
 		t.Fatalf("reason = %q after merges, want user", st.reason)
+	}
+}
+
+// Single tunnel: no Tunnels list, so the start reason comes from the
+// primary; a tunnel that just went down reports its end reason top-level.
+func TestReasonsFromStatus_SingleTunnel(t *testing.T) {
+	r := reasonsFromStatus(ConnectionStatus{
+		TunnelName:       "home-vpn",
+		LastChangeReason: domain.ChangeReasonAutomation,
+		ActiveTunnels:    []string{"home-vpn"},
+		RecentDisconnects: map[string]domain.TunnelChange{
+			"office-vpn": {Reason: domain.ChangeReasonUser, At: "2026-01-02T10:00:00Z"},
+			"empty":      {},
+		},
+	}, "HomeWiFi")
+	if r.start["home-vpn"] != domain.ChangeReasonAutomation || r.ssid != "HomeWiFi" {
+		t.Fatalf("start reasons = %v ssid = %q", r.start, r.ssid)
+	}
+	if len(r.end) != 1 || r.end["office-vpn"] != domain.ChangeReasonUser {
+		t.Fatalf("end reasons = %v", r.end)
+	}
+}
+
+func TestReasonsFromStatus_MultiTunnelAndOldHelper(t *testing.T) {
+	r := reasonsFromStatus(ConnectionStatus{
+		TunnelName: "a",
+		Tunnels: []domain.ConnectionStatus{
+			{TunnelName: "a", LastChangeReason: domain.ChangeReasonUser},
+			{TunnelName: "b", LastChangeReason: domain.ChangeReasonWake},
+		},
+	}, "")
+	if r.start["a"] != domain.ChangeReasonUser || r.start["b"] != domain.ChangeReasonWake {
+		t.Fatalf("start reasons = %v", r.start)
+	}
+	old := reasonsFromStatus(ConnectionStatus{TunnelName: "a"}, "")
+	if old.start != nil || old.end != nil {
+		t.Fatal("an older helper's status must yield nil reason maps")
 	}
 }

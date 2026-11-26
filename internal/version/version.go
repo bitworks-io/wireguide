@@ -1,4 +1,4 @@
 // Package version supplies build identity without update or GUI dependencies.
 package version
 
-const Current = "0.6.1-bitworks.1"
+const Current = "0.7.0-bitworks.1"

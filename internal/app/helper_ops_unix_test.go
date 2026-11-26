@@ -51,7 +51,7 @@ func serviceWithHelper(t *testing.T, handlers map[string]func(json.RawMessage) (
 func TestGetHelperInfoUsesHelperInfo(t *testing.T) {
 	s := serviceWithHelper(t, map[string]func(json.RawMessage) (interface{}, error){
 		ipc.MethodHelperInfo: func(json.RawMessage) (interface{}, error) {
-			return ipc.HelperInfoResponse{AppVersion: "1.2.3", ProtocolVersion: "1.9", PID: 42,
+			return ipc.HelperInfoResponse{AppVersion: "1.2.3", ProtocolVersion: "1.11", PID: 42,
 				StartedAt: "2026-01-02T03:04:05Z", StartMode: "launchd-socket", SocketPath: "/x", GUIAttached: true,
 				Recovery: &ipc.HelperRecovery{TunnelsRecovered: []string{"home-vpn"}, FirewallFlushed: true}}, nil
 		},

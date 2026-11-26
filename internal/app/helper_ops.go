@@ -32,7 +32,7 @@ type HelperInfo struct {
 	ActivationReason string `json:"activation_reason"`
 	GUIAttached      bool   `json:"gui_attached"`
 	// Recovery is what the helper's startup crash recovery cleaned up; nil
-	// when nothing was (or the helper predates IPC 1.14).
+	// when nothing was (or the helper predates IPC 1.16).
 	Recovery *ipc.HelperRecovery `json:"recovery,omitempty"`
 }
 

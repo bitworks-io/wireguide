@@ -87,6 +87,13 @@ export class ConnectionStatus {
              * @member
              * @type {string | undefined}
              */
+            this["counter_epoch"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
             this["duration"] = undefined;
         }
         if (!("rx_bytes" in $$source)) {
@@ -163,7 +170,7 @@ export class ConnectionStatus {
         if (/** @type {any} */(false)) {
             /**
              * LastChangeReason / LastChangeAt say what last brought this tunnel up
-             * (protocol minor 13): one of the ChangeReason* values and an RFC3339
+             * (protocol minor 15): one of the ChangeReason* values and an RFC3339
              * time. Empty when the helper does not know (older helper, or a tunnel
              * it did not connect itself).
              * @member
@@ -181,7 +188,7 @@ export class ConnectionStatus {
         if (/** @type {any} */(false)) {
             /**
              * RecentDisconnects maps a tunnel that went down in the last minute to
-             * why (top-level only; protocol minor 13). A disconnected tunnel is no
+             * why (top-level only; protocol minor 15). A disconnected tunnel is no
              * longer in the status at all, so this is how its end reason reaches
              * the GUI's history.
              * @member
@@ -218,22 +225,22 @@ export class ConnectionStatus {
      * @returns {ConnectionStatus}
      */
     static createFrom($$source = {}) {
-        const $$createField11_0 = $$createType0;
-        const $$createField15_0 = $$createType2;
-        const $$createField16_0 = $$createType0;
-        const $$createField17_0 = $$createType4;
+        const $$createField12_0 = $$createType0;
+        const $$createField16_0 = $$createType2;
+        const $$createField17_0 = $$createType0;
+        const $$createField18_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("dns_servers" in $$parsedSource) {
-            $$parsedSource["dns_servers"] = $$createField11_0($$parsedSource["dns_servers"]);
+            $$parsedSource["dns_servers"] = $$createField12_0($$parsedSource["dns_servers"]);
         }
         if ("recent_disconnects" in $$parsedSource) {
-            $$parsedSource["recent_disconnects"] = $$createField15_0($$parsedSource["recent_disconnects"]);
+            $$parsedSource["recent_disconnects"] = $$createField16_0($$parsedSource["recent_disconnects"]);
         }
         if ("active_tunnels" in $$parsedSource) {
-            $$parsedSource["active_tunnels"] = $$createField16_0($$parsedSource["active_tunnels"]);
+            $$parsedSource["active_tunnels"] = $$createField17_0($$parsedSource["active_tunnels"]);
         }
         if ("tunnels" in $$parsedSource) {
-            $$parsedSource["tunnels"] = $$createField17_0($$parsedSource["tunnels"]);
+            $$parsedSource["tunnels"] = $$createField18_0($$parsedSource["tunnels"]);
         }
         return new ConnectionStatus(/** @type {Partial<ConnectionStatus>} */($$parsedSource));
     }

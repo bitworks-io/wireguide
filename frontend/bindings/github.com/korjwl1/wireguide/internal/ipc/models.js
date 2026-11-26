@@ -8,7 +8,7 @@ import { Create as $Create } from "@wailsio/runtime";
 
 /**
  * AutomationEventPayload is broadcast as EventAutomation (protocol minor
- * >= 7). RuleIndex is the deciding rule's position in the tunnel's rule
+ * >= 12). RuleIndex is the deciding rule's position in the tunnel's rule
  * list, -1 when no single rule applies (a manual latch). RuleText is an
  * English description of that rule ("SSID is not Home"); GUIs localise
  * from the rule itself when they can. Error is set when an executed

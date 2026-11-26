@@ -6,8 +6,8 @@ import (
 )
 
 func TestProtocolMinorCoversResetDNS(t *testing.T) {
-	if ProtocolMinor < 12 {
-		t.Fatalf("ProtocolMinor = %d, Network.ResetDNS needs >= 12", ProtocolMinor)
+	if ProtocolMinor < 14 {
+		t.Fatalf("ProtocolMinor = %d, Network.ResetDNS needs >= 14", ProtocolMinor)
 	}
 	if MethodResetDNS != "Network.ResetDNS" {
 		t.Fatalf("MethodResetDNS = %q", MethodResetDNS)

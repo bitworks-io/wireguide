@@ -130,7 +130,7 @@ func (h *Helper) statusDTO() ipc.ConnectionStatus {
 		result.LatencyMs = lat
 	}
 
-	// Change reasons (protocol minor 13): why each listed tunnel came up,
+	// Change reasons (protocol minor 15): why each listed tunnel came up,
 	// and why recently-ended tunnels went down — a gone tunnel is absent
 	// from the status entirely, so its end reason travels top-level. The
 	// primary carries its own reason because Tunnels is filled only when

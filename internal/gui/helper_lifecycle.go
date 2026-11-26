@@ -49,6 +49,9 @@ func firstContactBudget(addr string) time.Duration {
 // one with privilege elevation. Authorization time is excluded from the
 // 30-second readiness timeout; ctx can still cancel recovery during shutdown.
 func ensureHelper(ctx context.Context, dataDir string, restoreDesired bool) (*ipc.Client, error) {
+	if err := elevate.ValidateHelperSource(ctx); err != nil {
+		return nil, fmt.Errorf("validate helper source: %w", err)
+	}
 	args := elevate.Args{
 		SocketPath: ipc.DefaultSocketPath(),
 		// -1 on Windows — the SID below is the owner identity there.
@@ -103,7 +106,7 @@ func ensureHelperWith(ctx context.Context, args elevate.Args, spawn func(context
 				return client, nil
 			}
 			if plistDrifted {
-				slog.Warn("LaunchDaemon plist drift detected, forcing reinstall",
+				slog.Warn("LaunchDaemon installation drift detected, forcing reinstall",
 					"helper", helperAppVersion, "gui", guiVersion)
 			} else if ipc.MinorOf(resp.Version) < ipc.ProtocolMinor {
 				slog.Warn("helper protocol update required", "helper", resp.Version, "gui", ipc.ProtocolVersion)
@@ -567,8 +570,15 @@ func repairProbe(ctx context.Context, clients *ipc.ClientHolder, addr string) (c
 	return c, owned, resp, busy, true
 }
 
-// repairHelper is the user-requested "Repair helper" action.
+// repairHelper is the user-requested "Repair helper" action. Like
+// ensureHelper it validates the packaged helper (on macOS the separately
+// signed Contents/Library/LaunchServices executable) before anything touches
+// the running service, so a damaged app bundle is reported instead of
+// leaving the user without a helper.
 func repairHelper(ctx context.Context, clients *ipc.ClientHolder, bridge *eventBridge, dataDir string) error {
+	if err := elevate.ValidateHelperSource(ctx); err != nil {
+		return fmt.Errorf("validate helper source: %w", err)
+	}
 	args := elevate.Args{
 		SocketPath:     ipc.DefaultSocketPath(),
 		SocketUID:      os.Getuid(),
@@ -581,7 +591,7 @@ func repairHelper(ctx context.Context, clients *ipc.ClientHolder, bridge *eventB
 
 // repairHelperWith runs the same install/repair path as an upgrade
 // (ForceReinstall makes SpawnHelper skip the "already running" shortcut and
-// reinstall the binary and launchd plist), which is the only step that
+// reinstall the packaged helper and its launchd plist), which is the only step that
 // prompts; the explanation dialog and the single administrator prompt come
 // from that path. It refuses, before touching anything, while a tunnel is
 // connected, wanted or pending restore: replacing the helper would drop it.

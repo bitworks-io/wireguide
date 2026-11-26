@@ -35,21 +35,21 @@ func TestReconcileKeepsCountersAcrossZeroedTeardownTick(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			s := newHistoryTestService(t)
 			rx, tx := rxtx("a", 1000, 500)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 			rx, tx = rxtx("a", 5000, 2500)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 			if reason == "user" {
 				s.markUserDisconnect("a", 0, 0)
 			}
 			// Teardown tick: still active, counters zeroed.
 			rx, tx = rxtx("a", 0, 0)
-			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+			s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 			// Gone.
 			disappear := reason
 			if reason == "user" {
 				disappear = ""
 			}
-			s.ReconcileHistoryFromStatus(nil, nil, nil, disappear, nil, nil, "")
+			s.ReconcileHistoryFromStatus(nil, nil, nil, disappear)
 			got := lastSession(t, s)
 			if got.RxBytes != 5000 || got.TxBytes != 2500 {
 				t.Errorf("rx/tx = %d/%d, want 5000/2500", got.RxBytes, got.TxBytes)
@@ -63,12 +63,12 @@ func TestReconcileKeepsCountersAcrossZeroedTeardownTick(t *testing.T) {
 func TestReconcileAccumulatesAcrossCounterReset(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 1000, 400)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	rx, tx = rxtx("a", 0, 0)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	rx, tx = rxtx("a", 50, 20)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect")
 	got := lastSession(t, s)
 	if got.RxBytes != 1050 || got.TxBytes != 420 {
 		t.Errorf("rx/tx = %d/%d, want 1050/420", got.RxBytes, got.TxBytes)
@@ -80,9 +80,9 @@ func TestReconcileAccumulatesAcrossCounterReset(t *testing.T) {
 func TestCloseHistorySessionsUsesCachedCountersWhenHelperGone(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 7000, 3000)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	rx, tx = rxtx("a", 0, 0) // teardown tick before quit
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	s.CloseHistorySessions("app_quit")
 	got := lastSession(t, s)
 	if got.RxBytes != 7000 || got.TxBytes != 3000 || got.DisconnectReason != "app_quit" {
@@ -95,11 +95,11 @@ func TestCloseHistorySessionsUsesCachedCountersWhenHelperGone(t *testing.T) {
 func TestReconcileCounterResetWhenOnlyOneDirectionDrops(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 10_000_000, 2_000)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	// New device: rx restarts below, tx already past its old value.
 	rx, tx = rxtx("a", 5_000, 3_000)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "reconnect")
 	got := lastSession(t, s)
 	if got.RxBytes != 10_005_000 || got.TxBytes != 5_000 {
 		t.Errorf("rx/tx = %d/%d, want 10005000/5000", got.RxBytes, got.TxBytes)
@@ -112,8 +112,8 @@ func TestReconcileDropsStaleSnapshotBeforeFirstSession(t *testing.T) {
 	s := newHistoryTestService(t)
 	s.markUserDisconnect("a", 9_000, 4_000)
 	rx, tx := rxtx("a", 100, 50)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	got := lastSession(t, s)
 	if got.RxBytes != 100 || got.TxBytes != 50 || got.DisconnectReason != "reconnect" {
 		t.Errorf("got rx/tx %d/%d reason %q, want 100/50 reconnect", got.RxBytes, got.TxBytes, got.DisconnectReason)
@@ -127,8 +127,8 @@ func TestReconcileKeepsSnapshotWhenFirstReadingIsZeroed(t *testing.T) {
 	s := newHistoryTestService(t)
 	s.markUserDisconnect("a", 9_000, 4_000)
 	rx, tx := rxtx("a", 0, 0)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	got := lastSession(t, s)
 	if got.RxBytes != 9_000 || got.TxBytes != 4_000 || got.DisconnectReason != "user" {
 		t.Errorf("got rx/tx %d/%d reason %q, want 9000/4000 user", got.RxBytes, got.TxBytes, got.DisconnectReason)
@@ -142,13 +142,13 @@ func TestReconcileKeepsSnapshotWhenFirstReadingIsZeroed(t *testing.T) {
 func TestReconcileDropsStaleSnapshotAcrossZeroedFirstTick(t *testing.T) {
 	s := newHistoryTestService(t)
 	s.markUserDisconnect("a", 9_000, 4_000)
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	rx, tx := rxtx("a", 0, 0)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	rx, tx = rxtx("a", 100, 50)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	got := lastSession(t, s)
 	if got.RxBytes != 100 || got.TxBytes != 50 || got.DisconnectReason != "reconnect" {
 		t.Errorf("got rx/tx %d/%d reason %q, want 100/50 reconnect", got.RxBytes, got.TxBytes, got.DisconnectReason)
@@ -161,13 +161,13 @@ func TestReconcileDropsStaleSnapshotAcrossZeroedFirstTick(t *testing.T) {
 func TestReconcileDropsColdSnapshotReason(t *testing.T) {
 	s := newHistoryTestService(t)
 	s.markUserDisconnect("a", 0, 0)
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	rx, tx := rxtx("a", 0, 0)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
 	rx, tx = rxtx("a", 100, 50)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	got := lastSession(t, s)
 	if got.DisconnectReason != "reconnect" {
 		t.Errorf("reason %q, want reconnect", got.DisconnectReason)
@@ -179,8 +179,8 @@ func TestReconcileDropsColdSnapshotReason(t *testing.T) {
 func TestReconcileStaleSnapshotRecordsNothingWithoutSession(t *testing.T) {
 	s := newHistoryTestService(t)
 	s.markUserDisconnect("a", 9_000, 4_000)
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	for _, sess := range s.historyStore.GetAll() {
 		if sess.TunnelName == "a" {
 			t.Errorf("unexpected session for a: %+v", sess)
@@ -195,9 +195,9 @@ func TestReconcileStaleSnapshotRecordsNothingWithoutSession(t *testing.T) {
 func TestReconcileKeepsCountersOfClosingSession(t *testing.T) {
 	s := newHistoryTestService(t)
 	rx, tx := rxtx("a", 700, 300)
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "", nil, nil, "")
-	s.ReconcileHistoryFromStatus(nil, nil, nil, "", nil, nil, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus([]string{"a"}, rx, tx, "")
+	s.ReconcileHistoryFromStatus(nil, nil, nil, "")
 	got := lastSession(t, s)
 	if got.RxBytes != 700 || got.TxBytes != 300 {
 		t.Errorf("rx/tx = %d/%d, want 700/300", got.RxBytes, got.TxBytes)

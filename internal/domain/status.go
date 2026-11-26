@@ -29,6 +29,7 @@ type ConnectionStatus struct {
 	State             State     `json:"state"`
 	TunnelName        string    `json:"tunnel_name"`
 	InterfaceName     string    `json:"interface_name,omitempty"`
+	CounterEpoch      string    `json:"counter_epoch,omitempty"`
 	ConnectedAt       time.Time `json:"-"`
 	Duration          string    `json:"duration,omitempty"`
 	RxBytes           int64     `json:"rx_bytes"`
@@ -50,16 +51,15 @@ type ConnectionStatus struct {
 	DNSMode      string   `json:"dns_mode,omitempty"`
 	DNSServers   []string `json:"dns_servers,omitempty"`
 	DNSProtected bool     `json:"dns_protected,omitempty"`
-
 	// LastChangeReason / LastChangeAt say what last brought this tunnel up
-	// (protocol minor 13): one of the ChangeReason* values and an RFC3339
+	// (protocol minor 15): one of the ChangeReason* values and an RFC3339
 	// time. Empty when the helper does not know (older helper, or a tunnel
 	// it did not connect itself).
 	LastChangeReason string `json:"last_change_reason,omitempty"`
 	LastChangeAt     string `json:"last_change_at,omitempty"`
 
 	// RecentDisconnects maps a tunnel that went down in the last minute to
-	// why (top-level only; protocol minor 13). A disconnected tunnel is no
+	// why (top-level only; protocol minor 15). A disconnected tunnel is no
 	// longer in the status at all, so this is how its end reason reaches
 	// the GUI's history.
 	RecentDisconnects map[string]TunnelChange `json:"recent_disconnects,omitempty"`

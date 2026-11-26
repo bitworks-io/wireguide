@@ -3,7 +3,6 @@ package gui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
@@ -97,7 +96,7 @@ func TestNotifierCriticalErrorCodes(t *testing.T) {
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "DNS Protection", Code: ipc.CriticalCodeDNSProtectionFailing})
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "Helper connection", Code: "helper_unavailable"})
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
-	time.Sleep(80 * time.Millisecond)
+	waitForCount(t, c, 3)
 	got := strings.Join(c.all(), "\n")
 	for _, want := range []string{
 		"DNS protection is turned on but its firewall rules keep failing to apply",

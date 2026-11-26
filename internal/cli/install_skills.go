@@ -74,8 +74,8 @@ wireguide ctl set pin-interface <on|off>
 wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
-wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake/routes/split-DNS check; exit 1 on failure
+wireguide ctl diag bundle [--out path]       # diagnostics zip for bug reports (keys redacted)
 wireguide ctl reset-dns [--force] [--kill-switch-off] [--json]
                                              # escape hatch: drop WireGuide firewall rules + split DNS,
                                              # retry pending DNS recovery, flush the DNS cache.
