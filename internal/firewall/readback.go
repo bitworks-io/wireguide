@@ -28,6 +28,10 @@ type Readback struct {
 	// Permits are the resolver permits found in the evaluated DNS rules.
 	// The loopback permit is not included.
 	Permits []DNSPermit
+	// RulesLoaded is true when any WireGuide rule is loaded in the read
+	// anchors, enforced or not (pf may be off). Startup recovery uses it to
+	// tell whether flushing the anchors actually removed something.
+	RulesLoaded bool
 }
 
 // StateReader is an optional FirewallManager extension for backends that can
@@ -139,6 +143,7 @@ func pfReadback(mainOut, dnsOut, infoOut string) Readback {
 		DNSProtectionActive: pfOn && blocks,
 		KillSwitchActive:    pfOn && ks,
 		Permits:             sortedUniquePermits(permits),
+		RulesLoaded:         strings.TrimSpace(mainOut) != "" || strings.TrimSpace(dnsOut) != "",
 	}
 }
 

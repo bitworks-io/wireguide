@@ -56,6 +56,14 @@ func TestHandleHelperInfoFields(t *testing.T) {
 	if resp.GUIAttached {
 		t.Error("GUIAttached with a nil server must be false")
 	}
+	if resp.Recovery != nil {
+		t.Errorf("no startup recovery must report none: %+v", resp.Recovery)
+	}
+	h.recovery = &ipc.HelperRecovery{TunnelsRecovered: []string{"home-vpn"}, FirewallFlushed: true}
+	got, _ = h.handleHelperInfo(nil)
+	if r := got.(ipc.HelperInfoResponse).Recovery; r == nil || !r.FirewallFlushed || r.TunnelsRecovered[0] != "home-vpn" {
+		t.Errorf("recovery = %+v", r)
+	}
 }
 
 // Helper.Info is reachable over a real socket through registerHandlers, and

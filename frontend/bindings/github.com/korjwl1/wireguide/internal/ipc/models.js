@@ -261,6 +261,65 @@ export class FirewallStatusResponse {
 }
 
 /**
+ * HelperRecovery reports startup crash recovery (HelperInfoResponse.Recovery).
+ */
+export class HelperRecovery {
+    /**
+     * Creates a new HelperRecovery instance.
+     * @param {Partial<HelperRecovery>} [$$source = {}] - The source object to create the HelperRecovery.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * TunnelsRecovered are tunnels whose leftover routes/DNS/interface state
+             * from a previous helper were cleaned up.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["tunnels_recovered"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * DNSRestored are the tunnels whose DNS changes were undone.
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["dns_restored"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * FirewallFlushed is true when WireGuide firewall rules were loaded at
+             * startup and recovery removed them. Only known where the helper can
+             * read its rules back (macOS pf).
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["firewall_flushed"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HelperRecovery instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HelperRecovery}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType2;
+        const $$createField1_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tunnels_recovered" in $$parsedSource) {
+            $$parsedSource["tunnels_recovered"] = $$createField0_0($$parsedSource["tunnels_recovered"]);
+        }
+        if ("dns_restored" in $$parsedSource) {
+            $$parsedSource["dns_restored"] = $$createField1_0($$parsedSource["dns_restored"]);
+        }
+        return new HelperRecovery(/** @type {Partial<HelperRecovery>} */($$parsedSource));
+    }
+}
+
+/**
  * LogEntry is a single structured log record forwarded from the helper
  * to the GUI (and from the GUI to the frontend LogViewer). We keep it flat
  * — no nested attrs — because the viewer just renders a one-line per entry.

@@ -49,9 +49,12 @@ import (
 // Minor 15 adds the status fields last_change_reason / last_change_at (why a
 // tunnel came up) and the top-level recent_disconnects map (why a tunnel
 // recently went down), used for change reasons in the connection history.
+// Minor 16 adds Helper.Info's optional recovery object (what startup crash
+// recovery cleaned up: tunnels, DNS, firewall rules); an older helper omits
+// it.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 15
+	ProtocolMinor = 16
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
