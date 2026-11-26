@@ -584,6 +584,7 @@
   },
   "reset_dns": {
     "step": {
+      "disconnect": "隧道",
       "remaining": "隧道",
       "kill_switch": "终止开关",
       "firewall": "防火墙规则",

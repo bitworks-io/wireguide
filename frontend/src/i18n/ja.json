@@ -584,6 +584,7 @@
   },
   "reset_dns": {
     "step": {
+      "disconnect": "トンネル",
       "remaining": "トンネル",
       "kill_switch": "キルスイッチ",
       "firewall": "ファイアウォールルール",
