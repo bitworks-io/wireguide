@@ -8,7 +8,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
@@ -150,5 +152,29 @@ func TestResetDNSOldHelper(t *testing.T) {
 	s := serviceWithHelper(t, nil)
 	if _, err := s.ResetDNS(false, false); !errors.Is(err, errResetDNSTooOld) {
 		t.Fatalf("err = %v, want too-old", err)
+	}
+}
+
+// A forced reset disconnects tunnels for the user: it must count as a user
+// disconnect while in flight and for the status lag afterwards, so the
+// notifier does not announce "disconnected outside the app".
+func TestResetDNSRecordsUserDisconnect(t *testing.T) {
+	var during atomic.Bool
+	var s *TunnelService
+	s = serviceWithHelper(t, map[string]func(json.RawMessage) (interface{}, error){
+		ipc.MethodResetDNS: func(json.RawMessage) (interface{}, error) {
+			during.Store(s.userActions.Recent("home-vpn", false, time.Now()))
+			return nil, errors.New("reset failed")
+		},
+	})
+	s.userActions = NewUserActions()
+	if _, err := s.ResetDNS(true, false); err == nil {
+		t.Fatal("expected the helper's failure")
+	}
+	if !during.Load() {
+		t.Error("reset was not recorded as a user disconnect while in flight")
+	}
+	if !s.userActions.Recent("home-vpn", false, time.Now()) {
+		t.Error("reset must keep covering the status lag afterwards")
 	}
 }
