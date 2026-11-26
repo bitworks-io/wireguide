@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,10 +63,12 @@ func TestParseURLAction(t *testing.T) {
 	}
 }
 
-func TestParseURLActionPauseIsUnsupported(t *testing.T) {
+// There is no automation verb: a pause URL is rejected like any other
+// unknown action.
+func TestParseURLActionAutomationPauseIsUnknown(t *testing.T) {
 	_, err := ParseURLAction("wireguide://automation/pause?minutes=30")
-	if !errors.Is(err, ErrURLPauseUnsupported) {
-		t.Fatalf("err = %v, want ErrURLPauseUnsupported", err)
+	if err == nil || !strings.Contains(err.Error(), `unknown action "automation"`) {
+		t.Fatalf("err = %v, want unknown action", err)
 	}
 }
 

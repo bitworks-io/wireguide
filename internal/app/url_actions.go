@@ -24,11 +24,6 @@ import (
 // a confirmation sheet in the window, whether or not the app is frontmost.
 // A confirmed connect goes through the normal TunnelService.Connect path, so it
 // engages the manual-override latch like a click on the Connect button.
-//
-// automation/pause is intentionally not implemented: pausing automation needs
-// a helper RPC (a latch that expires on network change or after N minutes),
-// and faking it GUI-side would mean connecting/disconnecting tunnels. It is
-// recognised only so the caller can report that it is unsupported.
 
 // URLScheme is the registered scheme (CFBundleURLTypes in Info.plist).
 const URLScheme = "wireguide"
@@ -39,9 +34,6 @@ const (
 	URLActionDisconnect = "disconnect"
 	URLActionShow       = "show"
 )
-
-// ErrURLPauseUnsupported is returned for wireguide://automation/pause.
-var ErrURLPauseUnsupported = errors.New("wireguide://automation/pause is not supported yet")
 
 // URLAction is a validated request parsed from a wireguide:// URL.
 type URLAction struct {
@@ -92,11 +84,6 @@ func ParseURLAction(raw string) (URLAction, error) {
 			return zero, err
 		}
 		return URLAction{Kind: verb, Tunnel: path}, nil
-	case "automation":
-		if path == "pause" {
-			return zero, ErrURLPauseUnsupported
-		}
-		return zero, fmt.Errorf("unknown automation action %q", path)
 	default:
 		return zero, fmt.Errorf("unknown action %q", verb)
 	}
