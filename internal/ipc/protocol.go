@@ -37,9 +37,12 @@ import (
 // dns_mode / dns_servers / dns_protected status fields and
 // CriticalErrorPayload.Code. An older helper answers Firewall.Status with
 // method-not-found and omits the fields, which the GUI reports as unknown.
+// Minor 11 adds the read-only Helper.Info method and the optional action
+// field on event.critical_error, so the GUI can offer a user-initiated
+// "Repair helper" instead of telling the user to quit and reopen.
 const (
 	ProtocolMajor = 1
-	ProtocolMinor = 10
+	ProtocolMinor = 11
 )
 
 // ProtocolVersion is the canonical "major.minor" string used in
@@ -179,6 +182,10 @@ const (
 	// shutdown path then stops the helper. With no GUI attached the
 	// helper simply shuts itself down.
 	MethodRequestQuit = "Helper.RequestQuit"
+	// MethodHelperInfo is a read-only description of the running helper
+	// (version, how it was started, socket, pid) for the Settings status
+	// card. Minor 6; an older helper answers method-not-found.
+	MethodHelperInfo = "Helper.Info"
 )
 
 // Event names (server → client notifications)
