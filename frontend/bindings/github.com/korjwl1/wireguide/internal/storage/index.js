@@ -4,6 +4,7 @@
 
 export {
     AutomationBackupStatus,
+    AutomationHistoryEntry,
     AutomationV3BackupStatus,
     Session,
     Settings

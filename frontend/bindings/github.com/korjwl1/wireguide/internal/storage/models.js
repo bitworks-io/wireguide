@@ -72,6 +72,61 @@ export class AutomationBackupStatus {
 }
 
 /**
+ * AutomationHistoryEntry describes one snapshot for the GUI list.
+ */
+export class AutomationHistoryEntry {
+    /**
+     * Creates a new AutomationHistoryEntry instance.
+     * @param {Partial<AutomationHistoryEntry>} [$$source = {}] - The source object to create the AutomationHistoryEntry.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("time" in $$source)) {
+            /**
+             * RFC3339, UTC
+             * @member
+             * @type {string}
+             */
+            this["time"] = "";
+        }
+        if (!("rule_count" in $$source)) {
+            /**
+             * rules for the requested tunnel
+             * @member
+             * @type {number}
+             */
+            this["rule_count"] = 0;
+        }
+        if (!("total_rules" in $$source)) {
+            /**
+             * rules across all tunnels
+             * @member
+             * @type {number}
+             */
+            this["total_rules"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AutomationHistoryEntry instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AutomationHistoryEntry}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AutomationHistoryEntry(/** @type {Partial<AutomationHistoryEntry>} */($$parsedSource));
+    }
+}
+
+/**
  * AutomationV3BackupStatus describes the tier-3 recovery copy.
  */
 export class AutomationV3BackupStatus {

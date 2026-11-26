@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ssidList, commitDraft, rowFromDisk, blankRow, cleanedRule, normRule, rulesDiffer, macCanon, rulesFor } from './automationRules.js';
+import { ssidList, commitDraft, rowFromDisk, blankRow, cleanedRule, normRule, rulesDiffer, macCanon, rulesFor, allRules } from './automationRules.js';
 
 test('ssidList trims, drops empties, dedupes case-insensitively', () => {
   assert.deepEqual(ssidList(' Home ', ['home', 'Office', '', 'OFFICE']), ['Home', 'Office']);
@@ -107,4 +107,16 @@ test('rulesFor reads every storage tier, highest tier winning', () => {
   assert.deepEqual(rulesFor(s, 'missing'), []);
   assert.deepEqual(rulesFor(null, 'plain'), []);
   assert.deepEqual(rulesFor({ automation: { per_tunnel_rules_v3: { t: [] } } }, 't'), []);
+});
+
+test('allRules merges every storage tier into one map', () => {
+  const s = {
+    automation: {
+      per_tunnel_rules: { a: [{ when: { type: 'ssid', ssid: 'A' }, do: 'connect' }] },
+      per_tunnel_rules_v2: { b: [{ when: { type: 'ssid', ssid: 'B', negate: true }, do: 'connect' }] },
+      per_tunnel_rules_v3: { c: [{ when: { type: 'medium', medium: 'wired' }, do: 'connect' }] },
+    },
+  };
+  assert.deepEqual(Object.keys(allRules(s)).sort(), ['a', 'b', 'c']);
+  assert.deepEqual(allRules(null), {});
 });

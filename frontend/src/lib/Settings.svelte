@@ -13,6 +13,8 @@
   import { firewallDnsLine } from './dns-protection.js';
   import { createEventScope } from './event-scope.js';
   import { startModeKey, isRepairBusy } from './helper-info.js';
+  import { rulesFor } from './automationRules.js';
+  import { noteOwnSave } from '../stores/automationWatch.js';
 
   export let TunnelService;
   export let onClose = () => {};
@@ -209,7 +211,15 @@
   async function restoreV3Backup() {
     restoringV3 = true;
     restoreV3Error = '';
-    try { await TunnelService.RestoreAutomationV3Backup(); }
+    try {
+      const names = (await TunnelService.RestoreAutomationV3Backup()) || [];
+      // Mark the restored lists as this app's own write so the rule
+      // history's outside-change notice does not report them.
+      if (names.length) {
+        const s = await TunnelService.GetSettings();
+        for (const name of names) noteOwnSave(name, rulesFor(s, name));
+      }
+    }
     catch (e) { restoreV3Error = errText(e); }
     finally {
       restoringV3 = false;
