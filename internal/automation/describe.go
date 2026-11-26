@@ -1,10 +1,14 @@
 package automation
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // DescribeCondition renders c as a short English phrase for logs and the
-// automation event's rule_text ("SSID is not Home", "subnet is
-// 10.0.0.0/24", "no other rule matches"). GUIs localise from the rule
+// automation event's rule_text ("SSID is not Home", "SSID is any of
+// Home, Office", "connection type is wired", "subnet is 10.0.0.0/24", "no
+// other rule matches"). GUIs localise from the rule
 // itself; this is the fallback and log form.
 func DescribeCondition(c Condition) string {
 	is := "is"
@@ -13,7 +17,17 @@ func DescribeCondition(c Condition) string {
 	}
 	switch c.Type {
 	case CondSSID:
-		return fmt.Sprintf("SSID %s %s", is, c.SSID)
+		set := SSIDSet(c)
+		if len(set) > 1 {
+			anyOf := "is any of"
+			if c.Negate {
+				anyOf = "is none of"
+			}
+			return fmt.Sprintf("SSID %s %s", anyOf, strings.Join(set, ", "))
+		}
+		return fmt.Sprintf("SSID %s %s", is, strings.Join(set, ""))
+	case CondMedium:
+		return fmt.Sprintf("connection type %s %s", is, c.Medium)
 	case CondSubnet:
 		return fmt.Sprintf("subnet %s %s", is, c.Subnet)
 	case CondNetwork:

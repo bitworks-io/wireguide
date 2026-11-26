@@ -12,6 +12,11 @@ func TestDescribeRule(t *testing.T) {
 		{When: Condition{Type: CondNetwork, GatewayMAC: "b0:38:6c:54:8b:ab", Label: "Office"}, Do: ActionConnect},
 		{When: Condition{Type: CondNoneMatch}, Do: ActionDisconnect},
 		{When: Condition{Type: "future"}, Do: ActionConnect},
+		{When: Condition{Type: CondSSID, SSIDs: []string{"HomeWiFi", "CafeWiFi"}}, Do: ActionConnect},
+		{When: Condition{Type: CondSSID, Negate: true, SSIDs: []string{"HomeWiFi", "CafeWiFi"}}, Do: ActionConnect},
+		{When: Condition{Type: CondSSID, SSIDs: []string{"HomeWiFi"}}, Do: ActionConnect},
+		{When: Condition{Type: CondMedium, Medium: MediumWired}, Do: ActionConnect},
+		{When: Condition{Type: CondMedium, Negate: true, Medium: MediumWiFi}, Do: ActionConnect},
 	}
 	want := []string{
 		"SSID is HomeWiFi",
@@ -22,6 +27,11 @@ func TestDescribeRule(t *testing.T) {
 		"network is Office",
 		"no other rule matches",
 		"future",
+		"SSID is any of HomeWiFi, CafeWiFi",
+		"SSID is none of HomeWiFi, CafeWiFi",
+		"SSID is HomeWiFi",
+		"connection type is wired",
+		"connection type is not wifi",
 	}
 	for i, w := range want {
 		if got := DescribeRule(rules, i); got != w {
