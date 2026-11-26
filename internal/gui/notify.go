@@ -74,9 +74,16 @@ type notifier struct {
 	actions  *wgapp.UserActions
 	differ   wgapp.StatusDiffer
 
-	mu       sync.Mutex
-	pending  map[string]stopper   // "up|name" / "down|name" -> hold-back timer
-	claimed  map[string]time.Time // "up|name" / "down|name" -> when an event claimed it
+	mu      sync.Mutex
+	pending map[string]stopper   // "up|name" / "down|name" -> hold-back timer
+	claimed map[string]time.Time // "up|name" / "down|name" -> when an event claimed it
+	// generic records when a status-diff ("outside the app") message was
+	// delivered for a change, so a helper event that arrives after the
+	// hold-back does not announce the same change a second time.
+	generic map[string]time.Time
+	// named records when an event.automation connect/disconnect announced a
+	// change, so the auto_connected that follows it stays silent.
+	named    map[string]time.Time
 	quitting bool
 	// gen is the cancellation generation. Every queued or in-flight
 	// notification carries the gen current when it was queued; stop(),
@@ -132,6 +139,8 @@ func newNotifier(settings *storage.SettingsStore, actions *wgapp.UserActions) *n
 		actions:        actions,
 		pending:        map[string]stopper{},
 		claimed:        map[string]time.Time{},
+		generic:        map[string]time.Time{},
+		named:          map[string]time.Time{},
 		systemLanguage: preferredGUILanguage,
 		newBackend:     newNotificationBackend,
 		afterFunc:      func(d time.Duration, f func()) stopper { return time.AfterFunc(d, f) },
@@ -149,6 +158,23 @@ func changeKey(name string, up bool) string {
 		return "up|" + name
 	}
 	return "down|" + name
+}
+
+// oppositeKey is the change key for the same tunnel in the other direction.
+func oppositeKey(key string) string {
+	if name, ok := strings.CutPrefix(key, "up|"); ok {
+		return "down|" + name
+	}
+	return "up|" + strings.TrimPrefix(key, "down|")
+}
+
+// forgetAnnouncedLocked drops the "already announced" marks for the other
+// direction of key's tunnel: a change in this direction starts a new cycle,
+// so the next opposite change must notify again. Caller holds n.mu.
+func (n *notifier) forgetAnnouncedLocked(key string) {
+	opp := oppositeKey(key)
+	delete(n.generic, opp)
+	delete(n.named, opp)
 }
 
 // stop silences the notifier for the rest of the session (app quit): the
@@ -187,6 +213,8 @@ func (n *notifier) reset() {
 	n.differ.Reset()
 	n.mu.Lock()
 	n.invalidateLocked()
+	clear(n.generic)
+	clear(n.named)
 	n.mu.Unlock()
 }
 
@@ -267,22 +295,33 @@ func (n *notifier) claimedLocked(key string, now time.Time) bool {
 	return ok
 }
 
-// claim records that a helper event named the change at now (suppressing
-// the generic status-diff message for it) and drops any message already
-// held back for it.
-func (n *notifier) claim(key string, now time.Time) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	for k, t := range n.claimed { // prune
+// recentLocked reports whether m holds key from within claimTTL of now,
+// pruning expired entries. Caller holds n.mu.
+func recentLocked(m map[string]time.Time, key string, now time.Time) bool {
+	for k, t := range m {
 		if now.Sub(t) >= claimTTL {
-			delete(n.claimed, k)
+			delete(m, k)
 		}
 	}
+	_, ok := m[key]
+	return ok
+}
+
+// claim records that a helper event named the change at now (suppressing
+// the generic status-diff message for it) and drops any message already
+// held back for it. It reports whether the change may still be announced:
+// false when a generic message for it was already delivered, or when an
+// event.automation message already named it, so each change notifies once.
+func (n *notifier) claim(key string, now time.Time) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	recentLocked(n.claimed, key, now) // prune
 	n.claimed[key] = now
 	if t, ok := n.pending[key]; ok {
 		t.Stop()
 		delete(n.pending, key)
 	}
+	return !recentLocked(n.generic, key, now) && !recentLocked(n.named, key, now)
 }
 
 // onStatus is called for every status event with the connected tunnel set.
@@ -299,6 +338,9 @@ func (n *notifier) onStatus(connected []string) {
 	now := time.Now()
 	for _, ev := range events {
 		up := ev.Kind == wgapp.NotifyTunnelUp
+		n.mu.Lock()
+		n.forgetAnnouncedLocked(changeKey(ev.Tunnel, up))
+		n.mu.Unlock()
 		// A change reversed inside the hold-back window (a wake or
 		// health-check reconnect tears the tunnel down and brings it
 		// back) is no change at all: drop the held-back message and
@@ -346,8 +388,23 @@ func (n *notifier) schedule(key string, kind msgKind, tunnel string, gen uint64)
 		skip := !n.liveLocked(gen) || n.claimedLocked(key, time.Now())
 		n.mu.Unlock()
 		// Checkpoint at expiry: the toggle may have been turned off (here
-		// or from the CLI) while the message was held back.
+		// or from the CLI) while the message was held back. The settings
+		// read runs with n.mu released.
 		if skip || !n.current(gen) {
+			return
+		}
+		n.mu.Lock()
+		now := time.Now()
+		skip = !n.liveLocked(gen) || n.claimedLocked(key, now)
+		if !skip {
+			// Recorded under the same lock as the claim check, and only for
+			// a message that goes out, so an event arriving now sees it and
+			// stays silent.
+			recentLocked(n.generic, key, now) // prune
+			n.generic[key] = now
+		}
+		n.mu.Unlock()
+		if skip {
 			return
 		}
 		n.send(kind, tunnel, gen)
@@ -393,7 +450,9 @@ func (n *notifier) onAutoConnected(name string) {
 		return
 	}
 	gen := n.generation()
-	n.claim(changeKey(name, true), time.Now())
+	if !n.claim(changeKey(name, true), time.Now()) {
+		return // event.automation (or the status diff) already announced it
+	}
 	if wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyAutoConnected, Tunnel: name}, n.actions, time.Now()) {
 		n.send(msgAuto, name, gen)
 	}
@@ -406,6 +465,8 @@ func (n *notifier) onForcedDisconnect(name string) {
 		return
 	}
 	gen := n.generation()
+	// Sent even when the status diff already announced the drop: this
+	// message says why and that it will not come back by itself.
 	n.claim(changeKey(name, false), time.Now())
 	if wgapp.ShouldNotify(n.enabled(), wgapp.NotifyEvent{Kind: wgapp.NotifyForcedDisconnect, Tunnel: name}, n.actions, time.Now()) {
 		n.send(msgForced, name, gen)
@@ -440,6 +501,13 @@ const criticalCodeHelperUnavailable = "helper_unavailable"
 // send localises and delivers one message, queued at gen, off the caller's
 // goroutine.
 func (n *notifier) send(kind msgKind, arg string, gen uint64) {
+	n.sendRendered(gen, func(lang string) (string, string) { return notifyText(lang, kind, arg) })
+}
+
+// sendRendered delivers the message render builds for the notification
+// language, queued at gen, off the caller's goroutine. gen is the
+// generation the caller captured before reading the preference.
+func (n *notifier) sendRendered(gen uint64, render func(lang string) (title, body string)) {
 	n.mu.Lock()
 	live := n.liveLocked(gen)
 	n.mu.Unlock()
@@ -450,7 +518,7 @@ func (n *notifier) send(kind msgKind, arg string, gen uint64) {
 		if !n.current(gen) {
 			return
 		}
-		title, body := notifyText(n.language(), kind, arg)
+		title, body := render(n.language())
 		n.post(gen, title, body)
 	})
 }

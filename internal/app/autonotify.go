@@ -102,6 +102,9 @@ const (
 	// NotifyForcedDisconnect: the helper tore a tunnel down on its own
 	// (routing-loop watchdog).
 	NotifyForcedDisconnect
+	// NotifyAutoDisconnected: an automation rule disconnected a tunnel
+	// (event.automation).
+	NotifyAutoDisconnected
 )
 
 // NotifyEvent is one candidate notification.
@@ -124,7 +127,7 @@ func ShouldNotify(enabled bool, ev NotifyEvent, actions *UserActions, now time.T
 		// A recent user connect also covers a "down": a failed user
 		// connect drops the tunnel again and must not read as automatic.
 		return !actions.Recent(ev.Tunnel, false, now) && !actions.Recent(ev.Tunnel, true, now)
-	case NotifyAutoConnected, NotifyCriticalError, NotifyForcedDisconnect:
+	case NotifyAutoConnected, NotifyAutoDisconnected, NotifyCriticalError, NotifyForcedDisconnect:
 		return true
 	}
 	return false

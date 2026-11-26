@@ -214,9 +214,56 @@ func TestDeliverStopBeforeFallbackDrops(t *testing.T) {
 	}
 }
 
+// A generic "down" held back and then dropped by turning the toggle off
+// posts nothing and leaves no "already announced" mark: after re-enabling,
+// a rule-named disconnect for the same change still notifies. An
+// event.automation message whose delivery is queued before stop() posts
+// nothing either.
+func TestNotifierCancelGenericAndNamed(t *testing.T) {
+	t.Run("generic down then disable", func(t *testing.T) {
+		n, svc, clock, b, fallbacks := cancelNotifier(t)
+		n.onStatus([]string{"Office"})
+		n.onStatus(nil) // down, held back
+		if len(clock.timers) != 1 {
+			t.Fatalf("want one held-back message, got %d timers", len(clock.timers))
+		}
+		setNotifyAutoChanges(t, svc, false)
+		clock.timers[0].f()
+		if b.sentCount() != 0 || *fallbacks != 0 {
+			t.Fatalf("queued down delivered after disable: sent=%d fallbacks=%d", b.sentCount(), *fallbacks)
+		}
+		n.mu.Lock()
+		marks := len(n.generic)
+		n.mu.Unlock()
+		if marks != 0 {
+			t.Fatalf("a dropped message must not be recorded as announced, generic=%d", marks)
+		}
+		setNotifyAutoChanges(t, svc, true)
+		n.onAutomationEvent(ipc.AutomationEventPayload{Tunnel: "Office", Action: ipc.AutomationActionDisconnect, RuleIndex: -1})
+		if got := b.sentCount(); got != 1 || *fallbacks != 0 {
+			t.Fatalf("rule-named disconnect after re-enable: sent=%d fallbacks=%d, want 1/0", got, *fallbacks)
+		}
+	})
+	t.Run("named queued then stop", func(t *testing.T) {
+		n, _, _, b, fallbacks := cancelNotifier(t)
+		var queued []func()
+		n.spawn = func(f func()) { queued = append(queued, f) }
+		n.onAutomationEvent(ipc.AutomationEventPayload{Tunnel: "Office", Action: ipc.AutomationActionConnect, RuleIndex: -1})
+		if len(queued) != 1 {
+			t.Fatalf("want one queued delivery, got %d", len(queued))
+		}
+		n.stop()
+		queued[0]()
+		if b.sentCount() != 0 || *fallbacks != 0 {
+			t.Fatalf("named message delivered after stop: sent=%d fallbacks=%d", b.sentCount(), *fallbacks)
+		}
+	})
+}
+
 // Notifications are opt-in: with default settings an automatic change, a
-// forced disconnect and a critical error neither post nor touch the
-// notification backend, so no authorization prompt can appear.
+// forced disconnect, a critical error and a rule-named automation event
+// neither post nor touch the notification backend, so no authorization
+// prompt can appear.
 func TestNotifierDefaultSettingsStaySilent(t *testing.T) {
 	store := storage.NewSettingsStore(t.TempDir())
 	n := newNotifier(store, wgapp.NewUserActions())
@@ -236,6 +283,7 @@ func TestNotifierDefaultSettingsStaySilent(t *testing.T) {
 	n.onAutoConnected("Office")
 	n.onForcedDisconnect("Office")
 	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
+	n.onAutomationEvent(ipc.AutomationEventPayload{Tunnel: "Office", Action: ipc.AutomationActionDisconnect, RuleIndex: -1})
 	for _, tm := range clock.timers {
 		tm.f()
 	}
