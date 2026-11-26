@@ -24,6 +24,7 @@ export {
     RouteEntry,
     SettingsPatch,
     TunnelInfo,
+    URLAction,
     UpdateState,
     VerifyOptions,
     VerifyRow,

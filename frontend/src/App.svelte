@@ -33,6 +33,7 @@
   import { criticalRow, isKnownCritical } from './lib/dns-protection.js';
   import { offersRepair } from './lib/helper-info.js';
   import { uniqueImportName, fileBase64, checkImportSize, warningText, importedMessage, isNotConnectedError, MAX_CONFIG_BYTES, MAX_ZIP_BYTES, MAX_QR_BYTES } from './lib/imports.js';
+  import { mergeURLActions } from './lib/urlActions.js';
   import { t, setLanguage, detectLanguage } from './i18n/index.js';
   import { TunnelService } from '../bindings/github.com/korjwl1/wireguide/internal/app';
   import Icon from './lib/Icon.svelte';
@@ -216,6 +217,11 @@
       refreshAutomationPreview();
     });
 
+    // wireguide:// link: pull any queued connect/disconnect requests (also
+    // covers a URL that launched the app before this listener existed).
+    appEvents.on('url-action', () => { takeURLActions(); });
+    takeURLActions();
+
     // The helper owns automation; the GUI only reports SSID transitions.
     // Active or pending tunnel intent keeps the helper alive without a GUI.
     // The Automation status strip and the tunnel chips show the network
@@ -311,6 +317,31 @@
   function openHelperRepair() {
     settingsTab = 'advanced';
     showSettings = true;
+  }
+
+  // wireguide:// confirmation sheet. Approval runs the ordinary Connect /
+  // DisconnectTunnel calls; nothing else can be requested through a URL. The
+  // sheet is always shown, whether or not the window was focused.
+  let urlActions = [];
+  async function takeURLActions() {
+    try {
+      const got = await TunnelService.TakeURLActions();
+      if (got && got.length) urlActions = mergeURLActions(urlActions, got);
+    } catch (_) { /* queue is best-effort */ }
+  }
+  async function approveURLAction() {
+    const [a, ...rest] = urlActions;
+    urlActions = rest;
+    if (!a) return;
+    try {
+      if (a.kind === 'connect') await TunnelService.Connect(a.tunnel);
+      else if (a.kind === 'disconnect') await TunnelService.DisconnectTunnel(a.tunnel);
+    } catch (e) {
+      showToast(errText(e));
+    }
+  }
+  function denyURLAction() {
+    urlActions = urlActions.slice(1);
   }
 
   function dismissCriticalError(idx) {
@@ -719,7 +750,7 @@
      separate components mounted conditionally below; they pick up the new
      language on their next open (deliberate — otherwise changing language
      mid-interaction would destroy the modal). -->
-<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
+<div class="app" class:modal-open={showSettings || showEditor || showConflictWarning || showZipResult || urlActions.length > 0} data-file-drop-target={!(showSettings || showEditor || showConflictWarning || showZipResult) && currentView === 'tunnels' ? true : undefined}>
   <!-- Wails adds .file-drop-target-active class to .app when dragging files.
        We only render the overlay when drop-target is actually active — i.e.
        on the tunnels view with no modal open — so it can never steal clicks
@@ -940,6 +971,20 @@
       on:proceed={handleConflictProceed}
       on:disconnect_proceed={handleConflictDisconnectProceed}
       on:cancel={handleConflictCancel} />
+  {/if}
+
+  {#if urlActions.length}
+    <div class="modal-backdrop" use:backdrop={denyURLAction}>
+      <div class="modal modal-zip-result" use:modal={denyURLAction} tabindex="-1"
+        role="alertdialog" aria-modal="true" aria-labelledby="url-action-title">
+        <h3 id="url-action-title">{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_title' : 'url_action.disconnect_title')}</h3>
+        <p>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect_message' : 'url_action.disconnect_message', { name: urlActions[0].tunnel })}</p>
+        <div class="zip-result-footer">
+          <button class="btn-secondary" on:click={denyURLAction}>{$t('url_action.cancel')}</button>
+          <button class="btn-primary" on:click={approveURLAction}>{$t(urlActions[0].kind === 'connect' ? 'url_action.connect' : 'url_action.disconnect')}</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if showZipResult}

@@ -327,6 +327,16 @@ directly against the local files.
 
 ---
 
+## URL scheme and Shortcuts (macOS)
+
+WireGuide registers `wireguide://` so Shortcuts, Focus filters, Raycast or a
+shell (`open "wireguide://connect/Home"`) can drive it:
+
+| URL | Effect |
+|
+
+---
+
 ## Architecture
 
 ```mermaid

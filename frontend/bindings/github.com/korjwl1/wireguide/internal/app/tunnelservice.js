@@ -841,6 +841,18 @@ export function SplitDNSSupported() {
 }
 
 /**
+ * TakeURLActions returns (and clears) the URL actions waiting for the user's
+ * confirmation. The frontend shows a sheet per action and, on approval,
+ * calls the ordinary Connect / DisconnectTunnel methods.
+ * @returns {$CancellablePromise<$models.URLAction[]>}
+ */
+export function TakeURLActions() {
+    return $Call.ByID(1243665022).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType40($result);
+    }));
+}
+
+/**
  * TunnelExists reports whether a tunnel with the given name is stored.
  * @param {string} name
  * @returns {$CancellablePromise<boolean>}
@@ -894,7 +906,7 @@ export function ValidateConfig(content) {
  */
 export function Verify(tunnelName, opts) {
     return $Call.ByID(2039407192, tunnelName, opts).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType40($result);
+        return $$createType42($result);
     }));
 }
 
@@ -938,5 +950,7 @@ const $$createType35 = $models.ResolveResult.createFrom;
 const $$createType36 = $Create.Nullable($$createType35);
 const $$createType37 = $models.DNSLeakResult.createFrom;
 const $$createType38 = $Create.Nullable($$createType37);
-const $$createType39 = $models.VerifyRow.createFrom;
+const $$createType39 = $models.URLAction.createFrom;
 const $$createType40 = $Create.Array($$createType39);
+const $$createType41 = $models.VerifyRow.createFrom;
+const $$createType42 = $Create.Array($$createType41);

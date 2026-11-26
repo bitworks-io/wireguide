@@ -34,6 +34,9 @@ type TunnelService struct {
 	// made in THIS process, so the notifier can tell them apart from
 	// automatic changes (automation, wake, health check, CLI).
 	userActions *UserActions
+	// urlQueue holds wireguide:// connect/disconnect requests awaiting the
+	// user's confirmation (see url_actions.go).
+	urlQueue urlActionQueue
 
 	// updateScheduler + updateStore are wired in by the GUI Run() entry
 	// after the Wails service registers (we can't inject them at
