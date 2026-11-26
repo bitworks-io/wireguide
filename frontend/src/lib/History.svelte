@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { t } from '../i18n/index.js';
   import { errText } from './errors.js';
+  import { endReasonKey, startReasonKey } from './history-reasons.js';
 
   export let TunnelService;
 
@@ -103,14 +104,14 @@
   }
 
   function reasonLabel(reason) {
-    switch (reason) {
-      case 'user': return $t('history.reason_user');
-      case 'reconnect': return $t('history.reason_reconnect');
-      case 'app_quit': return $t('history.reason_app_quit');
-      case 'health_check': return $t('history.reason_health_check');
-      case 'error': return $t('history.reason_error');
-      default: return $t('history.reason_user');
-    }
+    return $t(endReasonKey(reason));
+  }
+
+  // What started a session ('' for records made before start reasons
+  // existed, or with an older helper).
+  function startLabel(reason) {
+    const key = startReasonKey(reason);
+    return key ? $t(key) : '';
   }
 
   function toggle(id) {
@@ -181,6 +182,18 @@
                     <span class="detail-label">{$t('history.started')}</span>
                     <span class="detail-value">{formatDateTime(s.start_time)}</span>
                   </div>
+                  {#if startLabel(s.start_reason)}
+                    <div class="detail-row">
+                      <span class="detail-label">{$t('history.started_by')}</span>
+                      <span class="detail-value">{startLabel(s.start_reason)}</span>
+                    </div>
+                  {/if}
+                  {#if s.ssid}
+                    <div class="detail-row">
+                      <span class="detail-label">{$t('history.ssid')}</span>
+                      <span class="detail-value">{s.ssid}</span>
+                    </div>
+                  {/if}
                   {#if s.end_time}
                     <div class="detail-row">
                       <span class="detail-label">{$t('history.ended')}</span>

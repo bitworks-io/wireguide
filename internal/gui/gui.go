@@ -342,7 +342,7 @@ func Run(assetsHandler http.Handler, dataDir string) error {
 	// Pass the tray's cheap icon-update hook — NOT the full menu rebuild —
 	// so the 1 Hz status stream doesn't trigger IPC round-trips on every event.
 	bridge := newEventBridge(app, clients, trayMgr.setIconState, func(status domain.ConnectionStatus, source *ipc.Client) {
-		wgapp.ObserveHistoryStatus(tunnelService, status, source)
+		wgapp.ObserveHistoryStatusSSID(tunnelService, status, getCurrentSSID(), source)
 	}, trayMgr.quitApp)
 	bridge.notify = notify
 	bridge.start()

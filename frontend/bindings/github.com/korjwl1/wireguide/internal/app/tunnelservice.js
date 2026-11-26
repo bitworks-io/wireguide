@@ -607,8 +607,16 @@ export function ReadFile(path) {
  *     both user-initiated Connect and helper-driven auto-reconnect / wifi
  *     rules engine / sleep-wake)
  *   - closes a session for any tracked tunnel that has disappeared (using
- *     cached rx/tx + cached reason from lastKnownStats; falls back to
- *     disappearReason — defaults to "reconnect")
+ *     cached rx/tx from lastKnownStats). The end reason is, in order: the
+ *     helper's recorded reason (reasons.end, from the status's
+ *     recent_disconnects), the cached "user" hint, then disappearReason —
+ *     defaults to "reconnect"
+ * 
+ * New sessions record the helper's start reason (reasons.start, from each
+ * tunnel's last_change_reason) and the GUI's current Wi-Fi SSID. All three
+ * are empty with an older helper / off Wi-Fi. Reasons only label sessions;
+ * which session opens or closes, and with which counters, is decided by the
+ * counter-epoch and session-fencing logic alone.
  * 
  * Stats cache is always refreshed for currently-active tunnels so disconnect
  * closes have ≤ 1 status-event-tick stale counters. Reason hints set by

@@ -153,6 +153,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage, sources
 		if err := json.Unmarshal(params, &payload); err != nil {
 			slog.Debug("event bridge: unmarshal wifi_ssid failed", "error", err)
 		} else {
+			setCurrentSSID(payload.NewSSID)
 			b.app.Event.Emit("wifi_ssid", payload)
 		}
 	case ipc.EventAutomationChanged:

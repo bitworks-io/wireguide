@@ -8,5 +8,6 @@ export {
     InterfaceConfig,
     PeerConfig,
     State,
+    TunnelChange,
     WireGuardConfig
 } from "./models.js";

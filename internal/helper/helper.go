@@ -231,6 +231,15 @@ type Helper struct {
 	emitAutomationFn   func(ipc.AutomationEventPayload)
 	automationActiveFn func() []string
 
+	// connectReasons records why each tunnel last came up and endReasons
+	// why a tunnel recently went down (status last_change_reason and
+	// recent_disconnects). Guarded by changeMu, a leaf lock: it is taken
+	// under connectMu by every connect/disconnect path and by statusDTO,
+	// and nothing else is locked or broadcast while it is held.
+	changeMu       sync.Mutex
+	connectReasons map[string]changeRecord
+	endReasons     map[string]changeRecord
+
 	// settle tracks how long the network fingerprint has been stable so
 	// negated rules can wait out roam blips; settleTimer re-triggers a
 	// held evaluation when the window elapses. Both guarded by settleMu.

@@ -144,7 +144,12 @@ func (h *Helper) connectPendingDesired(ctx context.Context, cfg *domain.WireGuar
 	if h.automaticLANConflict(cfg) {
 		return reconnect.ErrNothingToReconnect
 	}
-	return restoreConnect(h, cfg)
+	undoReason := h.beginConnectReason(cfg.Name, reconnectReason(ctx))
+	err := restoreConnect(h, cfg)
+	if err != nil {
+		undoReason()
+	}
+	return err
 }
 
 // restoreConnect connects one restored or pending tunnel. It runs the same

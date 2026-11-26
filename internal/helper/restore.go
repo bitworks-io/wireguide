@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	"github.com/korjwl1/wireguide/internal/domain"
 )
 
 // restoreDesiredTunnels runs once at helper startup (via goSafe). It is the
@@ -180,7 +182,9 @@ func (h *Helper) restoreDesiredTunnels() {
 			h.mu.Unlock()
 			continue
 		}
+		undoReason := h.beginConnectReason(name, domain.ChangeReasonRecovery)
 		if err := restoreConnect(h, cfg); err != nil {
+			undoReason()
 			failed++
 			slog.Warn("desired-state: restore connect failed; keeping entry for reconnect triggers",
 				"tunnel", name, "error", err)
