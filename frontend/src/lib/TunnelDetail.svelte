@@ -10,7 +10,9 @@
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
   import VerifyPanel from './VerifyPanel.svelte';
-  import { parseDnsEntries, dnsModeOf, dnsChip, resolveHint } from './dns-mode.js';
+  import { parseDnsEntries, dnsChip, resolveHint } from './dns-mode.js';
+  import { automationVerdicts } from '../stores/automation.js';
+  import { verdictText, verdictTone } from './automationLine.js';
 
   export let TunnelService;
   const dispatch = createEventDispatcher();
@@ -159,9 +161,7 @@
   // Intended DNS behaviour from the config (not read back from the OS). Once
   // the detail is loaded it comes from the same parse as the info card below;
   // until then the backend's classification (the list row's) stands in.
-  $: dnsChipInfo = detail
-    ? dnsChip($t, dnsModeOf(dnsInfo), dnsInfo.match)
-    : dnsChip($t, $selectedTunnel?.dns_mode, $selectedTunnel?.dns_domains || []);
+  $: dnsChipInfo = dnsChip($t, $selectedTunnel?.dns_mode, $selectedTunnel?.dns_domains || []);
   $: autoLatency = autoLatencyTarget(detail, $selectedTunnel);
   $: latencyTargetDisplay = latencyTargetSaved
     ? latencyTargetSaved
@@ -193,6 +193,11 @@
       latencyTargetError = '';
     }
   }
+
+  // Why automation is / isn't acting on this tunnel (same one-liner as the
+  // Automation editor strip and the list row).
+  $: autoVerdict = $automationVerdicts.get($selectedTunnel?.name);
+  $: autoLine = autoVerdict ? verdictText($t, autoVerdict) : '';
 
   onDestroy(() => {
     if (notesSaveTimer) clearTimeout(notesSaveTimer);
@@ -439,6 +444,11 @@
         {#if dnsChipInfo}
           <div class="hero-dns-line">
             <span class="dns-chip dns-chip-{dnsChipInfo.mode}" title={dnsChipInfo.hint}>{dnsChipInfo.text}</span>
+          </div>
+        {/if}
+        {#if autoLine}
+          <div class="hero-auto-line">
+            <span class="auto-chip auto-chip-{verdictTone(autoVerdict)}" title={autoLine}>{autoLine}</span>
           </div>
         {/if}
       </div>
@@ -828,6 +838,24 @@
     box-shadow: 0 0 0 3px var(--blue-tint);
   }
 
+  .hero-auto-line {
+    margin-top: 6px;
+    min-width: 0;
+  }
+  .auto-chip {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 0.5px solid var(--border);
+    font: 500 11px/16px var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .auto-chip-warn { color: var(--orange, #FF9500); }
   .hero-status-line {
     display: flex;
     align-items: center;
