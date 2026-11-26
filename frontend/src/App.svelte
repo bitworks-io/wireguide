@@ -816,7 +816,7 @@
       {#each criticalErrors as e, i}
         <div class="critical-banner-row">
           <span class="critical-banner-where">{e.where === 'Helper connection' ? $t('settings.section_connection') : criticalRow($t, e).where}</span>
-          <span class="critical-banner-detail">{e.where === 'Helper connection' ? $t('app.helper_disconnected') : criticalRow($t, e).detail}</span>
+          <span class="critical-banner-detail">{criticalDetail(e)}</span>
           <span class="critical-banner-time">{e.at}</span>
           <button class="critical-banner-close" on:click={() => dismissCriticalError(i)} aria-label={$t('app.dismiss')}>×</button>
         </div>
