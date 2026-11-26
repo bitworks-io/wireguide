@@ -18,6 +18,7 @@ export {
     FirewallStatus,
     HelperInfo,
     KnownSSIDs,
+    LANOverlap,
     ProfileMutationResult,
     ResolveResult,
     RouteEntry,
