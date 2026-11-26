@@ -68,6 +68,8 @@ func Run(args []string) int {
 		return cmdRoutes(rest)
 	case "verify":
 		return cmdVerify(rest)
+	case "diag":
+		return cmdDiag(rest)
 	case "install-skills":
 		return cmdInstallSkills(rest)
 	default:
@@ -117,6 +119,9 @@ Settings & diagnostics:
                                           check handshake, routes and split-DNS resolvers of a
                                           connected tunnel (exit 1 on any failure; probes are
                                           local and capped at 3 s each)
+  wireguide ctl diag bundle [--out path]       write a diagnostics zip (logs, redacted configs,
+                                               DNS/route/firewall state); private keys are never
+                                               included. Default: Desktop or Downloads
 
 Coding agents:
   wireguide ctl install-skills [--target claude,codex,opencode,hermes]

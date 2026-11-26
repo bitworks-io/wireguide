@@ -7,6 +7,7 @@ package logrotate
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -118,4 +119,16 @@ func (w *Writer) Close() error {
 	err := w.f.Close()
 	w.f = nil
 	return err
+}
+
+// RotatedFiles lists existing rotated siblings (path.1 ... path.N), newest first.
+func RotatedFiles(path string, maxFiles int) []string {
+	var out []string
+	for i := 1; i <= maxFiles; i++ {
+		p := fmt.Sprintf("%s.%d", path, i)
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, filepath.Clean(p))
+		}
+	}
+	return out
 }

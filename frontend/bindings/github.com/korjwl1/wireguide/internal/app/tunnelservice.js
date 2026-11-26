@@ -198,6 +198,17 @@ export function ExportConfig(name) {
 }
 
 /**
+ * ExportDiagnostics shows a native save dialog and writes the diagnostics
+ * zip (helper log tail, redacted configs, DNS/route/firewall state,
+ * versions). Private and preshared keys are never included. Returns the
+ * saved path, or "" if the user cancelled.
+ * @returns {$CancellablePromise<string>}
+ */
+export function ExportDiagnostics() {
+    return $Call.ByID(4002171981);
+}
+
+/**
  * ExportTunnel shows a native save dialog and writes the .conf file.
  * Returns the saved path, or empty string if the user cancelled.
  * @param {string} name
