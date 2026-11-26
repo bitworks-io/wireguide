@@ -9,7 +9,8 @@
   import { createEventDispatcher, tick, onDestroy } from 'svelte';
   import AutomationEditor from './AutomationEditor.svelte';
   import PingHealthSettings from './PingHealthSettings.svelte';
-  import { parseDnsEntries, dnsChip } from './dns-mode.js';
+  import VerifyPanel from './VerifyPanel.svelte';
+  import { parseDnsEntries, dnsChip, resolveHint } from './dns-mode.js';
   import { automationVerdicts } from '../stores/automation.js';
   import { verdictText, verdictTone } from './automationLine.js';
 
@@ -591,6 +592,13 @@
           </div>
         {/if}
       </div>
+    {/if}
+
+    <!-- VERIFY: manual post-connect checks -->
+    {#if isConnected}
+      {#key $selectedTunnel.name}
+        <VerifyPanel {TunnelService} tunnelName={$selectedTunnel.name} resolveHint={resolveHint(dnsInfo.match)} />
+      {/key}
     {/if}
 
     <!-- NOTES -->

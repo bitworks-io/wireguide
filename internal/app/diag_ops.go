@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/korjwl1/wireguide/internal/diag"
 	"github.com/korjwl1/wireguide/internal/ipc"
 )
@@ -12,8 +15,48 @@ type DNSLeakResult struct {
 	TestDomain string      `json:"test_domain"`
 	Error      string      `json:"error,omitempty"`
 
-	SplitMode           bool     `json:"split_mode,omitempty"`
-	MissingMatchDomains []string `json:"missing_match_domains,omitempty"`
+	SplitMode           bool          `json:"split_mode,omitempty"`
+	MissingMatchDomains []string      `json:"missing_match_domains,omitempty"`
+	Domains             []DomainCheck `json:"domains,omitempty"`
+}
+
+// DomainCheck mirrors diag.DomainCheck.
+type DomainCheck struct {
+	Domain     string `json:"domain"`
+	Resolver   string `json:"resolver,omitempty"`
+	Registered bool   `json:"registered"`
+	Search     bool   `json:"search,omitempty"`
+}
+
+// VerifyRow mirrors diag.VerifyRow for Wails JSON serialisation.
+type VerifyRow struct {
+	Check  string `json:"check"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	// DetailKey/DetailParams carry a localisable detail (see diag.VerifyRow).
+	DetailKey    string            `json:"detail_key,omitempty"`
+	DetailParams map[string]string `json:"detail_params,omitempty"`
+	Hint         string            `json:"hint,omitempty"`
+	HintKey      string            `json:"hint_key,omitempty"`
+}
+
+// VerifyOptions are the optional user-chosen probes of Verify.
+type VerifyOptions struct {
+	PingHost    string `json:"ping_host,omitempty"`
+	ResolveName string `json:"resolve_name,omitempty"`
+}
+
+// ResolveResult mirrors diag.ResolveResult.
+type ResolveResult struct {
+	Name        string   `json:"name"`
+	Addrs       []string `json:"addrs,omitempty"`
+	Resolver    string   `json:"resolver,omitempty"`
+	MatchDomain string   `json:"match_domain,omitempty"`
+	NXDomain    bool     `json:"nxdomain,omitempty"`
+	TimedOut    bool     `json:"timed_out,omitempty"`
+	DurationMs  float64  `json:"duration_ms"`
+	Error       string   `json:"error,omitempty"`
+	ErrorCode   string   `json:"error_code,omitempty"`
 }
 
 // DNSServer mirrors diag.DNSServer.
@@ -59,6 +102,9 @@ func (s *TunnelService) RunDNSLeakTest() (*DNSLeakResult, error) {
 		SplitMode:           r.SplitMode,
 		MissingMatchDomains: r.MissingMatchDomains,
 	}
+	for _, d := range r.Domains {
+		out.Domains = append(out.Domains, DomainCheck{Domain: d.Domain, Resolver: d.Resolver, Registered: d.Registered, Search: d.Search})
+	}
 	for _, srv := range r.DNSServers {
 		out.DNSServers = append(out.DNSServers, DNSServer{
 			IP:       srv.IP,
@@ -85,6 +131,41 @@ func (s *TunnelService) GetRoutingTable() ([]RouteEntry, error) {
 			Interface:   e.Interface,
 			Flags:       e.Flags,
 		})
+	}
+	return out, nil
+}
+
+// ResolveHost resolves name through the system resolver path (getaddrinfo),
+// the same one browsers use, and reports which resolver answered. Unlike
+// dig/nslookup it honours split-DNS supplemental resolvers. Bounded by 3 s.
+func (s *TunnelService) ResolveHost(name string) *ResolveResult {
+	r := diag.Resolve(context.Background(), name)
+	return &ResolveResult{
+		Name: r.Name, Addrs: r.Addrs, Resolver: r.Resolver, MatchDomain: r.MatchDomain,
+		NXDomain: r.NXDomain, TimedOut: r.TimedOut, DurationMs: r.DurationMs, Error: r.Error, ErrorCode: r.ErrorCode,
+	}
+}
+
+// Verify runs the manual post-connect checks for a tunnel: handshake, a route
+// per AllowedIPs, split-DNS resolver registration and, when given in opts, a
+// ping and a name resolve. Read-only; every probe is bounded by 3 s. The
+// frontend only calls it on an explicit user click.
+func (s *TunnelService) Verify(tunnelName string, opts VerifyOptions) ([]VerifyRow, error) {
+	cfg, err := s.tunnelStore.Load(tunnelName)
+	if err != nil {
+		return nil, fmt.Errorf("load tunnel: %w", err)
+	}
+	in := diag.NewVerifyInput(tunnelName, cfg)
+	in.PingHost, in.ResolveName = opts.PingHost, opts.ResolveName
+	st, err := s.GetStatus()
+	if err != nil {
+		return nil, err
+	}
+	in.ApplyStatus(*st)
+	res := diag.Verify(context.Background(), in)
+	out := make([]VerifyRow, 0, len(res))
+	for _, r := range res {
+		out = append(out, VerifyRow(r))
 	}
 	return out, nil
 }

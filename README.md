@@ -291,6 +291,7 @@ wireguide ctl set pin-interface <on|off>
 wireguide ctl set loglevel <debug|info|warn|error>
 wireguide ctl dnsleak                        # check whether DNS leaks outside the tunnel
 wireguide ctl routes                         # OS routing table
+wireguide ctl verify <name> [--ping <host>] [--resolve <host>]   # handshake, routes and split-DNS resolvers; exit 1 on failure
 
 # Teach coding agents (Claude Code, Codex, ...) how to drive the CLI:
 wireguide ctl install-skills

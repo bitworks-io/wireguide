@@ -546,6 +546,19 @@ export function RenameTunnel(oldName, newName) {
 }
 
 /**
+ * ResolveHost resolves name through the system resolver path (getaddrinfo),
+ * the same one browsers use, and reports which resolver answered. Unlike
+ * dig/nslookup it honours split-DNS supplemental resolvers. Bounded by 3 s.
+ * @param {string} name
+ * @returns {$CancellablePromise<$models.ResolveResult | null>}
+ */
+export function ResolveHost(name) {
+    return $Call.ByID(3083149897, name).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType32($result);
+    }));
+}
+
+/**
  * RunDNSLeakTest performs a DNS leak test using the currently active tunnel's
  * DNS servers as the expected (VPN) resolvers. If no tunnel is connected, the
  * expected set is empty — all detected resolvers will be flagged as leaks.
@@ -553,7 +566,7 @@ export function RenameTunnel(oldName, newName) {
  */
 export function RunDNSLeakTest() {
     return $Call.ByID(2469114850).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType32($result);
+        return $$createType34($result);
     }));
 }
 
@@ -761,6 +774,21 @@ export function ValidateConfig(content) {
     }));
 }
 
+/**
+ * Verify runs the manual post-connect checks for a tunnel: handshake, a route
+ * per AllowedIPs, split-DNS resolver registration and, when given in opts, a
+ * ping and a name resolve. Read-only; every probe is bounded by 3 s. The
+ * frontend only calls it on an explicit user click.
+ * @param {string} tunnelName
+ * @param {$models.VerifyOptions} opts
+ * @returns {$CancellablePromise<$models.VerifyRow[]>}
+ */
+export function Verify(tunnelName, opts) {
+    return $Call.ByID(2039407192, tunnelName, opts).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType36($result);
+    }));
+}
+
 // Private type creation functions
 const $$createType0 = diag$0.ConflictInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
@@ -793,5 +821,9 @@ const $$createType27 = $Create.Array($$createType26);
 const $$createType28 = config$0.Diagnostic.createFrom;
 const $$createType29 = $Create.Array($$createType28);
 const $$createType30 = $Create.Array($$createType24);
-const $$createType31 = $models.DNSLeakResult.createFrom;
+const $$createType31 = $models.ResolveResult.createFrom;
 const $$createType32 = $Create.Nullable($$createType31);
+const $$createType33 = $models.DNSLeakResult.createFrom;
+const $$createType34 = $Create.Nullable($$createType33);
+const $$createType35 = $models.VerifyRow.createFrom;
+const $$createType36 = $Create.Array($$createType35);
