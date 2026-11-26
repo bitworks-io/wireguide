@@ -7,6 +7,7 @@ import (
 	"time"
 
 	wgapp "github.com/korjwl1/wireguide/internal/app"
+	"github.com/korjwl1/wireguide/internal/ipc"
 	"github.com/korjwl1/wireguide/internal/storage"
 )
 
@@ -107,7 +108,7 @@ func TestNotifierDisableReEnableDropsStaleKeepsNew(t *testing.T) {
 		t.Fatalf("new change must be held back, got %d timers", len(clock.timers))
 	}
 	clock.timers[1].f()
-	n.onCriticalError("eventLoop")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
 	if got := b.sentCount(); got != 2 || *fallbacks != 0 {
 		t.Fatalf("new events after re-enable must notify: sent=%d fallbacks=%d", got, *fallbacks)
 	}
@@ -179,7 +180,7 @@ func TestNotifierAuthWaitThenStopDrops(t *testing.T) {
 					n.deliver(gen, title, body)
 				}
 
-				n.onCriticalError("eventLoop")
+				n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
 				<-b.waiting
 				if interrupt == "stop" {
 					n.stop()
@@ -234,7 +235,7 @@ func TestNotifierDefaultSettingsStaySilent(t *testing.T) {
 	n.onStatus(nil)                // and down again
 	n.onAutoConnected("Office")
 	n.onForcedDisconnect("Office")
-	n.onCriticalError("eventLoop")
+	n.onCriticalError(ipc.CriticalErrorPayload{Where: "eventLoop"})
 	for _, tm := range clock.timers {
 		tm.f()
 	}

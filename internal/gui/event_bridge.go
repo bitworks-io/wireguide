@@ -233,7 +233,7 @@ func (b *eventBridge) handleEvent(method string, params json.RawMessage, sources
 		} else {
 			slog.Error("helper background goroutine died permanently", "where", payload.Where, "detail", payload.Detail)
 			b.app.Event.Emit("critical_error", payload)
-			b.notify.onCriticalError(payload.Where)
+			b.notify.onCriticalError(payload)
 		}
 	}
 }

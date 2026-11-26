@@ -1,6 +1,10 @@
 package gui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/korjwl1/wireguide/internal/ipc"
+)
 
 func TestNotifierQueuedWorkCannotStartAuthorizationAfterCancellation(t *testing.T) {
 	for _, interruption := range []string{"disable", "stop", "reset", "disable-enable"} {
@@ -10,7 +14,7 @@ func TestNotifierQueuedWorkCannotStartAuthorizationAfterCancellation(t *testing.
 			n.spawn = func(f func()) { queued = f }
 			created := 0
 			n.newBackend = func() notificationBackend { created++; return b }
-			n.onCriticalError("test")
+			n.onCriticalError(ipc.CriticalErrorPayload{Where: "test"})
 			if queued == nil {
 				t.Fatal("expected queued notification work")
 			}
