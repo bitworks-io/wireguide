@@ -2,6 +2,34 @@
 
 All notable changes to WireGuide will be documented in this file.
 
+## 0.7.0-bitworks.1
+
+Fork build on top of upstream 0.7.0. Everything below is fork-only or a follow-up not yet in an upstream release.
+
+### Added
+- **Shared interface Address warning** - importing, saving or connecting a tunnel whose `Address` another tunnel already uses shows a non-blocking warning.
+- **Per-domain split-DNS rows and "Try a name"** - the DNS leak test lists each `~domain` with its resolver and can resolve a name through the system resolver path.
+- **Verify** - a manual "Run checks" panel and `wireguide ctl verify <name>` for handshake, routes and split-DNS resolvers.
+- **Precise macOS Location Services state** - the Wi-Fi permission banner and the status strip say whether Location Services is denied, restricted or not yet allowed.
+- **Per-tunnel handshake health check** - each tunnel can override the global health check (use Settings / on / off).
+- **Diagnostics bundle** - `wireguide ctl diag bundle` and Settings > Logs export a redacted zip, including `Helper.Info` and `Firewall.Status` (new `Diag.Snapshot`, IPC 1.9).
+- **DNS protection status** - Settings and the tunnel header show what DNS protection actually allows, read back from pf on macOS (`Firewall.Status`, IPC 1.10).
+- **Helper status and Repair** - a Helper card in Settings > Advanced and a user-initiated Repair through the signed-helper install path (`Helper.Info`, IPC 1.11).
+- **Pre-connect preview** - "What will change when you connect" for DNS, routes and LAN-overlapping AllowedIPs.
+- **Automation decision events** - `event.automation` for executed, held, latched and overlap-skipped rule decisions (IPC 1.12).
+- **`wireguide://` URL scheme (macOS)** - `connect/<name>`, `disconnect/<name>` and `show`, always behind a confirmation sheet.
+- **Automation: Wi-Fi name lists and connection type** - "is any of" / "is none of" Wi-Fi lists and wired / Wi-Fi / tethered conditions, stored under `per_tunnel_rules_v3` with their own backup (`Automation.Preview` medium, IPC 1.13).
+- **Automation: undo and rule history** - undo a removed rule, restore one of the last saved rule states, and a notice when rules change outside the app.
+- **Reset DNS & firewall** - Settings > Advanced and `wireguide ctl reset-dns` remove WireGuide's firewall rules and split DNS and retry DNS recovery (`Network.ResetDNS`, IPC 1.14).
+- **Connection change reasons** - history records why each session started and ended and the Wi-Fi network it started on (status `last_change_reason` / `recent_disconnects`, IPC 1.15).
+- **Startup recovery notice** - a one-time notice lists what the helper cleaned up after a previous helper stopped unexpectedly (`Helper.Info` recovery, IPC 1.16).
+- **Rule-named notifications** - automation notifications name the deciding rule and the Wi-Fi network, known helper errors use translated text, and a forced Reset DNS counts as your own disconnect.
+
+### Changed
+- **Tunnels that never handshake** - with the health check on, a tunnel that has sent traffic but never completed a handshake is reconnected with exponential backoff (up to 48 minutes).
+- **Repeated wireguard-go warnings** - identical warnings are logged once per 60 s with a `suppressed_repeats` count.
+- **Fork update channel** - version `0.7.0-bitworks.1`; update checks and About links use the fork's repository, and a Homebrew install opens the fork's release page instead of upgrading to upstream's cask.
+
 ## [0.7.0] - 2026-11-13
 
 ### Added
